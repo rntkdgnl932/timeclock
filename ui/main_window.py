@@ -7,10 +7,10 @@ from PyQt5 import QtWidgets
 
 from timeclock.settings import APP_NAME, DB_PATH, LOG_PATH, EXPORT_DIR, BACKUP_DIR, ARCHIVE_DIR
 from timeclock.utils import Message
-from ui.login_page import LoginPage
-from ui.worker_page import WorkerPage
-from ui.owner_page import OwnerPage
-
+from login_page import LoginPage
+from worker_page import WorkerPage
+from owner_page import OwnerPage
+from signup_page import SignupPage
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -27,10 +27,16 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.login = LoginPage(db)
         self.login.logged_in.connect(self.on_logged_in)
+
+        # STEP 1에서 만든 직원가입 전환 시그널 연결
+        if hasattr(self.login, "signup_requested"):
+            self.login.signup_requested.connect(self.on_signup_requested)
+
         self.stack.addWidget(self.login)
 
         self._worker_page = None
         self._owner_page = None
+        self._signup_page = None
 
         self._create_menu()
 
@@ -150,33 +156,70 @@ class MainWindow(QtWidgets.QMainWindow):
         self.session = session
         logging.info(f"Logged in: {session.username} ({session.role})")
 
+        new_page = None  # 🚨 new_page 변수 초기화
+
         try:
             if session.role == "worker":
+                logging.info("Attempting to create WorkerPage...")
                 self._worker_page = WorkerPage(self.db, session)
                 self._worker_page.logout_requested.connect(self.on_logout)
-                self._set_page(self._worker_page)
+                new_page = self._worker_page
             else:
+                logging.info("Attempting to create OwnerPage...")
+                # 🚨 충돌 지점: OwnerPage 객체 생성 (현재는 __init__ 최소화 상태)
                 self._owner_page = OwnerPage(self.db, session)
                 self._owner_page.logout_requested.connect(self.on_logout)
-                self._set_page(self._owner_page)
+                new_page = self._owner_page
+
+            if new_page:
+                self._set_page(new_page)  # 🚨 new_page가 생성되었을 때만 전환 시도
+            else:
+                raise Exception("Page object was not created.")
 
         except Exception as e:
             logging.exception("Failed to create page after login")
-            from timeclock.utils import Message  # 네 구조상 코어는 timeclock.*
+            # 🚨 오류 메시지를 띄우고 로그인 화면으로 복귀
             Message.err(self, "오류", f"로그인 후 화면 생성 중 오류:\n{e}\n\n{traceback.format_exc()}")
-            # 로그인 화면으로 되돌림
             self.session = None
-            self.stack.setCurrentWidget(self.login)
+            self._back_to_login()
 
     def _set_page(self, widget):
+        # login(0)은 유지, 1번 이후는 모두 제거 후 새로 붙임
+        while self.stack.count() > 1:
+            w = self.stack.widget(1)
+            self.stack.removeWidget(w)
+
+            # 🚨 수정: deleteLater()는 이벤트 루프가 돌 때 호출되어야 안정적입니다.
+            #     충돌을 피하기 위해 QTimer.singleShot으로 지연 삭제를 시도합니다.
+            QtCore.QTimer.singleShot(0, w.deleteLater)
+
+        self.stack.addWidget(widget)
+        self.stack.setCurrentWidget(widget)
+
+    def _back_to_login(self):
         while self.stack.count() > 1:
             w = self.stack.widget(1)
             self.stack.removeWidget(w)
             w.deleteLater()
-        self.stack.addWidget(widget)
-        self.stack.setCurrentWidget(widget)
+        self.stack.setCurrentWidget(self.login)
+
+    # STEP 2: 직원가입 화면 전환
+    def on_signup_requested(self):
+        try:
+            self._signup_page = SignupPage(self.db)
+            # ❗ 이 시그널이 signup_page.py에 정확히 정의되어 있어야 합니다.
+            self._signup_page.signup_done.connect(self._back_to_login)
+            self._set_page(self._signup_page)
+        except Exception as e:
+            # 이 부분이 없으면 그냥 꺼집니다. 로그를 남겨야 합니다.
+            logging.exception("SignupPage 생성 중 오류 발생")
+            Message.err(self, "오류", f"가입 화면 로드 실패: {e}")
+            self._back_to_login()
+
+    def on_back_to_login(self):
+        self._back_to_login()
 
     def on_logout(self):
         logging.info(f"Logout: {self.session.username if self.session else '-'}")
         self.session = None
-        self.stack.setCurrentWidget(self.login)
+        self._back_to_login()

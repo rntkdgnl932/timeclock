@@ -46,6 +46,12 @@ class DateRangeBar(QtWidgets.QWidget):
         d2 = self.de_to.date().toString("yyyy-MM-dd")
         return d1, d2
 
+    def get_date_from(self):
+        return self.de_from.date().toString("yyyy-MM-dd")
+
+    def get_date_to(self):
+        return self.de_to.date().toString("yyyy-MM-dd")
+
 
 
 class Table(QtWidgets.QTableWidget):

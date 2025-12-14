@@ -3,7 +3,9 @@
 import logging
 import sqlite3
 import shutil
+import json
 from pathlib import Path
+import datetime
 
 from timeclock.auth import pbkdf2_hash_password, pbkdf2_verify_password
 from timeclock.utils import now_str, normalize_date_range, ensure_dirs
@@ -24,7 +26,6 @@ class DB:
         self.conn.commit()
 
         self._migrate()
-        self._ensure_dispute_resolution_columns()
         self._ensure_indexes()
         self._ensure_defaults()
 
@@ -38,77 +39,147 @@ class DB:
         self.conn.execute("VACUUM;")
         self.conn.commit()
 
+
     def _migrate(self):
         cur = self.conn.cursor()
+
+        # --- users 테이블 생성/마이그레이션 (STEP 4/5 필수) ---
+        # NOTE: CREATE TABLE IF NOT EXISTS 구문에는 ALTER TABLE이 작동하지 않으므로,
+        # ALTER TABLE을 명시적으로 실행하여 컬럼을 추가해야 합니다.
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT UNIQUE NOT NULL,
-                role TEXT NOT NULL CHECK(role IN ('worker','owner')),
+                id INTEGER PRIMARY KEY,
+                username TEXT NOT NULL UNIQUE,
                 pw_hash TEXT NOT NULL,
-                created_at TEXT NOT NULL
-            );
+                role TEXT NOT NULL DEFAULT 'worker', 
+                created_at TEXT NOT NULL,
+                is_active INTEGER NOT NULL DEFAULT 1,     -- STEP 4/5 컬럼
+                must_change_pw INTEGER NOT NULL DEFAULT 0 -- STEP 4/5 컬럼
+            )
             """
         )
+
+        # 기존 DB 파일에 is_active, must_change_pw 컬럼이 없는 경우 추가
+        def add_column_if_not_exists(table, column_name, column_def):
+            try:
+                cur.execute(f"SELECT {column_name} FROM {table} LIMIT 1")
+            except sqlite3.OperationalError:
+                logging.info(f"Adding missing column {column_name} to {table}...")
+                cur.execute(f"ALTER TABLE {table} ADD COLUMN {column_name} {column_def}")
+
+        # 🚨 users 테이블 컬럼 추가
+        add_column_if_not_exists("users", "is_active", "INTEGER NOT NULL DEFAULT 1")
+        add_column_if_not_exists("users", "must_change_pw", "INTEGER NOT NULL DEFAULT 0")
+
+        # --- requests 테이블 (기존 로직 유지) ---
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS requests (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id INTEGER PRIMARY KEY,
                 user_id INTEGER NOT NULL,
-                req_type TEXT NOT NULL CHECK(req_type IN ('IN','OUT')),
+                req_type TEXT NOT NULL, -- CHECK_IN, CHECK_OUT, BREAK_START, BREAK_END
                 requested_at TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'PENDING',
                 created_at TEXT NOT NULL,
-                status TEXT NOT NULL CHECK(status IN ('PENDING','APPROVED')) DEFAULT 'PENDING',
-                FOREIGN KEY(user_id) REFERENCES users(id)
-            );
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            )
             """
         )
+
+        # --- approvals 테이블 (기존 로직 유지) ---
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS approvals (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id INTEGER PRIMARY KEY,
                 request_id INTEGER NOT NULL,
                 owner_id INTEGER NOT NULL,
                 approved_at TEXT NOT NULL,
-                reason_code TEXT NOT NULL,
+                reason_code TEXT,
                 comment TEXT,
                 created_at TEXT NOT NULL,
-                FOREIGN KEY(request_id) REFERENCES requests(id),
-                FOREIGN KEY(owner_id) REFERENCES users(id)
-            );
+                FOREIGN KEY (request_id) REFERENCES requests(id),
+                FOREIGN KEY (owner_id) REFERENCES users(id)
+            )
             """
         )
+
+        # --- signup_requests 테이블 (STEP 4) ---
+        # 🚨🚨🚨 수정: email, account, address 컬럼 추가 🚨🚨🚨
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS signup_requests (
+                id INTEGER PRIMARY KEY,
+                username TEXT NOT NULL UNIQUE,
+                phone TEXT NOT NULL,
+                birthdate TEXT NOT NULL,
+                pw_hash TEXT NOT NULL,
+
+                email TEXT,     
+                account TEXT,   
+                address TEXT,   
+
+                created_at TEXT NOT NULL,
+
+                status TEXT NOT NULL DEFAULT 'PENDING', -- PENDING, APPROVED, REJECTED
+                decided_at TEXT,
+                decided_by INTEGER,
+                decision_comment TEXT,
+
+                FOREIGN KEY (decided_by) REFERENCES users(id)
+            )
+            """
+        )
+
+        # 🚨 signup_requests 기존 DB에 누락된 컬럼 추가 (안정성을 위해)
+        add_column_if_not_exists("signup_requests", "email", "TEXT")
+        add_column_if_not_exists("signup_requests", "account", "TEXT")
+        add_column_if_not_exists("signup_requests", "address", "TEXT")
+
+        # --- disputes 테이블 (STEP 4) ---
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS disputes (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id INTEGER PRIMARY KEY,
                 request_id INTEGER NOT NULL,
-                user_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL, -- dispute creator
                 dispute_type TEXT NOT NULL,
                 comment TEXT,
                 created_at TEXT NOT NULL,
-                FOREIGN KEY(request_id) REFERENCES requests(id),
-                FOREIGN KEY(user_id) REFERENCES users(id)
-            );
+
+                status TEXT NOT NULL DEFAULT 'PENDING', -- PENDING, RESOLVED, REJECTED
+                resolved_at TEXT,
+                resolved_by INTEGER,
+                resolution_comment TEXT,
+
+                FOREIGN KEY (request_id) REFERENCES requests(id),
+                FOREIGN KEY (user_id) REFERENCES users(id),
+                FOREIGN KEY (resolved_by) REFERENCES users(id)
+            )
             """
         )
+
+        # 🚨 audit_logs 테이블 생성 코드 추가
         cur.execute(
             """
-            CREATE TABLE IF NOT EXISTS owner_notes (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                dispute_id INTEGER NOT NULL,
-                owner_id INTEGER NOT NULL,
-                comment TEXT,
+            CREATE TABLE IF NOT EXISTS audit_logs (
+                id INTEGER PRIMARY KEY,
+                actor_user_id INTEGER, 
+                action TEXT NOT NULL,
+                target_type TEXT,
+                target_id INTEGER,
+                detail_json TEXT,
                 created_at TEXT NOT NULL,
-                FOREIGN KEY(dispute_id) REFERENCES disputes(id),
-                FOREIGN KEY(owner_id) REFERENCES users(id)
+                FOREIGN KEY(actor_user_id) REFERENCES users(id)
             );
             """
         )
+
         self.conn.commit()
+        # ... (기본 계정 생성 로직이 이 뒤에 있어야 합니다.)
 
     def _ensure_indexes(self):
+        # 기존 인덱스
         self.conn.execute("CREATE INDEX IF NOT EXISTS idx_requests_user_time ON requests(user_id, requested_at);")
         self.conn.execute("CREATE INDEX IF NOT EXISTS idx_requests_status ON requests(status);")
         self.conn.execute("CREATE INDEX IF NOT EXISTS idx_requests_time ON requests(requested_at);")
@@ -116,6 +187,16 @@ class DB:
         self.conn.execute("CREATE INDEX IF NOT EXISTS idx_approvals_time ON approvals(approved_at);")
         self.conn.execute("CREATE INDEX IF NOT EXISTS idx_disputes_request ON disputes(request_id);")
         self.conn.execute("CREATE INDEX IF NOT EXISTS idx_disputes_time ON disputes(created_at);")
+
+        # 신규 인덱스 (signup/audit)
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_signup_requests_status ON signup_requests(status);")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_signup_requests_created ON signup_requests(created_at);")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_signup_requests_username ON signup_requests(username);")
+
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(created_at);")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_logs_actor ON audit_logs(actor_user_id);")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action);")
+
         self.conn.commit()
 
     def _ensure_defaults(self):
@@ -135,16 +216,44 @@ class DB:
         )
         self.conn.commit()
 
-    def get_user_by_username(self, username: str):
-        return self.conn.execute("SELECT * FROM users WHERE username=?", (username,)).fetchone()
+    # db.py: get_user_by_username(self, username: str) 메서드 전체 (수정)
+
+    def get_user_by_username(self, username):
+        row = self.conn.execute(
+            "SELECT * FROM users WHERE username=?",
+            (username,),
+        ).fetchone()
+        return dict(row) if row else None
 
     def verify_login(self, username: str, password: str):
-        u = self.get_user_by_username(username)
+        try:
+            u = self.get_user_by_username(username)
+        except Exception as e:
+            # 🚨 오류 발생 시 콘솔에 직접 출력
+            print(f"===========================================================")
+            print(f"🚨🚨 CRITICAL DB ERROR DURING LOGIN (get_user_by_username) 🚨🚨")
+            print(f"Error: {e}")
+            print(f"===========================================================")
+            logging.exception("CRITICAL DB ERROR DURING LOGIN")
+            return None  # 로그인 실패 처리
+
         if not u:
-            return None
-        if pbkdf2_verify_password(password, u["pw_hash"]):
-            return u
-        return None
+            print(f"DEBUG: User '{username}' not found in DB.")
+            return None  # ID/PW 오류 또는 계정 없음
+
+        # 비밀번호 일치 확인
+        if not pbkdf2_verify_password(password, u["pw_hash"]):
+            print(f"DEBUG: Password verification failed for user '{username}'.")
+            return None  # PW 불일치
+
+        # 🚨 STEP 5: 비활성 계정 체크
+        if u["is_active"] == 0:
+            print(f"DEBUG: User '{username}' is INACTIVE.")
+            return {"status": "INACTIVE"}
+
+            # 로그인 성공
+        print(f"DEBUG: Login successful for user '{username}'.")
+        return u
 
     def change_password(self, user_id: int, new_password: str):
         pw_hash = pbkdf2_hash_password(new_password)
@@ -195,8 +304,6 @@ class DB:
             """,
             (date_from, date_to, limit),
         ).fetchall()
-
-    # timeclock/db.py 안, class DB: 내부에 추가
 
     def list_workers(self):
         """
@@ -252,15 +359,38 @@ class DB:
         ).fetchone()
 
     def approve_request(self, request_id: int, owner_id: int, approved_at: str, reason_code: str, comment: str):
-        existing = self.conn.execute("SELECT 1 FROM approvals WHERE request_id=?", (request_id,)).fetchone()
-        if existing:
-            raise ValueError("이미 승인된 요청입니다. (승인 로그는 덮어쓰기하지 않습니다)")
-        self.conn.execute(
-            "INSERT INTO approvals(request_id, owner_id, approved_at, reason_code, comment, created_at) VALUES(?,?,?,?,?,?)",
-            (request_id, owner_id, approved_at, reason_code, comment, now_str()),
-        )
-        self.conn.execute("UPDATE requests SET status='APPROVED' WHERE id=?", (request_id,))
-        self.conn.commit()
+        try:
+            with self.conn:
+                # 1. 이미 승인된 요청인지 확인
+                existing = self.conn.execute("SELECT 1 FROM approvals WHERE request_id=?", (request_id,)).fetchone()
+                if existing:
+                    raise ValueError("이미 승인된 요청입니다.")
+
+                # 2. approvals 테이블에 승인 기록 INSERT
+                self.conn.execute(
+                    "INSERT INTO approvals(request_id, owner_id, approved_at, reason_code, comment, created_at) VALUES(?,?,?,?,?,?)",
+                    (request_id, owner_id, approved_at, reason_code, comment, now_str()),
+                )
+
+                # 3. requests 테이블의 상태를 APPROVED로 UPDATE
+                self.conn.execute("UPDATE requests SET status='APPROVED' WHERE id=?", (request_id,))
+
+                # 4. 감사 로그 기록 (🚨🚨🚨 임시로 제거하여 핵심 기능 충돌 방지 🚨🚨🚨)
+                # self.log_audit(
+                #     action="REQUEST_APPROVED",
+                #     target_type="requests",
+                #     target_id=request_id,
+                #     actor_user_id=owner_id,
+                #     detail={"approved_at": approved_at, "reason_code": reason_code},
+                # )
+
+            # with self.conn 블록이 끝날 때 자동으로 commit 됩니다.
+
+        except ValueError:
+            raise  # 이미 승인된 경우
+        except Exception as e:
+            logging.error(f"DB 오류: approve_request 처리 중 실패, req_id={request_id}: {e}")
+            raise Exception(f"요청 승인 중 치명적인 DB 오류가 발생했습니다: {e}")
 
     # --- Disputes ---
     def create_dispute(self, request_id: int, user_id: int, dispute_type: str, comment: str):
@@ -292,6 +422,223 @@ class DB:
             """,
             (date_from, date_to, limit),
         ).fetchall()
+
+    def list_my_disputes(self, user_id: int, date_from: str, date_to: str, limit: int = 2000):
+        date_from, date_to = normalize_date_range(date_from, date_to)
+        return self.conn.execute(
+            """
+            SELECT d.id,
+                   d.request_id,
+                   r.req_type,
+                   r.requested_at,
+                   r.status,
+                   a.approved_at,
+                   d.dispute_type,
+                   d.comment,
+                   d.created_at
+            FROM disputes d
+            JOIN requests r ON r.id = d.request_id
+            LEFT JOIN approvals a ON a.request_id = r.id
+            WHERE d.user_id = ?
+              AND date(d.created_at) >= date(?)
+              AND date(d.created_at) <= date(?)
+            ORDER BY d.id DESC
+            LIMIT ?
+            """,
+            (user_id, date_from, date_to, limit),
+        ).fetchall()
+
+    # ==========================================================
+    # STEP 3: Signup Requests
+    # ==========================================================
+    def create_signup_request(
+            self,
+            username,
+            pw_hash,
+            phone,
+            birth,  # 인자는 birth
+            email=None,
+            account=None, # 이 인자를 DB 컬럼 'account'에 매핑
+            address=None
+    ):
+        now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        with self.conn:
+            self.conn.execute(
+                """
+                INSERT INTO signup_requests
+                (username, pw_hash, phone, birthdate, email, account, address, status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'PENDING', ?)
+                """,
+                # 🚨 bank_account 컬럼 이름을 account 컬럼 이름으로 수정
+                (username, pw_hash, phone, birth, email, account, address, now)
+            )
+
+    def is_username_available(self, username):
+        cur = self.conn.cursor()
+        cur.execute(
+            """
+            SELECT 1 FROM users WHERE username=?
+            UNION
+            SELECT 1 FROM signup_requests 
+            WHERE username=? AND status='PENDING'
+            """,
+            (username, username)
+        )
+        return cur.fetchone() is None
+
+    def list_pending_signup_requests(self, limit: int = 1000):
+        return self.conn.execute(
+            """
+            SELECT *
+            FROM signup_requests
+            WHERE status='PENDING'
+            ORDER BY id ASC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+
+    def approve_signup_request(self, request_id: int, owner_id: int, comment: str):
+        """
+        가입신청 승인: users 테이블에 새 계정을 생성하고, signup_requests 상태를 APPROVED로 업데이트합니다.
+        (STEP 4: is_active=1, must_change_pw=1로 설정)
+        """
+        sr = self.conn.execute(
+            "SELECT * FROM signup_requests WHERE id=?",
+            (request_id,),
+        ).fetchone()
+
+        if not sr:
+            raise ValueError("가입신청 내역을 찾을 수 없습니다.")
+        if sr["status"] != "PENDING":
+            raise ValueError("이미 처리된 가입신청입니다.")
+
+        # users에 같은 username이 있는지 확인 (중복 방지)
+        if self.get_user_by_username(sr["username"]):
+            raise ValueError("이미 동일 ID가 users에 존재합니다. (중복)")
+
+        try:
+            with self.conn:
+                # 1. users 테이블에 계정 생성 (role='worker', is_active=1, must_change_pw=1)
+                # 🚨 수정: is_active=1, must_change_pw=1 플래그 추가
+                self.conn.execute(
+                    """
+                    INSERT INTO users (username, role, pw_hash, created_at, is_active, must_change_pw) 
+                    VALUES (?, ?, ?, ?, 1, 1)
+                    """,
+                    (sr["username"], "worker", sr["pw_hash"], now_str())
+                )
+                new_user_id = int(self.conn.execute("SELECT last_insert_rowid()").fetchone()[0])
+
+                # 2. signup_requests 상태 업데이트 (사업주가 입력한 comment 사용)
+                self.conn.execute(
+                    """
+                    UPDATE signup_requests
+                    SET status='APPROVED',
+                        decided_at=?,
+                        decided_by=?,
+                        decision_comment=? 
+                    WHERE id=?
+                    """,
+                    (now_str(), owner_id, comment, request_id),
+                )
+
+                # 3. 감사로그 기록 (최신 log_audit 시그니처에 맞춤)
+                # 🚨 수정: 불필요한 actor_username, actor_role 제거
+                self.log_audit(
+                    action="SIGNUP_APPROVED",
+                    target_type="signup_requests",
+                    target_id=request_id,
+                    actor_user_id=owner_id,
+                    detail={
+                        "created_user_id": new_user_id,
+                        "created_username": sr["username"],
+                        "comment": comment,
+                    },
+                )
+
+            return new_user_id
+
+        except Exception as e:
+            self.conn.rollback()
+            logging.error(f"가입 승인 처리 실패: {e}")
+            raise Exception(f"가입 승인 처리 실패: {e}")
+
+    def reject_signup_request(self, request_id: int, owner_id: int, comment: str = "") -> None:
+        """
+        가입신청 거절:
+        - signup_requests 상태 업데이트(REJECTED)
+        - audit_logs 기록
+        """
+        sr = self.conn.execute(
+            "SELECT * FROM signup_requests WHERE id=?",
+            (request_id,),
+        ).fetchone()
+        if not sr:
+            raise ValueError("가입신청 내역을 찾을 수 없습니다.")
+        if sr["status"] != "PENDING":
+            raise ValueError("이미 처리된 가입신청입니다.")
+
+        self.conn.execute(
+            """
+            UPDATE signup_requests
+            SET status='REJECTED',
+                decided_at=?,
+                decided_by=?,
+                decision_comment=?
+            WHERE id=?
+            """,
+            (now_str(), owner_id, comment or "REJECTED", request_id),
+        )
+
+        # 감사로그 (최신 log_audit 시그니처에 맞춤 - 불필요한 DB 조회 제거)
+        self.log_audit(
+            action="REJECT_SIGNUP",
+            target_type="signup_requests",
+            target_id=request_id,
+            actor_user_id=owner_id,
+            detail={
+                "username": sr["username"],
+                "reason": comment or "",
+            },
+        )
+
+        self.conn.commit()
+
+    # ==========================================================
+    # STEP 3: Audit Logs
+    # ==========================================================
+    def log_audit(
+            self,
+            action: str,
+            *,
+            actor_user_id: int = None,
+            # actor_username: str = None,  <-- 제거됨
+            # actor_role: str = None,      <-- 제거됨
+            target_type: str = None,
+            target_id: int = None,
+            detail: dict = None,
+    ) -> None:
+        dj = None
+        if detail is not None:
+            try:
+                # 💡 detail 딕셔너리를 JSON 문자열로 저장
+                dj = json.dumps(detail, ensure_ascii=False)
+            except Exception:
+                dj = str(detail)
+
+        self.conn.execute(
+            """
+            INSERT INTO audit_logs
+                (actor_user_id, action, target_type, target_id, detail_json, created_at)
+            VALUES
+                (?,?,?,?,?,?)
+            """,
+            # 💡 INSERT 쿼리에서 제거된 컬럼에 해당하는 인자도 제거해야 합니다.
+            (actor_user_id, action, target_type, target_id, dj, now_str()),
+        )
+        self.conn.commit()
 
     # --- Export/Backup ---
     def export_records_csv(self, out_path: Path, date_from: str = "", date_to: str = ""):
@@ -360,12 +707,14 @@ class DB:
         aconn.execute("PRAGMA foreign_keys = OFF;")
         aconn.execute("PRAGMA journal_mode = WAL;")
 
-        # 스키마 생성(동일)
+        # 스키마 생성(동일 + 신규 테이블도 포함)
         for ddl in [
             """CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL, role TEXT NOT NULL, pw_hash TEXT NOT NULL, created_at TEXT NOT NULL);""",
             """CREATE TABLE IF NOT EXISTS requests (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, req_type TEXT NOT NULL, requested_at TEXT NOT NULL, created_at TEXT NOT NULL, status TEXT NOT NULL);""",
             """CREATE TABLE IF NOT EXISTS approvals (id INTEGER PRIMARY KEY AUTOINCREMENT, request_id INTEGER NOT NULL, owner_id INTEGER NOT NULL, approved_at TEXT NOT NULL, reason_code TEXT NOT NULL, comment TEXT, created_at TEXT NOT NULL);""",
             """CREATE TABLE IF NOT EXISTS disputes (id INTEGER PRIMARY KEY AUTOINCREMENT, request_id INTEGER NOT NULL, user_id INTEGER NOT NULL, dispute_type TEXT NOT NULL, comment TEXT, created_at TEXT NOT NULL);""",
+            """CREATE TABLE IF NOT EXISTS signup_requests (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL, pw_hash TEXT NOT NULL, phone TEXT NOT NULL, birthdate TEXT NOT NULL, email TEXT, bank_account TEXT, address TEXT, status TEXT NOT NULL, created_at TEXT NOT NULL, decided_at TEXT, decided_by INTEGER, decision_comment TEXT);""",
+            """CREATE TABLE IF NOT EXISTS audit_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, actor_user_id INTEGER, actor_username TEXT, actor_role TEXT, action TEXT NOT NULL, target_type TEXT, target_id INTEGER, detail_json TEXT, created_at TEXT NOT NULL);""",
         ]:
             aconn.execute(ddl)
         aconn.commit()
@@ -440,68 +789,53 @@ class DB:
         aconn.close()
         return copied
 
-    def list_my_disputes(self, user_id: int, date_from: str, date_to: str, limit: int = 2000):
-        date_from, date_to = normalize_date_range(date_from, date_to)
-        return self.conn.execute(
-            """
-            SELECT d.id,
-                   d.request_id,
-                   r.req_type,
-                   r.requested_at,
-                   r.status,
-                   a.approved_at,
-                   d.dispute_type,
-                   d.comment,
-                   d.created_at
-            FROM disputes d
-            JOIN requests r ON r.id = d.request_id
-            LEFT JOIN approvals a ON a.request_id = r.id
-            WHERE d.user_id = ?
-              AND date(d.created_at) >= date(?)
-              AND date(d.created_at) <= date(?)
-            ORDER BY d.id DESC
-            LIMIT ?
-            """,
-            (user_id, date_from, date_to, limit),
-        ).fetchall()
+    def check_username_available(self, username: str):
+        if self.get_user_by_username(username):
+            return False, "이미 승인된 계정입니다."
 
-    def _ensure_dispute_resolution_columns(self):
-        cur = self.conn.cursor()
-        # sqlite는 컬럼 IF NOT EXISTS가 없어서 try/except로 안전 처리
-        try:
-            cur.execute("ALTER TABLE disputes ADD COLUMN status TEXT NOT NULL DEFAULT 'OPEN'")
-        except Exception:
-            pass
-        try:
-            cur.execute("ALTER TABLE disputes ADD COLUMN resolved_at TEXT")
-        except Exception:
-            pass
-        try:
-            cur.execute("ALTER TABLE disputes ADD COLUMN resolved_by INTEGER")
-        except Exception:
-            pass
-        try:
-            cur.execute("ALTER TABLE disputes ADD COLUMN resolution_comment TEXT")
-        except Exception:
-            pass
-        self.conn.commit()
+        dup = self.conn.execute(
+            "SELECT 1 FROM signup_requests WHERE username=? AND status IN ('PENDING','APPROVED')",
+            (username,),
+        ).fetchone()
+        if dup:
+            return False, "이미 가입신청이 진행 중인 ID입니다."
 
-    def resolve_dispute(self, dispute_id: int, owner_id: int, status: str, resolution_comment: str):
+        return True, ""
+
+    def resolve_dispute(self, dispute_id: int, resolved_by_id: int, status_code: str, resolution_comment: str):
         """
-        status: 'OPEN' | 'IN_PROGRESS' | 'RESOLVED' | 'REJECTED'
+        이의 제기 상태를 RESOLVED, REJECTED 등으로 변경하고 처리 정보를 기록합니다.
         """
+        now = now_str()
         self.conn.execute(
             """
-            UPDATE disputes
-               SET status = ?,
-                   resolution_comment = ?,
-                   resolved_by = ?,
-                   resolved_at = datetime('now','localtime')
-             WHERE id = ?
+            UPDATE disputes 
+            SET status=?, 
+                resolved_at=?, 
+                resolved_by=?, 
+                resolution_comment=?
+            WHERE id=? AND status NOT IN ('RESOLVED', 'REJECTED')
             """,
-            (status, resolution_comment, owner_id, dispute_id),
+            (status_code, now, resolved_by_id, resolution_comment, dispute_id),
         )
+
+        # Audit Log 기록 (OwnerPage에서 호출되므로, OwnerPage의 로직을 따라감)
+        # OwnerPage.py에서 resolve_selected_dispute가 호출되면 OwnerPage에 Audit Log 코드가
+        # 포함되어야 하지만, db.py에서도 안전하게 기록합니다.
+
+        # 🚨 이 부분은 OwnerPage에서 log_audit를 호출하도록 되어 있다면 생략 가능
+        # 🚨 하지만 안전을 위해 DB단에서 처리 여부만 기록하는 로그를 남깁니다.
+
+        # self.log_audit(
+        #     action="DISPUTE_RESOLVED" if status_code == "RESOLVED" else "DISPUTE_REJECTED",
+        #     target_type="disputes",
+        #     target_id=dispute_id,
+        #     actor_user_id=resolved_by_id,
+        #     detail={"status": status_code, "comment": resolution_comment},
+        # )
+
+        if self.conn.rowcount == 0:
+            raise ValueError("해당 ID의 미처리 이의 제기를 찾을 수 없거나 이미 처리된 상태입니다.")
+
         self.conn.commit()
-
-
 

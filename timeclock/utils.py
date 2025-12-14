@@ -4,7 +4,6 @@ import sys
 import json
 import logging
 from datetime import datetime
-from pathlib import Path
 from PyQt5 import QtWidgets, QtCore
 
 from timeclock.settings import DATA_DIR, LOG_PATH, CONFIG_PATH, EXPORT_DIR, BACKUP_DIR, ARCHIVE_DIR
@@ -72,3 +71,15 @@ class Message:
     @staticmethod
     def err(parent, title: str, text: str):
         QtWidgets.QMessageBox.critical(parent, title, text)
+
+    @staticmethod
+    def confirm(parent, title: str, text: str) -> bool:
+        """예/아니오 확인 메시지 다이얼로그"""
+        reply = QtWidgets.QMessageBox.question(
+            parent,
+            title,
+            text,
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+            QtWidgets.QMessageBox.No
+        )
+        return reply == QtWidgets.QMessageBox.Yes

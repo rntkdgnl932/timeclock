@@ -69,8 +69,11 @@ class ApproveDialog(QtWidgets.QDialog):
             pass
 
         self.cb_reason = QtWidgets.QComboBox()
-        for code, label in REASON_CODES:
+        for code, label in REASON_CODES.items():
             self.cb_reason.addItem(f"{label} ({code})", code)
+
+        if self.cb_reason.count() > 0:
+            self.cb_reason.setCurrentIndex(0)
 
         self.te_comment = QtWidgets.QPlainTextEdit()
         self.te_comment.setPlaceholderText("예: 준비시간으로 인한 무급 / 실제 퇴근 시간 기록 정정함 등")
@@ -161,3 +164,36 @@ class DisputeDialog(QtWidgets.QDialog):
         if not comment:
             return None, None
         return dtype, comment
+# timeclock/ui/dialogs.py (파일 하단에 추가)
+
+class RejectSignupDialog(QtWidgets.QDialog):
+    def __init__(self, parent=None, username=None):
+        super().__init__(parent)
+        self.setWindowTitle("가입 거절 사유 입력")
+        self.setModal(True)
+        self.resize(450, 200)
+
+        info = QtWidgets.QLabel(f"'{username}'님의 가입을 거절하는 사유를 입력하세요:")
+        info.setWordWrap(True)
+
+        self.te_comment = QtWidgets.QPlainTextEdit()
+        self.te_comment.setPlaceholderText("거절 사유를 구체적으로 작성하세요.")
+
+        self.btn_ok = QtWidgets.QPushButton("거절 처리")
+        self.btn_cancel = QtWidgets.QPushButton("취소")
+        self.btn_ok.clicked.connect(self.accept)
+        self.btn_cancel.clicked.connect(self.reject)
+
+        btns = QtWidgets.QHBoxLayout()
+        btns.addStretch(1)
+        btns.addWidget(self.btn_ok)
+        btns.addWidget(self.btn_cancel)
+
+        layout = QtWidgets.QVBoxLayout()
+        layout.addWidget(info)
+        layout.addWidget(self.te_comment)
+        layout.addLayout(btns)
+        self.setLayout(layout)
+
+    def get_comment(self):
+        return self.te_comment.toPlainText().strip()

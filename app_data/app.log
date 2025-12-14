@@ -169,3 +169,269 @@ AttributeError: 'WorkerPage' object has no attribute 'my_dispute_table'
 2025-12-14 21:16:15,097 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
 2025-12-14 21:16:15,097 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
 2025-12-14 21:16:15,098 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-15 02:06:58,549 [INFO] Signup requested from LoginPage
+2025-12-15 02:07:15,636 [INFO] Login success: owner (owner)
+2025-12-15 02:07:15,636 [INFO] Logged in: owner (owner)
+2025-12-15 02:07:16,441 [INFO] Logout: owner
+2025-12-15 02:07:26,992 [INFO] Signup requested from LoginPage
+2025-12-15 02:07:28,870 [INFO] Signup requested from LoginPage
+2025-12-15 02:07:32,002 [INFO] Signup requested from LoginPage
+2025-12-15 02:07:32,657 [INFO] Signup requested from LoginPage
+2025-12-15 02:07:32,994 [INFO] Signup requested from LoginPage
+2025-12-15 02:07:33,310 [INFO] Signup requested from LoginPage
+2025-12-15 02:07:33,618 [INFO] Signup requested from LoginPage
+2025-12-15 02:07:33,951 [INFO] Signup requested from LoginPage
+2025-12-15 02:07:34,299 [INFO] Signup requested from LoginPage
+2025-12-15 02:07:34,635 [INFO] Signup requested from LoginPage
+2025-12-15 02:07:35,004 [INFO] Signup requested from LoginPage
+2025-12-15 02:07:35,750 [INFO] Signup requested from LoginPage
+2025-12-15 02:43:21,735 [INFO] Signup requested from LoginPage
+2025-12-15 02:44:00,126 [ERROR] signup submit failed
+Traceback (most recent call last):
+  File "C:\my_games\timeclock\ui\signup_page.py", line 152, in submit
+    data = self._validate()
+  File "C:\my_games\timeclock\ui\signup_page.py", line 120, in _validate
+    raise ValueError("비밀번호는 8자 이상으로 입력하세요.")
+ValueError: 비밀번호는 8자 이상으로 입력하세요.
+2025-12-15 02:44:05,629 [ERROR] signup submit failed
+Traceback (most recent call last):
+  File "C:\my_games\timeclock\ui\signup_page.py", line 131, in _validate
+    datetime.strptime(birth, "%Y-%m-%d")
+  File "C:\Users\구대표\AppData\Local\Programs\Python\Python310\lib\_strptime.py", line 568, in _strptime_datetime
+    tt, fraction, gmtoff_fraction = _strptime(data_string, format)
+  File "C:\Users\구대표\AppData\Local\Programs\Python\Python310\lib\_strptime.py", line 349, in _strptime
+    raise ValueError("time data %r does not match format %r" %
+ValueError: time data '19990909' does not match format '%Y-%m-%d'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\my_games\timeclock\ui\signup_page.py", line 152, in submit
+    data = self._validate()
+  File "C:\my_games\timeclock\ui\signup_page.py", line 133, in _validate
+    raise ValueError("생년월일은 YYYY-MM-DD 형식으로 입력하세요. (예: 1999-01-31)")
+ValueError: 생년월일은 YYYY-MM-DD 형식으로 입력하세요. (예: 1999-01-31)
+2025-12-15 02:44:13,747 [ERROR] signup submit failed
+Traceback (most recent call last):
+  File "C:\my_games\timeclock\ui\signup_page.py", line 155, in submit
+    self.db.create_signup_request(
+TypeError: DB.create_signup_request() got an unexpected keyword argument 'birth'
+2025-12-15 03:40:36,433 [INFO] Signup requested from LoginPage
+2025-12-15 03:51:09,605 [INFO] Signup requested from LoginPage
+2025-12-15 04:02:24,174 [INFO] Signup requested from LoginPage
+2025-12-15 04:13:20,833 [INFO] Signup requested from LoginPage
+2025-12-15 04:13:20,834 [ERROR] SignupPage 생성 중 오류 발생
+Traceback (most recent call last):
+  File "C:\my_games\timeclock\ui\main_window.py", line 194, in on_signup_requested
+    self._signup_page = SignupPage(self.db)
+  File "C:\my_games\timeclock\ui\signup_page.py", line 32, in __init__
+    self._build_ui()
+  File "C:\my_games\timeclock\ui\signup_page.py", line 76, in _build_ui
+    ed.setValidator(QtWidgets.QIntValidator())
+AttributeError: module 'PyQt5.QtWidgets' has no attribute 'QIntValidator'
+2025-12-15 04:15:13,868 [INFO] Signup requested from LoginPage
+2025-12-15 04:16:27,750 [ERROR] 가입신청 DB 등록 중 오류 발생
+Traceback (most recent call last):
+  File "C:\my_games\timeclock\ui\signup_page.py", line 216, in submit
+    self.db.create_signup_request(
+  File "C:\my_games\timeclock\timeclock\db.py", line 404, in create_signup_request
+    self.conn.execute(
+sqlite3.OperationalError: table signup_requests has no column named birth
+2025-12-15 04:19:17,067 [INFO] Signup requested from LoginPage
+2025-12-15 04:19:45,671 [INFO] Login success: owner (owner)
+2025-12-15 04:19:45,671 [INFO] Logged in: owner (owner)
+2025-12-15 04:28:31,171 [INFO] Login success: owner (owner)
+2025-12-15 04:28:31,171 [INFO] Logged in: owner (owner)
+2025-12-15 04:43:07,597 [INFO] Signup requested from LoginPage
+2025-12-15 04:43:10,431 [INFO] Login success: owner (owner)
+2025-12-15 04:43:10,431 [INFO] Logged in: owner (owner)
+2025-12-15 04:43:10,453 [INFO] Refreshing pending requests
+2025-12-15 04:43:10,453 [ERROR] Failed to create page after login
+Traceback (most recent call last):
+  File "C:\my_games\timeclock\ui\main_window.py", line 165, in on_logged_in
+    self._owner_page = OwnerPage(self.db, session)
+  File "C:\my_games\timeclock\ui\owner_page.py", line 67, in __init__
+    self.refresh()  # 미처리 요청 로드
+  File "C:\my_games\timeclock\ui\owner_page.py", line 283, in refresh
+    date_from = self.filter_pending.get_date_from()
+AttributeError: 'DateRangeBar' object has no attribute 'get_date_from'
+2025-12-15 04:48:13,895 [INFO] Login success: owner (owner)
+2025-12-15 04:48:13,896 [INFO] Logged in: owner (owner)
+2025-12-15 04:48:13,919 [INFO] Refreshing pending requests
+2025-12-15 04:48:13,919 [ERROR] Failed to fetch pending requests
+Traceback (most recent call last):
+  File "C:\my_games\timeclock\ui\owner_page.py", line 287, in refresh
+    rows = self.db.get_pending_requests(date_from, date_to)
+AttributeError: 'DB' object has no attribute 'get_pending_requests'
+2025-12-15 04:49:19,821 [INFO] Login success: owner (owner)
+2025-12-15 04:49:19,821 [INFO] Logged in: owner (owner)
+2025-12-15 04:49:19,844 [INFO] Refreshing pending requests
+2025-12-15 04:49:19,844 [INFO] Refreshing disputes
+2025-12-15 04:49:19,844 [ERROR] Failed to fetch disputes
+Traceback (most recent call last):
+  File "C:\my_games\timeclock\ui\owner_page.py", line 316, in refresh_disputes
+    rows = self.db.get_disputes(date_from, date_to)
+AttributeError: 'DB' object has no attribute 'get_disputes'
+2025-12-15 04:51:26,109 [INFO] Login success: owner (owner)
+2025-12-15 04:51:26,110 [INFO] Logged in: owner (owner)
+2025-12-15 04:51:26,132 [INFO] Refreshing pending requests
+2025-12-15 04:51:26,132 [INFO] Refreshing disputes
+2025-12-15 04:51:26,132 [ERROR] Failed to fetch disputes
+Traceback (most recent call last):
+  File "C:\my_games\timeclock\ui\owner_page.py", line 336, in refresh_disputes
+    r.get("resolution_comment", "") or "",
+AttributeError: 'sqlite3.Row' object has no attribute 'get'
+2025-12-15 04:52:52,018 [INFO] Login success: owner (owner)
+2025-12-15 04:52:52,019 [INFO] Logged in: owner (owner)
+2025-12-15 04:52:52,041 [INFO] Refreshing pending requests
+2025-12-15 04:52:52,042 [INFO] Refreshing disputes
+2025-12-15 04:52:52,042 [INFO] Refreshing signup requests
+2025-12-15 04:52:52,042 [ERROR] Failed to fetch signup requests
+Traceback (most recent call last):
+  File "C:\my_games\timeclock\ui\owner_page.py", line 111, in refresh_signup_requests
+    rows = self.db.get_signup_requests()
+AttributeError: 'DB' object has no attribute 'get_signup_requests'
+2025-12-15 04:58:03,449 [INFO] Login success: owner (owner)
+2025-12-15 04:58:03,450 [INFO] Logged in: owner (owner)
+2025-12-15 04:58:03,472 [INFO] Refreshing pending requests
+2025-12-15 04:58:03,472 [INFO] Refreshing disputes
+2025-12-15 04:58:03,473 [INFO] Refreshing signup requests
+2025-12-15 04:59:27,173 [ERROR] Signup approval failed
+Traceback (most recent call last):
+  File "C:\my_games\timeclock\ui\owner_page.py", line 406, in approve_signup
+    self.db.approve_signup_request(
+TypeError: DB.approve_signup_request() takes 3 positional arguments but 4 were given
+2025-12-15 05:12:06,954 [INFO] Adding missing column is_active to users...
+2025-12-15 05:12:06,956 [INFO] Adding missing column must_change_pw to users...
+2025-12-15 05:17:56,886 [INFO] Default owner account created: owner/admin1234
+2025-12-15 05:17:56,974 [INFO] Default worker account created: worker/worker1234
+2025-12-15 05:35:06,944 [INFO] Default owner account created: owner/admin1234
+2025-12-15 05:35:07,032 [INFO] Default worker account created: worker/worker1234
+2025-12-15 05:51:48,878 [INFO] Default owner account created: owner/admin1234
+2025-12-15 05:51:48,964 [INFO] Default worker account created: worker/worker1234
+2025-12-15 05:58:54,298 [INFO] Login success: owner (owner)
+2025-12-15 05:58:54,298 [INFO] Logged in: owner (owner)
+2025-12-15 05:58:54,298 [INFO] Attempting to create OwnerPage...
+2025-12-15 05:58:54,321 [INFO] Refreshing pending requests
+2025-12-15 05:58:54,321 [INFO] Refreshing disputes
+2025-12-15 05:58:54,322 [INFO] Refreshing signup requests
+2025-12-15 05:59:25,824 [INFO] Logout: owner
+2025-12-15 05:59:27,219 [INFO] Signup requested from LoginPage
+2025-12-15 05:59:49,780 [ERROR] 가입신청 DB 등록 중 오류 발생
+Traceback (most recent call last):
+  File "C:\my_games\timeclock\ui\signup_page.py", line 215, in submit
+    self.db.create_signup_request(
+  File "C:\my_games\timeclock\timeclock\db.py", line 431, in create_signup_request
+    self.conn.execute(
+sqlite3.OperationalError: table signup_requests has no column named email
+2025-12-15 05:59:55,749 [ERROR] 가입신청 DB 등록 중 오류 발생
+Traceback (most recent call last):
+  File "C:\my_games\timeclock\ui\signup_page.py", line 215, in submit
+    self.db.create_signup_request(
+  File "C:\my_games\timeclock\timeclock\db.py", line 431, in create_signup_request
+    self.conn.execute(
+sqlite3.OperationalError: table signup_requests has no column named email
+2025-12-15 06:03:52,789 [INFO] Adding missing column email to signup_requests...
+2025-12-15 06:03:52,791 [INFO] Adding missing column account to signup_requests...
+2025-12-15 06:03:52,792 [INFO] Adding missing column address to signup_requests...
+2025-12-15 06:03:55,055 [INFO] Signup requested from LoginPage
+2025-12-15 06:04:19,349 [ERROR] 가입신청 DB 등록 중 오류 발생
+Traceback (most recent call last):
+  File "C:\my_games\timeclock\ui\signup_page.py", line 215, in submit
+    self.db.create_signup_request(
+  File "C:\my_games\timeclock\timeclock\db.py", line 444, in create_signup_request
+    self.conn.execute(
+sqlite3.OperationalError: table signup_requests has no column named bank_account
+2025-12-15 06:06:17,509 [INFO] Signup requested from LoginPage
+2025-12-15 06:06:39,080 [INFO] Login success: owner (owner)
+2025-12-15 06:06:39,080 [INFO] Logged in: owner (owner)
+2025-12-15 06:06:39,080 [INFO] Attempting to create OwnerPage...
+2025-12-15 06:06:39,102 [INFO] Refreshing pending requests
+2025-12-15 06:06:39,102 [INFO] Refreshing disputes
+2025-12-15 06:06:39,102 [INFO] Refreshing signup requests
+2025-12-15 06:06:47,923 [INFO] Refreshing signup requests
+2025-12-15 06:06:48,811 [INFO] Logout: owner
+2025-12-15 06:06:55,995 [INFO] Login success: test01 (worker)
+2025-12-15 06:06:55,995 [INFO] Logged in: test01 (worker)
+2025-12-15 06:06:55,995 [INFO] Attempting to create WorkerPage...
+2025-12-15 06:06:56,019 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-15 06:06:56,019 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-15 06:06:56,019 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-15 06:06:56,019 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-15 06:07:02,587 [INFO] Worker request created: user=test01 type=IN at=2025-12-15 06:07:02
+2025-12-15 06:07:06,802 [INFO] Logout: test01
+2025-12-15 06:07:08,992 [INFO] Login success: owner (owner)
+2025-12-15 06:07:08,992 [INFO] Logged in: owner (owner)
+2025-12-15 06:07:08,992 [INFO] Attempting to create OwnerPage...
+2025-12-15 06:07:09,005 [INFO] Refreshing pending requests
+2025-12-15 06:07:09,006 [INFO] Refreshing disputes
+2025-12-15 06:07:09,006 [INFO] Refreshing signup requests
+2025-12-15 06:07:40,898 [INFO] Login success: owner (owner)
+2025-12-15 06:07:40,898 [INFO] Logged in: owner (owner)
+2025-12-15 06:07:40,898 [INFO] Attempting to create OwnerPage...
+2025-12-15 06:07:40,921 [INFO] Refreshing pending requests
+2025-12-15 06:07:40,922 [INFO] Refreshing disputes
+2025-12-15 06:07:40,922 [INFO] Refreshing signup requests
+2025-12-15 06:13:19,004 [INFO] Signup requested from LoginPage
+2025-12-15 06:13:45,483 [INFO] Login success: owner (owner)
+2025-12-15 06:13:45,484 [INFO] Logged in: owner (owner)
+2025-12-15 06:13:45,484 [INFO] Attempting to create OwnerPage...
+2025-12-15 06:13:45,505 [INFO] Refreshing pending requests
+2025-12-15 06:13:45,505 [INFO] Refreshing disputes
+2025-12-15 06:13:45,506 [INFO] Refreshing signup requests
+2025-12-15 06:14:54,070 [INFO] Login success: owner (owner)
+2025-12-15 06:14:54,071 [INFO] Logged in: owner (owner)
+2025-12-15 06:14:54,071 [INFO] Attempting to create OwnerPage...
+2025-12-15 06:14:54,093 [INFO] Refreshing pending requests
+2025-12-15 06:14:54,094 [INFO] Refreshing disputes
+2025-12-15 06:14:54,094 [INFO] Refreshing signup requests
+2025-12-15 06:16:15,334 [INFO] Login success: owner (owner)
+2025-12-15 06:16:15,334 [INFO] Logged in: owner (owner)
+2025-12-15 06:16:15,335 [INFO] Attempting to create OwnerPage...
+2025-12-15 06:16:15,357 [INFO] Refreshing pending requests
+2025-12-15 06:16:15,358 [INFO] Refreshing disputes
+2025-12-15 06:16:15,358 [INFO] Refreshing signup requests
+2025-12-15 06:18:51,726 [INFO] Default owner account created: owner/admin1234
+2025-12-15 06:18:51,813 [INFO] Default worker account created: worker/worker1234
+2025-12-15 06:18:55,459 [INFO] Signup requested from LoginPage
+2025-12-15 06:19:16,302 [INFO] Login success: owner (owner)
+2025-12-15 06:19:16,302 [INFO] Logged in: owner (owner)
+2025-12-15 06:19:16,302 [INFO] Attempting to create OwnerPage...
+2025-12-15 06:19:16,324 [INFO] Refreshing pending requests
+2025-12-15 06:19:16,324 [INFO] Refreshing disputes
+2025-12-15 06:19:16,325 [INFO] Refreshing signup requests
+2025-12-15 06:19:22,189 [INFO] Refreshing signup requests
+2025-12-15 06:19:23,660 [INFO] Logout: owner
+2025-12-15 06:19:31,289 [INFO] Login success: test01 (worker)
+2025-12-15 06:19:31,289 [INFO] Logged in: test01 (worker)
+2025-12-15 06:19:31,289 [INFO] Attempting to create WorkerPage...
+2025-12-15 06:19:31,313 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-15 06:19:31,313 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-15 06:19:31,313 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-15 06:19:31,313 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-15 06:19:32,715 [INFO] Worker request created: user=test01 type=IN at=2025-12-15 06:19:32
+2025-12-15 06:19:34,627 [INFO] Logout: test01
+2025-12-15 06:19:35,995 [INFO] Login success: owner (owner)
+2025-12-15 06:19:35,995 [INFO] Logged in: owner (owner)
+2025-12-15 06:19:35,995 [INFO] Attempting to create OwnerPage...
+2025-12-15 06:19:36,008 [INFO] Refreshing pending requests
+2025-12-15 06:19:36,008 [INFO] Refreshing disputes
+2025-12-15 06:19:36,009 [INFO] Refreshing signup requests
+2025-12-15 06:22:39,895 [INFO] Login success: owner (owner)
+2025-12-15 06:22:39,895 [INFO] Logged in: owner (owner)
+2025-12-15 06:22:39,895 [INFO] Attempting to create OwnerPage...
+2025-12-15 06:22:39,918 [INFO] Refreshing pending requests
+2025-12-15 06:22:39,918 [INFO] Refreshing disputes
+2025-12-15 06:22:39,918 [INFO] Refreshing signup requests
+2025-12-15 06:25:33,720 [INFO] Login success: owner (owner)
+2025-12-15 06:25:33,720 [INFO] Logged in: owner (owner)
+2025-12-15 06:25:33,721 [INFO] Attempting to create OwnerPage...
+2025-12-15 06:25:33,743 [INFO] Refreshing pending requests
+2025-12-15 06:25:33,744 [INFO] Refreshing disputes
+2025-12-15 06:25:33,744 [INFO] Refreshing signup requests
+2025-12-15 06:27:03,247 [INFO] Login success: owner (owner)
+2025-12-15 06:27:03,247 [INFO] Logged in: owner (owner)
+2025-12-15 06:27:03,247 [INFO] Attempting to create OwnerPage...
+2025-12-15 06:27:03,270 [INFO] Refreshing pending requests
+2025-12-15 06:27:03,271 [INFO] Refreshing disputes
+2025-12-15 06:27:03,271 [INFO] Refreshing signup requests

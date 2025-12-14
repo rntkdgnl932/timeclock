@@ -53,3 +53,26 @@ DISPUTE_STATUS_ITEMS = [
     ("REJECTED", "기각"),
 ]
 
+
+# timeclock/settings.py
+# (기존 REQ_STATUS 아래에 추가)
+
+# 가입신청 상태 (STEP 3)
+SIGNUP_STATUS = {
+    "PENDING": "승인 대기",
+    "APPROVED": "승인 완료",
+    "REJECTED": "신청 거절",
+}
+SIGNUP_STATUS_ITEMS = list(SIGNUP_STATUS.items())
+
+# 감사 로그 유형 (STEP 3)
+AUDIT_ACTIONS = {
+    "USER_CREATED": "사용자 계정 생성",
+    "USER_DEACTIVATED": "사용자 비활성화",
+    "SIGNUP_APPROVED": "가입 신청 승인",
+    "SIGNUP_REJECTED": "가입 신청 거절",
+    "REQUEST_APPROVED": "근태 요청 승인",
+    "REQUEST_REJECTED": "근태 요청 거절",
+    "DISPUTE_RESOLVED": "이의 제기 처리",
+}
+
