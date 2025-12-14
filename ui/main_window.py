@@ -3,14 +3,14 @@
 import logging
 import traceback
 from datetime import datetime, timedelta
-from PyQt5 import QtWidgets
+from PyQt5 import QtWidgets, QtCore
 
 from timeclock.settings import APP_NAME, DB_PATH, LOG_PATH, EXPORT_DIR, BACKUP_DIR, ARCHIVE_DIR
 from timeclock.utils import Message
-from login_page import LoginPage
-from worker_page import WorkerPage
-from owner_page import OwnerPage
-from signup_page import SignupPage
+from ui.login_page import LoginPage
+from ui.worker_page import WorkerPage
+from ui.owner_page import OwnerPage
+from ui.signup_page import SignupPage
 
 
 class MainWindow(QtWidgets.QMainWindow):

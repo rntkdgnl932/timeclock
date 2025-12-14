@@ -32,6 +32,7 @@ REQ_STATUS = {
 
 # 승인(정정) 사유
 REASON_CODES = {
+    "AS_REQUESTED": "요청대로 승인(정정 없음)",   # ✅ 추가
     "PREP_DELAY": "준비 지연으로 실제 시작 시각 반영",
     "EARLY_OUT": "조기 퇴근으로 실제 종료 시각 반영",
     "LATE_IN": "지각",

@@ -69,8 +69,15 @@ class ApproveDialog(QtWidgets.QDialog):
             pass
 
         self.cb_reason = QtWidgets.QComboBox()
-        for code, label in REASON_CODES.items():
+        for code, label in REASON_CODES.items():  # ✅ dict 순회
             self.cb_reason.addItem(f"{label} ({code})", code)
+
+        # ✅ 기본 선택: 요청대로 승인
+        idx = self.cb_reason.findData("AS_REQUESTED")
+        if idx >= 0:
+            self.cb_reason.setCurrentIndex(idx)
+        elif self.cb_reason.count() > 0:
+            self.cb_reason.setCurrentIndex(0)
 
         if self.cb_reason.count() > 0:
             self.cb_reason.setCurrentIndex(0)
