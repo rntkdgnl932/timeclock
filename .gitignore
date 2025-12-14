@@ -1,0 +1,29 @@
+# IDE / 환경
+.idea/
+.venv/
+
+# 파이썬 캐시
+__pycache__/
+app/jsons/
+character/
+comfy_input/
+comfy_output/
+maked_title/
+maked_talk/
+issue_list/
+app/blog_setting
+playwright_profile
+
+# 빌드 산출물
+build/
+dist/
+_internal/
+
+mysettings
+asd.png
+error_screenshot
+naver_cookies.json
+chromedriver
+LICENSE
+THIRD_PARTY_NOTICES
+.env

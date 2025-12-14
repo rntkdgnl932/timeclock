@@ -1,0 +1,171 @@
+2025-12-14 01:06:41,448 [INFO] Starting app...
+2025-12-14 01:06:41,543 [INFO] Default owner account created: owner/admin1234
+2025-12-14 01:06:41,630 [INFO] Default worker account created: worker/worker1234
+2025-12-14 01:07:47,005 [INFO] Login success: owner (owner)
+2025-12-14 01:07:54,220 [INFO] Logout: owner
+2025-12-14 01:16:45,385 [INFO] Login success: owner (owner)
+2025-12-14 01:17:12,635 [INFO] Logout: owner
+2025-12-14 01:56:07,760 [INFO] Login success: worker (worker)
+2025-12-14 01:56:07,760 [INFO] Logged in: worker (worker)
+2025-12-14 01:56:18,900 [INFO] Worker request created: user=worker type=IN at=2025-12-14 01:56:18
+2025-12-14 01:56:39,837 [INFO] Logout: worker
+2025-12-14 01:56:50,741 [INFO] Login success: owner (owner)
+2025-12-14 01:56:50,742 [INFO] Logged in: owner (owner)
+2025-12-14 01:58:34,629 [INFO] Logout: owner
+2025-12-14 01:58:44,773 [INFO] Login success: worker (worker)
+2025-12-14 01:58:44,773 [INFO] Logged in: worker (worker)
+2025-12-14 02:01:35,050 [INFO] Login success: owner (owner)
+2025-12-14 02:01:35,050 [INFO] Logged in: owner (owner)
+2025-12-14 02:01:56,268 [INFO] Login success: owner (owner)
+2025-12-14 02:01:56,269 [INFO] Logged in: owner (owner)
+2025-12-14 02:02:45,062 [INFO] Login success: owner (owner)
+2025-12-14 02:02:45,063 [INFO] Logged in: owner (owner)
+2025-12-14 02:06:17,065 [INFO] Login success: owner (owner)
+2025-12-14 02:06:17,066 [INFO] Logged in: owner (owner)
+2025-12-14 02:06:17,078 [ERROR] Failed to create page after login
+Traceback (most recent call last):
+  File "C:\my_games\timeclock\ui\main_window.py", line 159, in on_logged_in
+    self._owner_page = OwnerPage(self.db, session)
+  File "C:\my_games\timeclock\ui\owner_page.py", line 91, in __init__
+    worker_panel = self._build_worker_records_panel()  # 새로 추가(근로자 조회 박스)
+AttributeError: 'OwnerPage' object has no attribute '_build_worker_records_panel'
+2025-12-14 02:11:38,695 [INFO] Login success: owner (owner)
+2025-12-14 02:11:38,695 [INFO] Logged in: owner (owner)
+2025-12-14 02:11:38,709 [ERROR] Failed to create page after login
+Traceback (most recent call last):
+  File "C:\my_games\timeclock\ui\main_window.py", line 159, in on_logged_in
+    self._owner_page = OwnerPage(self.db, session)
+  File "C:\my_games\timeclock\ui\owner_page.py", line 91, in __init__
+    worker_panel = self._build_worker_records_panel()  # 새로 추가(근로자 조회 박스)
+  File "C:\my_games\timeclock\ui\owner_page.py", line 201, in _build_worker_records_panel
+    workers = self.db.list_workers()
+AttributeError: 'DB' object has no attribute 'list_workers'
+2025-12-14 02:20:03,667 [INFO] Login success: owner (owner)
+2025-12-14 02:20:03,668 [INFO] Logged in: owner (owner)
+2025-12-14 02:21:06,833 [INFO] Logout: owner
+2025-12-14 02:21:16,065 [INFO] Login success: worker (worker)
+2025-12-14 02:21:16,065 [INFO] Logged in: worker (worker)
+2025-12-14 02:28:59,364 [INFO] Login success: owner (owner)
+2025-12-14 02:28:59,364 [INFO] Logged in: owner (owner)
+2025-12-14 02:29:06,870 [INFO] Logout: owner
+2025-12-14 02:29:22,557 [INFO] Login success: worker (worker)
+2025-12-14 02:29:22,558 [INFO] Logged in: worker (worker)
+2025-12-14 02:44:01,263 [INFO] Login success: worker (worker)
+2025-12-14 02:44:01,263 [INFO] Logged in: worker (worker)
+2025-12-14 02:44:03,659 [ERROR] open_dispute failed
+Traceback (most recent call last):
+  File "C:\my_games\timeclock\ui\worker_page.py", line 99, in open_dispute
+    row_idx = self.table.selected_first_row_index()
+AttributeError: 'Table' object has no attribute 'selected_first_row_index'
+2025-12-14 17:26:52,109 [INFO] Login success: worker (worker)
+2025-12-14 17:26:52,109 [INFO] Logged in: worker (worker)
+2025-12-14 17:27:58,513 [INFO] Dispute created: request_id=1 user=worker
+2025-12-14 17:37:35,843 [INFO] Login success: worker (worker)
+2025-12-14 17:37:35,843 [INFO] Logged in: worker (worker)
+2025-12-14 17:37:59,093 [INFO] Logout: worker
+2025-12-14 17:38:08,855 [INFO] Login success: owner (owner)
+2025-12-14 17:38:08,855 [INFO] Logged in: owner (owner)
+2025-12-14 17:50:20,138 [INFO] Login success: owner (owner)
+2025-12-14 17:50:20,139 [INFO] Logged in: owner (owner)
+2025-12-14 19:03:59,607 [INFO] Login success: owner (owner)
+2025-12-14 19:03:59,607 [INFO] Logged in: owner (owner)
+2025-12-14 19:04:43,213 [INFO] Logout: owner
+2025-12-14 19:04:57,064 [INFO] Login success: worker (worker)
+2025-12-14 19:04:57,064 [INFO] Logged in: worker (worker)
+2025-12-14 19:21:22,522 [INFO] Login success: worker (worker)
+2025-12-14 19:21:22,522 [INFO] Logged in: worker (worker)
+2025-12-14 19:21:22,524 [ERROR] Failed to create page after login
+Traceback (most recent call last):
+  File "C:\my_games\timeclock\ui\main_window.py", line 155, in on_logged_in
+    self._worker_page = WorkerPage(self.db, session)
+  File "C:\my_games\timeclock\ui\worker_page.py", line 43, in __init__
+    self.my_dispute_table.table.cellDoubleClicked.connect(
+AttributeError: 'WorkerPage' object has no attribute 'my_dispute_table'
+2025-12-14 19:21:30,626 [INFO] Login success: worker (worker)
+2025-12-14 19:21:30,626 [INFO] Logged in: worker (worker)
+2025-12-14 19:21:30,627 [ERROR] Failed to create page after login
+Traceback (most recent call last):
+  File "C:\my_games\timeclock\ui\main_window.py", line 155, in on_logged_in
+    self._worker_page = WorkerPage(self.db, session)
+  File "C:\my_games\timeclock\ui\worker_page.py", line 43, in __init__
+    self.my_dispute_table.table.cellDoubleClicked.connect(
+AttributeError: 'WorkerPage' object has no attribute 'my_dispute_table'
+2025-12-14 19:21:44,303 [INFO] Login success: worker (worker)
+2025-12-14 19:21:44,303 [INFO] Logged in: worker (worker)
+2025-12-14 19:21:44,304 [ERROR] Failed to create page after login
+Traceback (most recent call last):
+  File "C:\my_games\timeclock\ui\main_window.py", line 155, in on_logged_in
+    self._worker_page = WorkerPage(self.db, session)
+  File "C:\my_games\timeclock\ui\worker_page.py", line 43, in __init__
+    self.my_dispute_table.table.cellDoubleClicked.connect(
+AttributeError: 'WorkerPage' object has no attribute 'my_dispute_table'
+2025-12-14 19:24:10,300 [INFO] Login success: worker (worker)
+2025-12-14 19:24:10,301 [INFO] Logged in: worker (worker)
+2025-12-14 19:30:10,229 [INFO] Login success: worker (worker)
+2025-12-14 19:30:10,229 [INFO] Logged in: worker (worker)
+2025-12-14 19:30:10,238 [WARNING] my_dispute_table: 내부 QTableWidget을 찾지 못했습니다. 더블클릭 전체보기 비활성.
+2025-12-14 19:34:01,081 [INFO] Login success: worker (worker)
+2025-12-14 19:34:01,081 [INFO] Logged in: worker (worker)
+2025-12-14 19:36:31,599 [INFO] Login success: worker (worker)
+2025-12-14 19:36:31,600 [INFO] Logged in: worker (worker)
+2025-12-14 19:36:31,609 [WARNING] my_dispute_table: 본문 테이블(QTableWidget/QTableView)을 찾지 못했습니다.
+2025-12-14 19:50:53,656 [INFO] Login success: worker (worker)
+2025-12-14 19:50:53,656 [INFO] Logged in: worker (worker)
+2025-12-14 19:50:53,665 [WARNING] my_dispute_table: 본문 테이블(QTableWidget/QTableView)을 찾지 못했습니다.
+2025-12-14 20:26:54,317 [INFO] Login success: worker (worker)
+2025-12-14 20:26:54,317 [INFO] Logged in: worker (worker)
+2025-12-14 20:26:54,356 [WARNING] my_dispute_table: 본문 테이블(QTableWidget/QTableView)을 찾지 못했습니다.
+2025-12-14 20:26:54,357 [WARNING] my_dispute_table: 본문 테이블(QTableWidget/QTableView)을 찾지 못했습니다.
+2025-12-14 20:30:52,572 [INFO] Default worker account created: worker/worker1234
+2025-12-14 20:31:08,207 [INFO] Default owner account created: owner/admin1234
+2025-12-14 20:31:08,293 [INFO] Default worker account created: worker/worker1234
+2025-12-14 20:31:16,683 [INFO] Login success: www (worker)
+2025-12-14 20:31:16,684 [INFO] Logged in: www (worker)
+2025-12-14 20:31:16,718 [WARNING] my_dispute_table: 본문 테이블(QTableWidget/QTableView)을 찾지 못했습니다.
+2025-12-14 20:31:16,718 [WARNING] my_dispute_table: 본문 테이블(QTableWidget/QTableView)을 찾지 못했습니다.
+2025-12-14 20:31:24,898 [WARNING] my_dispute_table: 본문 테이블(QTableWidget/QTableView)을 찾지 못했습니다.
+2025-12-14 20:31:37,301 [INFO] Logout: www
+2025-12-14 20:32:21,736 [INFO] Login success: worker (worker)
+2025-12-14 20:32:21,737 [INFO] Logged in: worker (worker)
+2025-12-14 20:32:21,776 [WARNING] my_dispute_table: 본문 테이블(QTableWidget/QTableView)을 찾지 못했습니다.
+2025-12-14 20:32:21,776 [WARNING] my_dispute_table: 본문 테이블(QTableWidget/QTableView)을 찾지 못했습니다.
+2025-12-14 20:40:52,660 [INFO] Login success: worker (worker)
+2025-12-14 20:40:52,660 [INFO] Logged in: worker (worker)
+2025-12-14 20:40:52,699 [WARNING] my_dispute_table: 본문 테이블(QTableWidget/QTableView)을 찾지 못했습니다.
+2025-12-14 20:40:52,699 [WARNING] my_dispute_table: 본문 테이블(QTableWidget/QTableView)을 찾지 못했습니다.
+2025-12-14 20:42:44,938 [INFO] Login success: worker (worker)
+2025-12-14 20:42:44,938 [INFO] Logged in: worker (worker)
+2025-12-14 20:42:44,979 [WARNING] my_dispute_table: 본문 테이블(QTableWidget/QTableView)을 찾지 못했습니다.
+2025-12-14 20:42:44,979 [WARNING] my_dispute_table: 본문 테이블(QTableWidget/QTableView)을 찾지 못했습니다.
+2025-12-14 21:04:17,827 [INFO] Login success: worker (worker)
+2025-12-14 21:04:17,827 [INFO] Logged in: worker (worker)
+2025-12-14 21:04:17,866 [WARNING] my_dispute_table: 본문 테이블(QTableWidget/QTableView)을 찾지 못했습니다.
+2025-12-14 21:04:17,866 [WARNING] my_dispute_table: 본문 테이블(QTableWidget/QTableView)을 찾지 못했습니다.
+2025-12-14 21:05:12,433 [INFO] Login success: worker (worker)
+2025-12-14 21:05:12,433 [INFO] Logged in: worker (worker)
+2025-12-14 21:05:12,473 [WARNING] my_dispute_table: 본문 테이블(QTableWidget/QTableView)을 찾지 못했습니다.
+2025-12-14 21:05:12,473 [WARNING] my_dispute_table: 본문 테이블(QTableWidget/QTableView)을 찾지 못했습니다.
+2025-12-14 21:10:37,383 [INFO] Login success: worker (worker)
+2025-12-14 21:10:37,384 [INFO] Logged in: worker (worker)
+2025-12-14 21:10:37,422 [WARNING] my_dispute_table: 본문 테이블(QTableWidget/QTableView)을 찾지 못했습니다.
+2025-12-14 21:10:37,423 [WARNING] my_dispute_table: QAbstractItemView를 찾지 못해 더블클릭 훅 설치 실패
+2025-12-14 21:10:37,423 [WARNING] my_dispute_table: 본문 테이블(QTableWidget/QTableView)을 찾지 못했습니다.
+2025-12-14 21:10:37,423 [WARNING] my_dispute_table: QAbstractItemView를 찾지 못해 더블클릭 훅 설치 실패
+2025-12-14 21:12:56,409 [INFO] Login success: worker (worker)
+2025-12-14 21:12:56,410 [INFO] Logged in: worker (worker)
+2025-12-14 21:12:56,449 [WARNING] my_dispute_table: 본문 테이블(QTableWidget/QTableView)을 찾지 못했습니다.
+2025-12-14 21:12:56,449 [WARNING] my_dispute_table: 본문 테이블(QTableWidget/QTableView)을 찾지 못했습니다.
+2025-12-14 21:15:17,305 [INFO] Login success: worker (worker)
+2025-12-14 21:15:17,305 [INFO] Logged in: worker (worker)
+2025-12-14 21:15:17,344 [INFO] --- _wire_my_dispute_doubleclick 호출됨 ---
+2025-12-14 21:15:17,345 [WARNING] my_dispute_table: 본문 테이블(QTableWidget/QTableView)을 찾지 못했습니다. (경로 3)
+2025-12-14 21:15:17,345 [INFO] ------------------------------------------
+2025-12-14 21:15:17,345 [INFO] --- _wire_my_dispute_doubleclick 호출됨 ---
+2025-12-14 21:15:17,345 [WARNING] my_dispute_table: 본문 테이블(QTableWidget/QTableView)을 찾지 못했습니다. (경로 3)
+2025-12-14 21:15:17,345 [INFO] ------------------------------------------
+2025-12-14 21:16:15,058 [INFO] Login success: worker (worker)
+2025-12-14 21:16:15,058 [INFO] Logged in: worker (worker)
+2025-12-14 21:16:15,097 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-14 21:16:15,097 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-14 21:16:15,097 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-14 21:16:15,098 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
