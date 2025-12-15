@@ -719,7 +719,6 @@ class OwnerPage(QtWidgets.QWidget):
 
         timeline_events = []
         try:
-            # ✅ 최종 DB 함수 사용
             timeline_events = self.db.get_dispute_timeline(dispute_id)
         except Exception as e:
             logging.exception("Failed to get dispute timeline")
@@ -728,32 +727,36 @@ class OwnerPage(QtWidgets.QWidget):
 
         html_content = []
 
-        # ------------------ CSS 스타일 정의 ------------------
+        # ------------------ CSS 스타일 정의 (float 기반) ------------------
+        # Owner: 오른쪽 정렬 (float: right) / Worker: 왼쪽 정렬 (float: left)
         html_content.append("""
         <html><head>
         <style>
             .chat-area { padding: 10px; }
-            .message-container { display: flex; margin-bottom: 10px; }
-            .worker-container { justify-content: flex-start; }
-            .owner-container { justify-content: flex-end; }
+            .message-row { clear: both; margin-bottom: 10px; overflow: hidden; /* float 컨테이너 */ }
 
-            /* WORKER: 왼쪽 (사업주 화면 기준) */
-            .worker-bubble { 
-                background-color: #e6e6e6; 
+            .bubble { 
                 border-radius: 8px; 
                 padding: 8px 12px; 
                 max-width: 65%;
+                word-wrap: break-word;
+                float: left; /* 기본 왼쪽 정렬 */
+                box-shadow: 1px 1px 2px rgba(0,0,0,0.1);
             }
-            /* OWNER: 오른쪽 (사업주 화면 기준) */
+            /* OWNER: 오른쪽 정렬 및 색상 (사업주 화면 기준) */
             .owner-bubble { 
+                float: right; 
                 background-color: #dcf8c6; 
-                border-radius: 8px; 
-                padding: 8px 12px; 
-                max-width: 65%;
             }
-            .meta { font-size: 0.8em; color: #555; margin-top: 2px; }
+            /* WORKER: 왼쪽 정렬 및 색상 (사업주 화면 기준) */
+            .worker-bubble { 
+                float: left; 
+                background-color: #e6e6e6; 
+            }
+
+            .meta { font-size: 0.8em; color: #555; margin-top: 5px; display: block; }
             .user-name { font-weight: bold; font-size: 0.9em; margin-bottom: 3px; display: block;}
-            pre { margin: 0; white-space: pre-wrap; word-wrap: break-word; font-family: sans-serif; font-size: 1em;}
+            pre { margin: 0; white-space: pre-wrap; font-family: sans-serif; font-size: 1em;}
         </style></head><body><div class="chat-area">
         """)
 
@@ -769,7 +772,6 @@ class OwnerPage(QtWidgets.QWidget):
             safe_comment = comment.replace('<', '&lt;').replace('>', '&gt;')
 
             is_owner = (who == "owner")
-            container_class = "owner-container" if is_owner else "worker-container"
             bubble_class = "owner-bubble" if is_owner else "worker-bubble"
 
             meta_info = f"<span class='meta'>{at}</span>"
@@ -778,7 +780,7 @@ class OwnerPage(QtWidgets.QWidget):
                 meta_info += f" | <span class='meta'>상태: {status_label}</span>"
 
             message_html = f"""
-            <div class="{container_class}">
+            <div class="message-row">
                 <div class="{bubble_class}">
                     <span class="user-name">{username}</span>
                     <pre>{safe_comment}</pre>

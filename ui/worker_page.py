@@ -337,6 +337,7 @@ class WorkerPage(QtWidgets.QWidget):
 
 
 
+    #
 
 
     def _show_my_dispute_comment_popup(self, row: int):
@@ -350,7 +351,6 @@ class WorkerPage(QtWidgets.QWidget):
 
         timeline_events = []
         try:
-            # ✅ 최종 DB 함수 사용
             timeline_events = self.db.get_dispute_timeline(dispute_id)
         except Exception as e:
             logging.exception("Failed to get dispute timeline")
@@ -359,35 +359,35 @@ class WorkerPage(QtWidgets.QWidget):
 
         html_content = []
 
-        # ------------------ CSS 스타일 정의 (WORKER: 오른쪽, OWNER: 왼쪽) ------------------
+        # ------------------ CSS 스타일 정의 (float 기반, Worker가 오른쪽) ------------------
         html_content.append("""
         <html><head>
         <style>
             .chat-area { padding: 10px; }
-            .message-container { display: flex; margin-bottom: 10px; }
+            .message-row { clear: both; margin-bottom: 10px; overflow: hidden; /* float 컨테이너 */ }
 
-            /* WORKER: 오른쪽 정렬 */
-            .worker-container { justify-content: flex-end; } 
-            /* OWNER: 왼쪽 정렬 */
-            .owner-container { justify-content: flex-start; } 
-
-            /* OWNER: 왼쪽 (근로자 화면 기준) */
+            .bubble { 
+                border-radius: 8px; 
+                padding: 8px 12px; 
+                max-width: 65%;
+                word-wrap: break-word;
+                float: left; /* 기본 왼쪽 정렬 */
+                box-shadow: 1px 1px 2px rgba(0,0,0,0.1);
+            }
+            /* OWNER: 왼쪽 정렬 및 색상 (근로자 화면 기준) */
             .owner-bubble { 
+                float: left; 
                 background-color: #e6e6e6; 
-                border-radius: 8px; 
-                padding: 8px 12px; 
-                max-width: 65%;
             }
-            /* WORKER: 오른쪽 (근로자 화면 기준) */
+            /* WORKER: 오른쪽 정렬 및 색상 (근로자 화면 기준) */
             .worker-bubble { 
+                float: right; 
                 background-color: #dcf8c6; 
-                border-radius: 8px; 
-                padding: 8px 12px; 
-                max-width: 65%;
             }
-            .meta { font-size: 0.8em; color: #555; margin-top: 2px; }
+
+            .meta { font-size: 0.8em; color: #555; margin-top: 5px; display: block; }
             .user-name { font-weight: bold; font-size: 0.9em; margin-bottom: 3px; display: block;}
-            pre { margin: 0; white-space: pre-wrap; word-wrap: break-word; font-family: sans-serif; font-size: 1em;}
+            pre { margin: 0; white-space: pre-wrap; font-family: sans-serif; font-size: 1em;}
         </style></head><body><div class="chat-area">
         """)
 
@@ -403,16 +403,15 @@ class WorkerPage(QtWidgets.QWidget):
             safe_comment = comment.replace('<', '&lt;').replace('>', '&gt;')
 
             is_worker = (who == "worker")
-            container_class = "worker-container" if is_worker else "owner-container"
             bubble_class = "worker-bubble" if is_worker else "owner-bubble"
 
             meta_info = f"<span class='meta'>{at}</span>"
-            if not is_worker and status_code:
+            if not is_worker and status_code:  # 사업주 메시지일 때만 상태 표시
                 status_label = DISPUTE_STATUS.get(status_code, status_code or "")
                 meta_info += f" | <span class='meta'>상태: {status_label}</span>"
 
             message_html = f"""
-            <div class="{container_class}">
+            <div class="message-row">
                 <div class="{bubble_class}">
                     <span class="user-name">{username}</span>
                     <pre>{safe_comment}</pre>
