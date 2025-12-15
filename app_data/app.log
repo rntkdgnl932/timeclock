@@ -570,3 +570,9 @@ AttributeError: 'sqlite3.Connection' object has no attribute 'rowcount'
 2025-12-15 16:31:56,702 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
 2025-12-15 16:31:56,702 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
 2025-12-15 16:31:56,702 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-15 18:34:41,839 [INFO] Login success: test01 (worker)
+2025-12-15 18:34:41,839 [INFO] Logged in: test01 (worker)
+2025-12-15 18:34:41,882 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-15 18:34:41,882 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-15 18:34:41,882 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-15 18:34:41,882 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)

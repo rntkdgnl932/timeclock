@@ -646,6 +646,29 @@ class DB:
         )
         self.conn.commit()
 
+    def list_dispute_audit_updates(self, dispute_id: int, limit: int = 2000):
+        """
+        audit_logs 에 저장된 사업주 처리 이력(action='DISPUTE_UPDATE')을 시간순으로 반환.
+        owner_page/worker_page 타임라인 팝업에서 사용.
+        """
+        return self.conn.execute(
+            """
+            SELECT a.id,
+                   a.actor_user_id,
+                   u.username AS actor_username,
+                   a.detail_json,
+                   a.created_at
+            FROM audit_logs a
+            LEFT JOIN users u ON u.id = a.actor_user_id
+            WHERE a.action = 'DISPUTE_UPDATE'
+              AND a.target_type = 'dispute'
+              AND a.target_id = ?
+            ORDER BY a.id ASC
+            LIMIT ?
+            """,
+            (dispute_id, limit),
+        ).fetchall()
+
     # --- Export/Backup ---
     def export_records_csv(self, out_path: Path, date_from: str = "", date_to: str = ""):
         where = "WHERE r.status='APPROVED'"

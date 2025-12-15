@@ -119,11 +119,13 @@ class OwnerPage(QtWidgets.QWidget):
         self.filter_disputes = DateRangeBar(label="이의제기 조회기간")
         self.filter_disputes.applied.connect(lambda *_: self.refresh_disputes())
 
-        self.btn_resolve_dispute = QtWidgets.QPushButton("선택 이의 처리")
         self.btn_disputes = QtWidgets.QPushButton("이의 제기 새로고침")
+        self.btn_resolve_dispute = QtWidgets.QPushButton("선택 이의 처리")
+        self.btn_view_dispute = QtWidgets.QPushButton("선택 이의내용 전체보기")
 
-        self.btn_resolve_dispute.clicked.connect(self.resolve_selected_dispute)
         self.btn_disputes.clicked.connect(self.refresh_disputes)
+        self.btn_resolve_dispute.clicked.connect(self.resolve_selected_dispute)
+        self.btn_view_dispute.clicked.connect(self.open_selected_dispute_timeline)
 
         self.dispute_table = Table([
             "이의ID", "근로자", "요청ID", "유형", "요청시각", "승인시각",
@@ -134,6 +136,7 @@ class OwnerPage(QtWidgets.QWidget):
         top = QtWidgets.QHBoxLayout()
         top.addWidget(self.btn_disputes)
         top.addWidget(self.btn_resolve_dispute)
+        top.addWidget(self.btn_view_dispute)
         top.addStretch(1)
 
         l = QtWidgets.QVBoxLayout()
@@ -246,25 +249,24 @@ class OwnerPage(QtWidgets.QWidget):
         try:
             rows = self.db.list_disputes(date_from, date_to)
 
-            # ✅ 상세보기/더블클릭 팝업에서 원문/전체 필드를 쓰기 위해 보관
+            # ✅ 상세 팝업에서 원문/전체 필드 쓰기 위해 보관
             self._dispute_rows = rows
 
             out = []
             for row in rows:
                 r = dict(row)
-
-                status_label = DISPUTE_STATUS.get(r.get("status"), r.get("status", ""))
+                status_label = DISPUTE_STATUS.get(r["status"], r["status"])
 
                 out.append([
-                    str(r.get("id", "")),
-                    r.get("worker_username", ""),
-                    str(r.get("request_id", "")),
-                    REQ_TYPES.get(r.get("req_type"), r.get("req_type", "")),
-                    r.get("requested_at", "") or "",
+                    str(r["id"]),
+                    r["worker_username"],
+                    str(r["request_id"]),
+                    REQ_TYPES.get(r["req_type"], r["req_type"]),
+                    r["requested_at"],
                     r.get("approved_at", "") or "",
-                    r.get("dispute_type", "") or "",
-                    (r.get("comment", "") or "").replace("\n", " "),  # 목록은 1줄 요약
-                    r.get("created_at", "") or "",
+                    r["dispute_type"],
+                    (r.get("comment", "") or "").replace("\n", " "),
+                    r["created_at"],
                     status_label,
                     r.get("resolution_comment", "") or "",
                     r.get("resolved_at", "") or "",
@@ -272,7 +274,7 @@ class OwnerPage(QtWidgets.QWidget):
 
             self.dispute_table.set_rows(out)
 
-            # ✅ 더블클릭 연결(중복 연결 방지 로직은 _wire_dispute_doubleclick에서 처리 권장)
+            # ✅ 더블클릭 연결(중복 연결 방지 포함)
             QtCore.QTimer.singleShot(0, self._wire_dispute_doubleclick)
 
         except Exception as e:
@@ -689,11 +691,106 @@ class OwnerPage(QtWidgets.QWidget):
         dlg.exec_()
 
     def _wire_dispute_doubleclick(self):
-        view = self.dispute_table.findChild(QtWidgets.QTableView)
-        if view:
-            view.doubleClicked.connect(
-                lambda idx: self._show_dispute_detail_popup(idx.row())
+        # Table은 QTableWidget 기반이라 cellDoubleClicked 사용 가능
+        if getattr(self, "_dispute_dbl_wired", False):
+            return
+        self._dispute_dbl_wired = True
+
+        self.dispute_table.cellDoubleClicked.connect(
+            lambda r, c: self.open_dispute_timeline_by_row(r)
+        )
+
+    def open_selected_dispute_timeline(self):
+        row_idx = self.dispute_table.selected_first_row_index()
+        if row_idx < 0:
+            Message.warn(self, "상세보기", "이의 제기 목록에서 항목을 선택하세요.")
+            return
+        self.open_dispute_timeline_by_row(row_idx)
+
+    def open_dispute_timeline_by_row(self, row_idx: int):
+        if not hasattr(self, "_dispute_rows") or not self._dispute_rows:
+            Message.err(self, "오류", "원본 이의 데이터가 없습니다. 새로고침 후 다시 시도하세요.")
+            return
+        if not (0 <= row_idx < len(self._dispute_rows)):
+            Message.err(self, "오류", "선택한 행 인덱스가 유효하지 않습니다.")
+            return
+
+        rr = dict(self._dispute_rows[row_idx])
+
+        dispute_id = int(rr.get("id", 0))
+        worker_username = rr.get("worker_username", "")
+        worker_at = rr.get("created_at", "") or ""
+        worker_comment = (rr.get("comment") or "").strip()
+
+        # 최신 처리 결과(disputes 테이블)
+        status_code = rr.get("status")
+        status_label = DISPUTE_STATUS.get(status_code, status_code or "")
+        resolution_comment = (rr.get("resolution_comment") or "").strip()
+        resolved_at = rr.get("resolved_at", "") or ""
+
+        # audit 이력(옵션 B)
+        audit_rows = []
+        try:
+            audit_rows = self.db.list_dispute_audit_updates(dispute_id)
+        except Exception:
+            audit_rows = []
+
+        import json
+
+        blocks = []
+
+        # 1) 근로자 원문
+        blocks.append(
+            f"[근로자({worker_username})]  {worker_at}\n"
+            f"{worker_comment if worker_comment else '(내용 없음)'}"
+        )
+
+        # 2) 사업주 최신 처리 결과(반드시 표시)
+        if status_label or resolution_comment or resolved_at:
+            blocks.append(
+                f"[사업주]  {resolved_at if resolved_at else '(처리시각 없음)'}\n"
+                f"처리상태: {status_label if status_label else '(없음)'}\n"
+                f"{resolution_comment if resolution_comment else '(코멘트 없음)'}"
             )
+
+        # 3) 처리 이력(audit_logs) — 여러 번 처리한 것처럼 누적 표시
+        for a in audit_rows:
+            ar = dict(a)
+            aid = ar.get("id")
+            actor = ar.get("actor_username") or f"사용자ID:{ar.get('actor_user_id')}"
+            at = ar.get("created_at") or ""
+
+            detail_json = ar.get("detail_json") or ""
+            status2 = ""
+            comment2 = ""
+            try:
+                dj = json.loads(detail_json) if detail_json else {}
+                status2 = (dj.get("status_label") or dj.get("status_code") or "").strip()
+                comment2 = (dj.get("comment") or "").strip()
+            except Exception:
+                comment2 = detail_json
+
+            blocks.append(
+                f"[처리기록 #{aid}] {actor}  {at}\n"
+                f"{('상태: ' + status2) if status2 else ''}\n"
+                f"{comment2 if comment2 else '(내용 없음)'}"
+            )
+
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle("이의 내용/처리 타임라인")
+        dlg.resize(900, 600)
+
+        v = QtWidgets.QVBoxLayout(dlg)
+        edit = QtWidgets.QPlainTextEdit()
+        edit.setReadOnly(True)
+        edit.setPlainText("\n\n" + ("-" * 70) + "\n\n".join(blocks) + "\n")
+        v.addWidget(edit)
+
+        btn = QtWidgets.QPushButton("닫기")
+        btn.clicked.connect(dlg.accept)
+        v.addWidget(btn)
+
+        dlg.exec_()
 
 
 
