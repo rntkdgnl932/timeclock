@@ -10,7 +10,7 @@ from timeclock.utils import now_str, Message
 from timeclock.settings import REQ_TYPES
 from ui.widgets import DateRangeBar, Table
 from ui.dialogs import DisputeDialog
-
+from ui.dialogs import DisputeTimelineDialog
 
 class WorkerPage(QtWidgets.QWidget):
     logout_requested = QtCore.pyqtSignal()
@@ -340,159 +340,24 @@ class WorkerPage(QtWidgets.QWidget):
     #
 
     def _show_my_dispute_comment_popup(self, row: int):
+        # 1. 데이터 준비 (기존과 동일)
         rows = getattr(self, "_my_dispute_rows", None)
         if not rows or not (0 <= row < len(rows)):
-            Message.warn(self, "이의 내용/처리 타임라인", "표시할 항목이 없습니다.")
             return
 
         rr = dict(rows[row])
         dispute_id = int(rr.get("id", 0))
 
-        timeline_events = []
         try:
-            timeline_events = self.db.get_dispute_timeline(dispute_id)
+            events = self.db.get_dispute_timeline(dispute_id)
         except Exception as e:
-            logging.exception("Failed to get dispute timeline")
-            Message.err(self, "오류", f"타임라인 로드 중 오류: {e}")
+            Message.err(self, "오류", f"타임라인 로드 실패: {e}")
             return
 
-        html_content = []
+        # 제목 만들기
+        title = f"내 이의 | 요청ID: {rr.get('request_id')} ({rr.get('requested_at')})"
 
-        # ------------------ 요청 정보 추출 및 정리 ------------------
-        worker_username = self.session.username
-        request_id = rr.get("request_id", "N/A")
-        req_type = REQ_TYPES.get(rr.get("req_type"), rr.get("req_type", "N/A"))
-        requested_at = rr.get("requested_at", "N/A")
-
-        dispute_type = rr.get("dispute_type", "N/A")
-        # dispute_comment_full = rr.get("comment", "") # 이제 비교에 사용 안 함
-
-        new_title = f"내 이의 | 요청ID: {request_id} ({req_type} {requested_at})"
-
-        # ------------------ CSS 스타일 정의 및 상단 정보 출력 ------------------
-        html_content.append(f"""
-        <html><head>
-        <style>
-            body {{ font-family: sans-serif; margin: 0; padding: 10px; }}
-            .header-container {{ text-align: center; margin-bottom: 15px; }}
-            .header-info {{ 
-                background-color: #f0f0f0; 
-                padding: 10px; 
-                margin: 0 auto 5px auto;
-                border-radius: 5px;
-                font-size: 1.0em;
-                width: 80%;
-            }}
-            .dispute-original {{ 
-                background-color: #ffffe0; 
-                border: 1px solid #e0e0e0;
-                padding: 10px; 
-                margin: 0 auto;
-                border-radius: 5px;
-                font-size: 0.9em;
-                width: 80%;
-            }}
-            .chat-table {{ width: 100%; border-collapse: collapse; table-layout: fixed; }}
-            .message-row {{ margin-bottom: 10px; display: table-row; }}
-
-            /* OWNER: 왼쪽 정렬 (카톡 스타일 - 상대방) */
-            .owner-cell {{ text-align: left; }}
-            .owner-bubble {{ 
-                background-color: #e6e6e6; 
-                border-radius: 8px; 
-                padding: 8px 12px; 
-                max-width: 90%;
-                display: inline-block;
-                text-align: left;
-            }}
-
-            /* WORKER: 오른쪽 정렬 (카톡 스타일 - 나) */
-            .worker-cell {{ text-align: right; }}
-            .worker-bubble {{ 
-                background-color: #dcf8c6; 
-                border-radius: 8px; 
-                padding: 8px 12px; 
-                max-width: 90%;
-                display: inline-block;
-                text-align: left;
-            }}
-
-            .meta {{ font-size: 0.8em; color: #555; margin-top: 2px; display: block; }}
-            .user-name {{ font-weight: bold; font-size: 0.9em; margin-bottom: 3px; display: block;}}
-            pre {{ margin: 0; white-space: pre-wrap; word-wrap: break-word; font-family: sans-serif; font-size: 1em;}}
-        </style></head><body>
-
-        <div class="header-container">
-            <div class="header-info">
-                대상 요청: {req_type} (ID: {request_id}) | 요청시각: {requested_at}
-            </div>
-            <div class="dispute-original">
-                최초 이의 유형: {dispute_type}
-            </div>
-        </div>
-
-        <table class="chat-table">
-        """)
-
-        # ------------------ 메시지 내용 구성 (대화 파트) ------------------
-
-        for event in timeline_events:
-            who = event.get("who", "unknown")
-            username = event.get("username", "")
-            at = event.get("at", "") or ""
-            comment = event.get("comment", "")
-            status_code = event.get("status_code")
-
-            safe_comment = comment.replace('<', '&lt;').replace('>', '&gt;')
-
-            # 🚨 [수정] 멍청한 중복 제거 로직 삭제됨 🚨
-            # 예전 코드: if comment == dispute_comment_full: continue
-            # -> 이 부분이 "1번째 시발년"을 숨기고 있었음. 이제 무조건 다 보여줍니다.
-
-            # 메시지 내용이 비어있으면 건너뜀
-            if not safe_comment.strip():
-                continue
-
-            is_worker = (who == "worker")
-
-            # 내 화면(WorkerPage) 기준: 나는 오른쪽(worker-cell), 사장은 왼쪽(owner-cell)
-            cell_class = "worker-cell" if is_worker else "owner-cell"
-            bubble_class = "worker-bubble" if is_worker else "owner-bubble"
-
-            meta_info = f"<span class='meta'>{at}</span>"
-            if not is_worker and status_code:
-                status_label = DISPUTE_STATUS.get(status_code, status_code or "")
-                meta_info += f" | <span class='meta'>상태: {status_label}</span>"
-
-            message_html = f"""
-            <tr class="message-row">
-                <td class="{cell_class}">
-                    <div class="{bubble_class}">
-                        <span class="user-name">{username}</span>
-                        <pre>{safe_comment}</pre>
-                        {meta_info}
-                    </div>
-                </td>
-            </tr>
-            """
-
-            html_content.append(message_html)
-
-        # ------------------ UI 적용 ------------------
-        html_content.append("</table></body></html>")
-
-        dlg = QtWidgets.QDialog(self)
-        dlg.setWindowTitle(new_title)
-        dlg.resize(800, 600)
-
-        layout = QtWidgets.QVBoxLayout(dlg)
-
-        edit = QtWidgets.QTextBrowser()
-        edit.setHtml("".join(html_content))
-
-        btn = QtWidgets.QPushButton("닫기")
-        btn.clicked.connect(dlg.accept)
-
-        layout.addWidget(edit)
-        layout.addWidget(btn)
+        # 2. ★ 다이얼로그 호출 (깔끔해짐) ★
+        # 근로자 화면이므로 my_role="worker" (내가 오른쪽)
+        dlg = DisputeTimelineDialog(self, title, events, my_role="worker")
         dlg.exec_()

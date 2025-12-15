@@ -204,3 +204,112 @@ class RejectSignupDialog(QtWidgets.QDialog):
 
     def get_comment(self):
         return self.te_comment.toPlainText().strip()
+
+
+# (ui/dialogs.py 맨 아래에 추가)
+
+class DisputeTimelineDialog(QtWidgets.QDialog):
+    """
+    이의 제기 타임라인을 보여주는 전용 팝업창
+    - my_role: 'worker'이면 근로자(나)가 오른쪽, 'owner'이면 사업주(나)가 오른쪽
+    """
+
+    def __init__(self, parent=None, title="", timeline_events=None, my_role="worker"):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.resize(800, 600)
+
+        # ------------------ HTML 생성 로직 ------------------
+        html_content = []
+
+        # 스타일 정의 (공통)
+        html_content.append("""
+        <html><head><style>
+            body { font-family: sans-serif; margin: 0; padding: 10px; }
+            .header-info { 
+                background-color: #f0f0f0; padding: 10px; margin: 0 auto 15px auto;
+                border-radius: 5px; text-align: center; font-size: 1.0em; width: 85%;
+            }
+            .chat-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+            .message-row { display: table-row; }
+
+            /* 말풍선 스타일 */
+            .my-cell { text-align: right; }
+            .my-bubble { 
+                background-color: #dcf8c6; border-radius: 8px; 
+                padding: 8px 12px; display: inline-block; text-align: left; max-width: 85%;
+            }
+
+            .other-cell { text-align: left; }
+            .other-bubble { 
+                background-color: #e6e6e6; border-radius: 8px; 
+                padding: 8px 12px; display: inline-block; text-align: left; max-width: 85%;
+            }
+
+            .meta { font-size: 0.75em; color: #666; margin-top: 4px; display: block; }
+            .user-name { font-weight: bold; font-size: 0.9em; margin-bottom: 4px; display: block; }
+            pre { margin: 0; white-space: pre-wrap; word-wrap: break-word; font-family: sans-serif; font-size: 1em; }
+        </style></head><body>
+        """)
+
+        # 상단 헤더 정보 (옵션)
+        # (호출하는 쪽에서 title에 다 넣어서 보내거나 별도 파라미터로 받아도 됨)
+        # 여기서는 심플하게 구현
+
+        html_content.append('<table class="chat-table">')
+
+        if timeline_events:
+            from timeclock.settings import DISPUTE_STATUS  # 필요시 import
+
+            for event in timeline_events:
+                who = event.get("who", "unknown")  # 'worker' or 'owner'
+                username = event.get("username", "")
+                at = event.get("at", "") or ""
+                comment = event.get("comment", "") or ""
+                status_code = event.get("status_code")
+
+                # HTML 이스케이프
+                safe_comment = comment.replace('<', '&lt;').replace('>', '&gt;')
+                if not safe_comment.strip():
+                    continue
+
+                # ★ 핵심 로직: 내 역할(my_role)과 메시지 작성자(who)를 비교해서 좌우 결정
+                is_me = (who == my_role)
+
+                cell_class = "my-cell" if is_me else "other-cell"
+                bubble_class = "my-bubble" if is_me else "other-bubble"
+
+                # 메타 정보 (시간, 상태)
+                meta_info = f"<span class='meta'>{at}"
+                if status_code:  # 상태값이 있으면 표시 (검토중, 완료 등)
+                    # DISPUTE_STATUS 딕셔너리가 필요하면 import하거나 텍스트로 받음
+                    meta_info += f" | {status_code}"
+                meta_info += "</span>"
+
+                row_html = f"""
+                <tr class="message-row">
+                    <td class="{cell_class}">
+                        <div class="{bubble_class}">
+                            <span class="user-name">{username}</span>
+                            <pre>{safe_comment}</pre>
+                            {meta_info}
+                        </div>
+                    </td>
+                </tr>
+                <tr><td style="height: 10px;"></td></tr> """
+                html_content.append(row_html)
+
+        html_content.append("</table></body></html>")
+
+        # UI 구성
+        layout = QtWidgets.QVBoxLayout()
+        self.browser = QtWidgets.QTextBrowser()
+        self.browser.setHtml("".join(html_content))
+
+        self.btn_close = QtWidgets.QPushButton("닫기")
+        self.btn_close.clicked.connect(self.accept)
+
+        layout.addWidget(self.browser)
+        layout.addWidget(self.btn_close)
+        self.setLayout(layout)
+
