@@ -49,6 +49,7 @@ DISPUTE_STATUS = {
 }
 
 
+
 # 이의 처리 상태 선택용 (UI 표시 한글 / 저장은 코드)
 DISPUTE_STATUS_ITEMS = [
     ("IN_PROGRESS", "검토 중"),

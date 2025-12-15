@@ -159,6 +159,23 @@ class DB:
             """
         )
 
+        # --- dispute_messages 테이블(대화 히스토리) ---
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS dispute_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                dispute_id INTEGER NOT NULL,
+                sender_user_id INTEGER,
+                sender_role TEXT NOT NULL,         -- 'worker' / 'owner'
+                message TEXT,
+                status_code TEXT,                  -- 상태변경이면 저장(선택)
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (dispute_id) REFERENCES disputes(id)
+            )
+            """
+        )
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_dispute_messages_dispute_id ON dispute_messages(dispute_id)")
+
         # 🚨 audit_logs 테이블 생성 코드 추가
         cur.execute(
             """
@@ -397,14 +414,55 @@ class DB:
 
     # --- Disputes ---
     def create_dispute(self, request_id: int, user_id: int, dispute_type: str, comment: str):
-        self.conn.execute(
+        """
+        같은 request_id + user_id에 대해 미처리/검토(PENDING/IN_REVIEW) 이의가 있으면
+        새 disputes row를 만들지 않고 그 건에 comment를 '추가'한다.
+        (최소 변경: 메시지 테이블 없이도 동작하도록 comment에 누적)
+        """
+        comment = (comment or "").strip()
+        now = now_str()
+
+        # 1) 열려있는 이의 찾기(묶기)
+        row = self.conn.execute(
             """
-            INSERT INTO disputes (request_id, user_id, dispute_type, comment, created_at)
-            VALUES (?, ?, ?, ?, datetime('now','localtime'))
+            SELECT id, comment
+            FROM disputes
+            WHERE request_id=? AND user_id=?
+              AND status IN ('PENDING', 'IN_REVIEW')
+            ORDER BY id DESC
+            LIMIT 1
             """,
-            (request_id, user_id, dispute_type, comment),
+            (request_id, user_id),
+        ).fetchone()
+
+        if row:
+            dispute_id = int(row["id"])
+            prev = row["comment"] or ""
+            # 기존 comment에 누적(구분선)
+            merged = prev
+            if merged and comment:
+                merged += "\n\n" + ("-" * 30) + "\n" + comment
+            elif comment:
+                merged = comment
+
+            self.conn.execute(
+                "UPDATE disputes SET comment=? WHERE id=?",
+                (merged, dispute_id),
+            )
+            self.conn.commit()
+            return dispute_id
+
+        # 2) 없으면 새로 생성
+        cur = self.conn.execute(
+            """
+            INSERT INTO disputes(request_id, user_id, dispute_type, comment, created_at, status)
+            VALUES(?,?,?,?,?,?)
+            """,
+            (request_id, user_id, dispute_type, comment, now, "PENDING"),
         )
+        dispute_id = cur.lastrowid
         self.conn.commit()
+        return dispute_id
 
     def list_disputes(self, date_from: str, date_to: str, limit: int = 1000):
         date_from, date_to = normalize_date_range(date_from, date_to)
@@ -832,23 +890,38 @@ class DB:
         return True, ""
 
     def resolve_dispute(self, dispute_id: int, resolved_by_id: int, status_code: str, resolution_comment: str):
+        """
+        상태 변경 + 처리 코멘트 저장(최신값) + dispute_messages에 사업주 메시지로 누적.
+        """
         now = now_str()
+        resolution_comment = (resolution_comment or "").strip()
 
-        with self.conn:
-            cur = self.conn.execute(
-                """
-                UPDATE disputes
-                SET status=?,
-                    resolved_at=?,
-                    resolved_by=?,
-                    resolution_comment=?
-                WHERE id=? AND status NOT IN ('RESOLVED', 'REJECTED')
-                """,
-                (status_code, now, resolved_by_id, resolution_comment, dispute_id),
-            )
+        cur = self.conn.execute(
+            """
+            UPDATE disputes
+            SET status=?,
+                resolved_at=?,
+                resolved_by=?,
+                resolution_comment=?
+            WHERE id=?
+            """,
+            (status_code, now, resolved_by_id, resolution_comment, dispute_id),
+        )
 
-            if cur.rowcount == 0:
-                raise ValueError("해당 ID의 미처리 이의 제기를 찾을 수 없거나 이미 처리된 상태입니다.")
+        if cur.rowcount == 0:
+            self.conn.rollback()
+            raise ValueError("해당 이의ID를 찾을 수 없습니다.")
+
+        self.conn.commit()
+
+        # ✅ 히스토리 누적(사업주 메시지)
+        self.add_dispute_message(
+            dispute_id,
+            sender_user_id=resolved_by_id,
+            sender_role="owner",
+            message=resolution_comment,
+            status_code=status_code,
+        )
 
     def get_dispute_timeline(self, dispute_id: int):
         """
@@ -939,5 +1012,108 @@ class DB:
             """,
             (dispute_id,),
         ).fetchall()
+
+    def add_dispute_message(
+            self,
+            dispute_id: int,
+            *,
+            sender_user_id: int = None,
+            sender_role: str,
+            message: str = "",
+            status_code: str = None,
+    ):
+        self.conn.execute(
+            """
+            INSERT INTO dispute_messages(dispute_id, sender_user_id, sender_role, message, status_code, created_at)
+            VALUES(?,?,?,?,?,?)
+            """,
+            (dispute_id, sender_user_id, sender_role, (message or "").strip(), status_code, now_str()),
+        )
+        self.conn.commit()
+
+    def list_dispute_messages(self, dispute_id: int, limit: int = 2000):
+        return self.conn.execute(
+            """
+            SELECT id, dispute_id, sender_user_id, sender_role, message, status_code, created_at
+            FROM dispute_messages
+            WHERE dispute_id=?
+            ORDER BY id ASC
+            LIMIT ?
+            """,
+            (dispute_id, limit),
+        ).fetchall()
+
+    def get_open_dispute_id(self, request_id: int, user_id: int):
+        row = self.conn.execute(
+            """
+            SELECT id
+            FROM disputes
+            WHERE request_id=? AND user_id=?
+              AND status IN ('PENDING', 'IN_REVIEW')
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (request_id, user_id),
+        ).fetchone()
+        return int(row["id"]) if row else None
+
+    def list_disputes_open(self, limit: int = 2000):
+        # 기간 무관: 미처리/검토
+        return self.conn.execute(
+            """
+            SELECT d.id,
+                   u.username AS worker_username,
+                   d.request_id,
+                   r.req_type,
+                   r.requested_at,
+                   a.approved_at,
+                   d.dispute_type,
+                   d.comment,
+                   d.created_at,
+                   d.status,
+                   d.resolution_comment,
+                   d.resolved_at
+            FROM disputes d
+            JOIN users u ON u.id = d.user_id
+            JOIN requests r ON r.id = d.request_id
+            LEFT JOIN approvals a ON a.request_id = r.id
+            WHERE d.status IN ('PENDING','IN_REVIEW')
+            ORDER BY d.id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+
+    def list_disputes_closed(self, date_from: str, date_to: str, limit: int = 2000):
+        # 기간 지정: 기각/처리완료
+        date_from, date_to = normalize_date_range(date_from, date_to)
+        return self.conn.execute(
+            """
+            SELECT d.id,
+                   u.username AS worker_username,
+                   d.request_id,
+                   r.req_type,
+                   r.requested_at,
+                   a.approved_at,
+                   d.dispute_type,
+                   d.comment,
+                   d.created_at,
+                   d.status,
+                   d.resolution_comment,
+                   d.resolved_at
+            FROM disputes d
+            JOIN users u ON u.id = d.user_id
+            JOIN requests r ON r.id = d.request_id
+            LEFT JOIN approvals a ON a.request_id = r.id
+            WHERE d.status IN ('RESOLVED','REJECTED')
+              AND date(d.resolved_at) >= date(?)
+              AND date(d.resolved_at) <= date(?)
+            ORDER BY d.id DESC
+            LIMIT ?
+            """,
+            (date_from, date_to, limit),
+        ).fetchall()
+
+
 
 
