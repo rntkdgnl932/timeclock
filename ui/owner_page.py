@@ -735,11 +735,12 @@ class OwnerPage(QtWidgets.QWidget):
         requested_at = rr.get("requested_at", "N/A")
 
         dispute_type = rr.get("dispute_type", "N/A")
-        dispute_comment_full = rr.get("comment", "")
 
+        # 제목 설정
         new_title = f"{worker_username}의 이의 | 요청ID: {request_id} ({req_type} {requested_at})"
 
         # ------------------ CSS 스타일 정의 및 상단 정보 출력 ------------------
+        # 사업주 화면 기준: 근로자(상대방)=왼쪽, 사업주(나)=오른쪽
         html_content.append(f"""
         <html><head>
         <style>
@@ -765,7 +766,7 @@ class OwnerPage(QtWidgets.QWidget):
             .chat-table {{ width: 100%; border-collapse: collapse; table-layout: fixed; }}
             .message-row {{ margin-bottom: 10px; display: table-row; }}
 
-            /* WORKER: 왼쪽 정렬 */
+            /* WORKER: 왼쪽 정렬 (상대방) */
             .worker-cell {{ text-align: left; }}
             .worker-bubble {{ 
                 background-color: #e6e6e6; 
@@ -776,7 +777,7 @@ class OwnerPage(QtWidgets.QWidget):
                 text-align: left;
             }}
 
-            /* OWNER: 오른쪽 정렬 */
+            /* OWNER: 오른쪽 정렬 (나) */
             .owner-cell {{ text-align: right; }}
             .owner-bubble {{ 
                 background-color: #dcf8c6; 
@@ -815,34 +816,17 @@ class OwnerPage(QtWidgets.QWidget):
 
             safe_comment = comment.replace('<', '&lt;').replace('>', '&gt;')
 
-            # 중복 및 포맷 제거 로직 (DB 복구 방식과 일치하도록)
-            is_worker = (who == "worker")
-
-            if is_worker:
-                # 1. 중복 제거: DB에서 복구된 누적 원문과 완전히 일치하는 메시지는 건너뜁니다.
-                if comment == dispute_comment_full:
-                    continue
-
-                # 2. 포맷 제거: DB에서 복구된 누적 원문에서 '--- 추가 제기...' 섹션을 제거하고 순수 메시지만 출력
-                if '--- 추가 제기' in comment:
-                    # 파싱하여 순수 메시지만 남기기
-                    sections = comment.split('--- 추가 제기')
-                    last_section = sections[-1].strip()
-
-                    if '---' in last_section:
-                        safe_comment = last_section.split('---', 1)[-1].strip()
-                    elif '---' not in last_section:
-                        safe_comment = last_section.strip()
-
-                    if len(safe_comment) > 50 and safe_comment == dispute_comment_full:
-                        continue
+            # 🚨 [수정] 중복 제거 및 포맷 제거 로직 삭제함 🚨
+            # 이제 무조건 다 보여줍니다.
 
             # 메시지 내용이 비어있으면 건너뜀
             if not safe_comment.strip():
                 continue
 
-            cell_class = "owner-cell" if not is_worker else "worker-cell"
-            bubble_class = "owner-bubble" if not is_worker else "worker-bubble"
+            # 사업주 화면 기준: Worker=왼쪽, Owner=오른쪽
+            is_worker = (who == "worker")
+            cell_class = "worker-cell" if is_worker else "owner-cell"
+            bubble_class = "worker-bubble" if is_worker else "owner-bubble"
 
             meta_info = f"<span class='meta'>{at}</span>"
             if not is_worker and status_code:

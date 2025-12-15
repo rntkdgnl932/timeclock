@@ -365,7 +365,7 @@ class WorkerPage(QtWidgets.QWidget):
         requested_at = rr.get("requested_at", "N/A")
 
         dispute_type = rr.get("dispute_type", "N/A")
-        dispute_comment_full = rr.get("comment", "")
+        # dispute_comment_full = rr.get("comment", "") # 이제 비교에 사용 안 함
 
         new_title = f"내 이의 | 요청ID: {request_id} ({req_type} {requested_at})"
 
@@ -395,7 +395,7 @@ class WorkerPage(QtWidgets.QWidget):
             .chat-table {{ width: 100%; border-collapse: collapse; table-layout: fixed; }}
             .message-row {{ margin-bottom: 10px; display: table-row; }}
 
-            /* OWNER: 왼쪽 정렬 */
+            /* OWNER: 왼쪽 정렬 (카톡 스타일 - 상대방) */
             .owner-cell {{ text-align: left; }}
             .owner-bubble {{ 
                 background-color: #e6e6e6; 
@@ -406,7 +406,7 @@ class WorkerPage(QtWidgets.QWidget):
                 text-align: left;
             }}
 
-            /* WORKER: 오른쪽 정렬 */
+            /* WORKER: 오른쪽 정렬 (카톡 스타일 - 나) */
             .worker-cell {{ text-align: right; }}
             .worker-bubble {{ 
                 background-color: #dcf8c6; 
@@ -445,31 +445,17 @@ class WorkerPage(QtWidgets.QWidget):
 
             safe_comment = comment.replace('<', '&lt;').replace('>', '&gt;')
 
-            # 중복 및 포맷 제거 로직
-            is_worker = (who == "worker")
-
-            if is_worker:
-                # 1. 중복 제거: DB에서 복구된 누적 원문과 완전히 일치하는 메시지는 건너뜁니다.
-                if comment == dispute_comment_full:
-                    continue
-
-                # 2. 포맷 제거: DB에서 복구된 누적 원문에서 '--- 추가 제기...' 섹션을 제거하고 순수 메시지만 출력
-                if '--- 추가 제기' in comment:
-                    sections = comment.split('--- 추가 제기')
-                    last_section = sections[-1].strip()
-
-                    if '---' in last_section:
-                        safe_comment = last_section.split('---', 1)[-1].strip()
-                    elif '---' not in last_section:
-                        safe_comment = last_section.strip()
-
-                    if len(safe_comment) > 50 and safe_comment == dispute_comment_full:
-                        continue
+            # 🚨 [수정] 멍청한 중복 제거 로직 삭제됨 🚨
+            # 예전 코드: if comment == dispute_comment_full: continue
+            # -> 이 부분이 "1번째 시발년"을 숨기고 있었음. 이제 무조건 다 보여줍니다.
 
             # 메시지 내용이 비어있으면 건너뜀
             if not safe_comment.strip():
                 continue
 
+            is_worker = (who == "worker")
+
+            # 내 화면(WorkerPage) 기준: 나는 오른쪽(worker-cell), 사장은 왼쪽(owner-cell)
             cell_class = "worker-cell" if is_worker else "owner-cell"
             bubble_class = "worker-bubble" if is_worker else "owner-bubble"
 
