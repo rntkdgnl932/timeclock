@@ -359,36 +359,60 @@ class WorkerPage(QtWidgets.QWidget):
 
         html_content = []
 
-        # ------------------ CSS 스타일 정의 (float 기반, Worker가 오른쪽) ------------------
-        html_content.append("""
+        # ------------------ 요청 정보 추출 및 제목 변경 ------------------
+        worker_username = self.session.username  # 근로자 이름은 세션에서 가져옴
+        request_id = rr.get("request_id", "N/A")
+        req_type = REQ_TYPES.get(rr.get("req_type"), rr.get("req_type", "N/A"))
+        requested_at = rr.get("requested_at", "N/A")
+
+        new_title = f"내 이의 | 요청ID: {request_id} ({req_type} {requested_at})"
+
+        # ------------------ CSS 스타일 정의 및 요청 정보 출력 ------------------
+        html_content.append(f"""
         <html><head>
         <style>
-            .chat-area { padding: 10px; }
-            .message-row { clear: both; margin-bottom: 10px; overflow: hidden; /* float 컨테이너 */ }
+            body {{ font-family: sans-serif; margin: 0; padding: 10px; }}
+            .header-info {{ 
+                background-color: #f0f0f0; 
+                padding: 10px; 
+                margin-bottom: 15px;
+                border-radius: 5px;
+                font-size: 1.1em;
+                font-weight: bold;
+            }}
+            .chat-table {{ width: 100%; border-collapse: collapse; table-layout: fixed; }}
+            .message-row {{ margin-bottom: 10px; display: table-row; }}
 
-            .bubble { 
+            /* OWNER: 왼쪽 정렬 */
+            .owner-cell {{ text-align: left; }}
+            .owner-bubble {{ 
+                background-color: #e6e6e6; /* 왼쪽, 회색 */
                 border-radius: 8px; 
                 padding: 8px 12px; 
-                max-width: 65%;
-                word-wrap: break-word;
-                float: left; /* 기본 왼쪽 정렬 */
-                box-shadow: 1px 1px 2px rgba(0,0,0,0.1);
-            }
-            /* OWNER: 왼쪽 정렬 및 색상 (근로자 화면 기준) */
-            .owner-bubble { 
-                float: left; 
-                background-color: #e6e6e6; 
-            }
-            /* WORKER: 오른쪽 정렬 및 색상 (근로자 화면 기준) */
-            .worker-bubble { 
-                float: right; 
-                background-color: #dcf8c6; 
-            }
+                max-width: 90%;
+                display: inline-block;
+            }}
 
-            .meta { font-size: 0.8em; color: #555; margin-top: 5px; display: block; }
-            .user-name { font-weight: bold; font-size: 0.9em; margin-bottom: 3px; display: block;}
-            pre { margin: 0; white-space: pre-wrap; font-family: sans-serif; font-size: 1em;}
-        </style></head><body><div class="chat-area">
+            /* WORKER: 오른쪽 정렬 */
+            .worker-cell {{ text-align: right; }}
+            .worker-bubble {{ 
+                background-color: #dcf8c6; /* 오른쪽, 초록 */
+                border-radius: 8px; 
+                padding: 8px 12px; 
+                max-width: 90%;
+                display: inline-block;
+            }}
+
+            .meta {{ font-size: 0.8em; color: #555; margin-top: 2px; display: block; }}
+            .user-name {{ font-weight: bold; font-size: 0.9em; margin-bottom: 3px; display: block;}}
+            pre {{ margin: 0; white-space: pre-wrap; word-wrap: break-word; font-family: sans-serif; font-size: 1em;}}
+        </style></head><body>
+
+        <div class="header-info">
+            대상 요청: {req_type} (ID: {request_id}) | 요청시각: {requested_at}
+        </div>
+
+        <table class="chat-table">
         """)
 
         # ------------------ 메시지 내용 구성 ------------------
@@ -403,30 +427,33 @@ class WorkerPage(QtWidgets.QWidget):
             safe_comment = comment.replace('<', '&lt;').replace('>', '&gt;')
 
             is_worker = (who == "worker")
+            cell_class = "worker-cell" if is_worker else "owner-cell"
             bubble_class = "worker-bubble" if is_worker else "owner-bubble"
 
             meta_info = f"<span class='meta'>{at}</span>"
-            if not is_worker and status_code:  # 사업주 메시지일 때만 상태 표시
+            if not is_worker and status_code:
                 status_label = DISPUTE_STATUS.get(status_code, status_code or "")
                 meta_info += f" | <span class='meta'>상태: {status_label}</span>"
 
             message_html = f"""
-            <div class="message-row">
-                <div class="{bubble_class}">
-                    <span class="user-name">{username}</span>
-                    <pre>{safe_comment}</pre>
-                    {meta_info}
-                </div>
-            </div>
+            <tr class="message-row">
+                <td class="{cell_class}">
+                    <div class="{bubble_class}">
+                        <span class="user-name">{username}</span>
+                        <pre>{safe_comment}</pre>
+                        {meta_info}
+                    </div>
+                </td>
+            </tr>
             """
 
             html_content.append(message_html)
 
         # ------------------ UI 적용 ------------------
-        html_content.append("</div></body></html>")
+        html_content.append("</table></body></html>")
 
         dlg = QtWidgets.QDialog(self)
-        dlg.setWindowTitle("이의 내용/처리 타임라인")
+        dlg.setWindowTitle(new_title)  # ✅ 제목 업데이트
         dlg.resize(800, 600)
 
         layout = QtWidgets.QVBoxLayout(dlg)

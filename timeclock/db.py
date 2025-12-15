@@ -413,17 +413,16 @@ class DB:
             raise Exception(f"요청 승인 중 치명적인 DB 오류가 발생했습니다: {e}")
 
     # --- Disputes ---
-    # timeclock/db.py
 
     def create_dispute(self, request_id: int, user_id: int, dispute_type: str, comment: str):
         """
-        [최종 수정] 같은 request_id + user_id에 대해 '가장 최근에 생성된' 이의를 찾아 누적합니다.
-        (처리 완료 여부와 관계없이 누적하며, 상태를 PENDING으로 되돌립니다.)
-
-        *재이의 시: disputes.comment에 누적하는 대신, dispute_messages에 Worker 메시지로 저장하여 타임라인 순서 문제를 해결*
+        [최종 확정] 같은 request_id + user_id에 대해 가장 최근의 이의를 찾아 누적하고,
+        메시지 중복을 피하기 위해 disputes.comment 사용을 최소화합니다.
         """
         comment = (comment or "").strip()
         now = now_str()
+        # messages 테이블에 저장할 메시지 내용
+        message_content = f"[이의 유형: {dispute_type}]\n{comment}"
 
         # 1) '처리 상태와 무관하게' 같은 요청ID에 대한 가장 최근의 이의를 찾습니다.
         row = self.conn.execute(
@@ -439,29 +438,38 @@ class DB:
 
         if row:
             dispute_id = int(row["id"])
+            prev = row["comment"] or ""
 
-            # ✅ 수정: 기존 disputes.comment에 누적하는 대신, dispute_messages에 Worker 메시지로 추가
-            self.add_dispute_message(
-                dispute_id,
-                sender_user_id=user_id,
-                sender_role="worker",
-                message=f"[이의 유형: {dispute_type}]\n{comment}",
-                status_code=None,
+            # 1-1) disputes.comment에 누적 (UI 출력용이 아닌, 기존 로직과의 호환성 유지용)
+            new_entry_comment = (
+                f"\n\n{'=' * 30} [추가 제기: {now}] {'=' * 30}\n"
+                f"{message_content}"
             )
+            merged_comment = prev + new_entry_comment if prev else new_entry_comment
 
             # 1-2) disputes Row의 상태 업데이트 (PENDING으로 초기화)
             self.conn.execute(
                 """
                 UPDATE disputes SET 
+                    comment=?,             -- ✅ comment 필드에 누적
                     dispute_type=?,  
-                    status='PENDING',  -- 상태를 PENDING으로 강제 초기화 (사업주 재검토 유도)
+                    status='PENDING',      -- 상태를 PENDING으로 강제 초기화
                     resolved_at=NULL,
                     resolution_comment=NULL
                 WHERE id=?
                 """,
-                (dispute_type, dispute_id),
+                (merged_comment, dispute_type, dispute_id),
             )
             self.conn.commit()
+
+            # ✅ 수정: message_content를 dispute_messages에 한 번만 추가 (중복 해결)
+            self.add_dispute_message(
+                dispute_id,
+                sender_user_id=user_id,
+                sender_role="worker",
+                message=message_content,
+                status_code=None,
+            )
             return dispute_id
 
         # 2) 없으면 새로 생성 (최초 제기)
@@ -475,12 +483,12 @@ class DB:
         dispute_id = cur.lastrowid
         self.conn.commit()
 
-        # 2-1) disputes_messages에 최초 이의 제기 사실도 기록합니다. (모든 이력은 이 테이블로 통일)
+        # ✅ 수정: disputes_messages에 최초 이의 제기 사실도 기록합니다. (중복 해결)
         self.add_dispute_message(
             dispute_id,
             sender_user_id=user_id,
             sender_role="worker",
-            message=f"[이의 유형: {dispute_type}]\n{comment}",
+            message=message_content,
             status_code=None,
         )
 
@@ -972,12 +980,14 @@ class DB:
             status_code=status_code,
         )
 
+
     def get_dispute_timeline(self, dispute_id: int):
         """
         [최종 복구/수정] disputes(최초 원문/누적)와 dispute_messages(사업주 메시지)를 합쳐서 시간 순서대로 반환합니다.
+        - 중복되는 최초 Worker 메시지를 건너뜁니다.
         """
 
-        # 1) disputes에서 근로자 원문/등록시각 (최초 이벤트)
+        # 1) disputes에서 근로자 원문/등록시각 (최초 이벤트이자 누적된 히스토리)
         base = self.conn.execute(
             """
             SELECT d.id,
@@ -997,8 +1007,7 @@ class DB:
 
         events = []
 
-        # A. 근로자 최초 이의 (disputes.comment 전체)를 첫 번째 이벤트로 추가
-        # NOTE: comment 필드에 모든 누적 이력이 포함되어 있으므로, 이 필드를 worker 메시지로 사용.
+        # A. 근로자 최초 이의 (disputes.comment 전체)를 첫 번째 이벤트로 추가 (기존 히스토리 보존)
         events.append({
             "who": "worker",
             "username": base["worker_username"],
@@ -1010,7 +1019,6 @@ class DB:
         })
 
         # 2) dispute_messages에서 모든 메시지/처리 이력 가져오기
-        # NOTE: 이 테이블에는 사업주 메시지와 근로자의 '재이의'가 시간 순서대로 저장되어 있음
         messages = self.conn.execute(
             """
             SELECT m.created_at,
@@ -1026,7 +1034,13 @@ class DB:
             (dispute_id,),
         ).fetchall()
 
-        for row in messages:
+        # ✅ 수정: 첫 번째 메시지가 근로자의 최초 이의 제기인 경우 건너뛰어 중복을 방지합니다.
+        # (첫 번째 메시지는 항상 worker의 최초 이의 제기입니다.)
+        for i, row in enumerate(messages):
+            # 첫 번째 메시지이고 sender_role이 worker인 경우 (최초 이의제기 중복) 건너뜁니다.
+            if i == 0 and row["sender_role"] == "worker":
+                continue
+
             events.append({
                 "who": row["sender_role"],
                 "username": row["sender_username"] or "System",
@@ -1037,9 +1051,8 @@ class DB:
                 "sort_key": row["created_at"]
             })
 
-        # NOTE: 시간순 정렬은 UI에서 수행하거나, DB 쿼리 순서에 의존합니다.
-        # 현재 events는 [disputes 원문, messages 1, messages 2, ...] 순서입니다.
-        # UI에서 HTML 블록을 순서대로 출력하면 됩니다.
+        # 시간 순서대로 정렬 (SQLite 날짜 포맷은 텍스트 정렬이 시간 정렬과 동일)
+        events.sort(key=lambda x: x['sort_key'])
 
         return events
 
