@@ -735,7 +735,7 @@ class OwnerPage(QtWidgets.QWidget):
         requested_at = rr.get("requested_at", "N/A")
 
         dispute_type = rr.get("dispute_type", "N/A")
-        dispute_comment_full = rr.get("comment", "")  # disputes 테이블에 누적된 원문 전체
+        dispute_comment_full = rr.get("comment", "")
 
         new_title = f"{worker_username}의 이의 | 요청ID: {request_id} ({req_type} {requested_at})"
 
@@ -748,19 +748,19 @@ class OwnerPage(QtWidgets.QWidget):
             .header-info {{ 
                 background-color: #f0f0f0; 
                 padding: 10px; 
-                margin: 0 auto 5px auto; /* 중앙 정렬 */
+                margin: 0 auto 5px auto;
                 border-radius: 5px;
                 font-size: 1.0em;
-                width: 80%; /* 중앙 정렬을 위해 너비 제한 */
+                width: 80%;
             }}
             .dispute-original {{ 
                 background-color: #ffffe0; 
                 border: 1px solid #e0e0e0;
                 padding: 10px; 
-                margin: 0 auto; /* 중앙 정렬 */
+                margin: 0 auto;
                 border-radius: 5px;
                 font-size: 0.9em;
-                width: 80%; /* 중앙 정렬을 위해 너비 제한 */
+                width: 80%;
             }}
             .chat-table {{ width: 100%; border-collapse: collapse; table-layout: fixed; }}
             .message-row {{ margin-bottom: 10px; display: table-row; }}
@@ -768,21 +768,23 @@ class OwnerPage(QtWidgets.QWidget):
             /* WORKER: 왼쪽 정렬 */
             .worker-cell {{ text-align: left; }}
             .worker-bubble {{ 
-                background-color: #e6e6e6; /* 왼쪽, 회색 */
+                background-color: #e6e6e6; 
                 border-radius: 8px; 
                 padding: 8px 12px; 
                 max-width: 90%;
                 display: inline-block;
+                text-align: left;
             }}
 
             /* OWNER: 오른쪽 정렬 */
             .owner-cell {{ text-align: right; }}
             .owner-bubble {{ 
-                background-color: #dcf8c6; /* 오른쪽, 초록 */
+                background-color: #dcf8c6; 
                 border-radius: 8px; 
                 padding: 8px 12px; 
                 max-width: 90%;
                 display: inline-block;
+                text-align: left;
             }}
 
             .meta {{ font-size: 0.8em; color: #555; margin-top: 2px; display: block; }}
@@ -813,28 +815,37 @@ class OwnerPage(QtWidgets.QWidget):
 
             safe_comment = comment.replace('<', '&lt;').replace('>', '&gt;')
 
-            # ✅ 수정: 중복 및 포맷 제거 로직
-            if event["who"] == "worker":
-                # 1. 중복 제거: 마이그레이션된 최초 메시지 (dispute_comment_full)와 완전히 일치하는 메시지 건너뛰기
+            # 중복 및 포맷 제거 로직 (DB 복구 방식과 일치하도록)
+            is_worker = (who == "worker")
+
+            if is_worker:
+                # 1. 중복 제거: DB에서 복구된 누적 원문과 완전히 일치하는 메시지는 건너뜁니다.
                 if comment == dispute_comment_full:
                     continue
 
-                # 2. 포맷 제거: 재이의 시 붙는 '[이의 유형:...' 포맷 제거
-                if comment.startswith('[이의 유형:'):
-                    lines = comment.split('\n', 1)
-                    safe_comment = lines[1] if len(lines) > 1 else lines[0]
-                    safe_comment = safe_comment.replace('<', '&lt;').replace('>', '&gt;')
+                # 2. 포맷 제거: DB에서 복구된 누적 원문에서 '--- 추가 제기...' 섹션을 제거하고 순수 메시지만 출력
+                if '--- 추가 제기' in comment:
+                    # 파싱하여 순수 메시지만 남기기
+                    sections = comment.split('--- 추가 제기')
+                    last_section = sections[-1].strip()
 
-            # 메시지 내용이 비어있으면 건너김
+                    if '---' in last_section:
+                        safe_comment = last_section.split('---', 1)[-1].strip()
+                    elif '---' not in last_section:
+                        safe_comment = last_section.strip()
+
+                    if len(safe_comment) > 50 and safe_comment == dispute_comment_full:
+                        continue
+
+            # 메시지 내용이 비어있으면 건너뜀
             if not safe_comment.strip():
                 continue
 
-            is_owner = (who == "owner")
-            cell_class = "owner-cell" if is_owner else "worker-cell"
-            bubble_class = "owner-bubble" if is_owner else "worker-bubble"
+            cell_class = "owner-cell" if not is_worker else "worker-cell"
+            bubble_class = "owner-bubble" if not is_worker else "worker-bubble"
 
             meta_info = f"<span class='meta'>{at}</span>"
-            if is_owner and status_code:
+            if not is_worker and status_code:
                 status_label = DISPUTE_STATUS.get(status_code, status_code or "")
                 meta_info += f" | <span class='meta'>상태: {status_label}</span>"
 

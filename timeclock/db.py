@@ -26,7 +26,6 @@ class DB:
         self.conn.commit()
 
         self._migrate()
-        self._migrate_dispute_comments_to_messages()  # ✅ 마이그레이션 함수를 _migrate 이후에 호출
         self._ensure_indexes()
         self._ensure_defaults()
 
@@ -52,7 +51,6 @@ class DB:
                 cur.execute(f"ALTER TABLE {table} ADD COLUMN {column_name} {column_def}")
 
         # --- users 테이블 생성/마이그레이션 (STEP 4/5 필수) ---
-        # 🚨🚨🚨 수정: PRIMARY 키워드 중복 제거 🚨🚨🚨
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS users (
@@ -158,11 +156,10 @@ class DB:
         )
 
         # --- dispute_messages 테이블(대화 히스토리) ---
-        # 🚨🚨🚨 수정: 기존 테이블 삭제 후 재생성하여 스키마 충돌 (thread_id 등) 해결 🚨🚨🚨
-        cur.execute("DROP TABLE IF EXISTS dispute_messages")
+        # 🚨 [수정 완료] DROP TABLE 구문을 삭제하고, IF NOT EXISTS로 변경함
         cur.execute(
             """
-            CREATE TABLE dispute_messages (
+            CREATE TABLE IF NOT EXISTS dispute_messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 dispute_id INTEGER NOT NULL,
                 sender_user_id INTEGER,
@@ -174,7 +171,6 @@ class DB:
             )
             """
         )
-        # 이제 ALTER TABLE은 필요 없음
 
         cur.execute("CREATE INDEX IF NOT EXISTS idx_dispute_messages_dispute_id ON dispute_messages(dispute_id)")
 
@@ -868,18 +864,50 @@ class DB:
 
     def resolve_dispute(self, dispute_id: int, resolved_by_id: int, status_code: str, resolution_comment: str):
         """
-        상태 변경 + 처리 코멘트 저장(최신값) + dispute_messages에 사업주 메시지로 누적.
+        [수정됨] 상태 변경 + 처리 코멘트 저장.
+        기존 resolution_comment가 있다면 덮어쓰기 전에 dispute_messages로 백업합니다.
         """
         now = now_str()
         resolution_comment = (resolution_comment or "").strip()
 
+        # [1] 🚨 업데이트 전, 기존 데이터 백업 (중요)
+        current_row = self.conn.execute(
+            "SELECT resolution_comment, resolved_by, status FROM disputes WHERE id=?",
+            (dispute_id,)
+        ).fetchone()
+
+        if current_row:
+            old_comment = (current_row["resolution_comment"] or "").strip()
+            # 기존 코멘트가 존재하고, 이번에 입력하는 내용과 다르면 백업 시도
+            if old_comment and old_comment != resolution_comment:
+                # 이미 히스토리에 똑같은 내용이 있는지 확인 (중복 방지)
+                exists = self.conn.execute(
+                    "SELECT 1 FROM dispute_messages WHERE dispute_id=? AND message=? AND sender_role='owner'",
+                    (dispute_id, old_comment)
+                ).fetchone()
+
+                if not exists:
+                    # 히스토리에 없으면 강제 저장 (백업)
+                    # 처리자 정보가 없으면 현재 처리자로 대체
+                    old_actor = current_row["resolved_by"] or resolved_by_id
+                    old_status = current_row["status"]
+
+                    self.add_dispute_message(
+                        dispute_id,
+                        sender_user_id=old_actor,
+                        sender_role="owner",
+                        message=old_comment,
+                        status_code=old_status
+                    )
+
+        # [2] disputes 테이블 업데이트 (최신 상태로 덮어쓰기)
         cur = self.conn.execute(
             """
             UPDATE disputes
             SET status=?,
                 resolved_at=?,
                 resolved_by=?,
-                resolution_comment=? -- 최신 처리 코멘트로 덮어씀 (목록 화면에 보임)
+                resolution_comment=? -- 목록 화면에 보일 최신 코멘트
             WHERE id=?
             """,
             (status_code, now, resolved_by_id, resolution_comment, dispute_id),
@@ -891,8 +919,7 @@ class DB:
 
         self.conn.commit()
 
-        # ✅ 히스토리 누적: resolution_comment는 disputes 테이블에 덮어쓰지만,
-        # dispute_messages에는 아래 함수를 통해 누적됩니다.
+        # [3] 이번에 작성한 코멘트도 히스토리(dispute_messages)에 누적
         self.add_dispute_message(
             dispute_id,
             sender_user_id=resolved_by_id,
@@ -903,105 +930,214 @@ class DB:
 
     #
 
-
     def get_dispute_timeline(self, dispute_id: int):
         """
-        [최종 확정] dispute_messages 테이블의 모든 메시지(근로자/사업주)를 시간순으로 반환합니다.
-        - disputes.comment (누적 원문)는 UI 상단 고정 영역에만 사용되므로, 대화 이벤트 목록에서는 제외합니다.
+        [수정됨] request_id 기준 모든 대화 내역 조회.
+        중복 제거 로직을 완화하여 모든 대화(개새끼, 십새끼 등)가 순서대로 나오게 함.
         """
+        # 1. request_id 역추적
+        req_row = self.conn.execute("SELECT request_id FROM disputes WHERE id=?", (dispute_id,)).fetchone()
+        if not req_row:
+            return []
 
-        # disputes 테이블 조회는 UI의 상단 고정 영역을 위해 이미 list_disputes에서 수행됨.
-        # 대화 이벤트 목록은 오직 dispute_messages만 사용합니다.
-        messages = self.conn.execute(
+        target_req_id = req_row["request_id"]
+        events = []
+
+        # 중복 방지용 집합: (sender_role, message_content) 튜플을 저장
+        seen = set()
+
+        # =========================================================
+        # [A] dispute_messages 테이블 (최신 채팅 데이터 - 확실한 기록)
+        # =========================================================
+        msgs = self.conn.execute(
             """
-            SELECT m.created_at,
-                   m.sender_role,
-                   m.message,
-                   m.status_code,
+            SELECT m.created_at, m.sender_role, m.message, m.status_code,
                    u.username AS sender_username
             FROM dispute_messages m
             LEFT JOIN users u ON u.id = m.sender_user_id
-            WHERE m.dispute_id = ?
+            WHERE m.dispute_id IN (SELECT id FROM disputes WHERE request_id=?)
             ORDER BY m.id ASC
             """,
-            (dispute_id,),
+            (target_req_id,)
         ).fetchall()
 
-        events = []
-        for row in messages:
+        for row in msgs:
+            txt = (row["message"] or "").strip()
+            if not txt: continue
+
+            role = row["sender_role"]
+
+            # 메시지 테이블에 있는 건 무조건 보여줍니다.
+            # 단, 완전히 동일한 데이터가 중복 insert 되었을 경우를 대비해 seen 체크
+            if (role, txt) in seen:
+                continue
+
             events.append({
-                "who": row["sender_role"],
-                "username": row["sender_username"] or "System",
+                "who": role,
+                "username": row["sender_username"] or ("Owner" if role == "owner" else "Worker"),
                 "at": row["created_at"],
                 "status_code": row["status_code"],
-                "status_label": None,
-                "comment": (row["message"] or "").strip(),
+                "comment": txt,
                 "sort_key": row["created_at"]
             })
+            seen.add((role, txt))
 
-        # 시간 순서대로 정렬 (id ASC로 이미 정렬됨)
+        # =========================================================
+        # [B] disputes 테이블 (과거 데이터 / 현재 최신 상태 값)
+        # =========================================================
+        legacy_rows = self.conn.execute(
+            """
+            SELECT d.comment AS worker_comment, d.created_at, 
+                   d.resolution_comment, d.resolved_at, d.resolved_by,
+                   u.username as worker_name
+            FROM disputes d
+            JOIN users u ON u.id = d.user_id
+            WHERE d.request_id = ?
+            ORDER BY d.id ASC
+            """,
+            (target_req_id,)
+        ).fetchall()
+
+        for row in legacy_rows:
+            # 1. 근로자 텍스트 파싱
+            w_comment = (row["worker_comment"] or "").strip()
+            if w_comment:
+                # '--- 추가 제기' 구분자로 나뉘어 있는 경우 분리
+                sections = w_comment.split('--- 추가 제기')
+
+                # 기본 작성 시간
+                base_time = row["created_at"]
+
+                for i, section in enumerate(sections):
+                    content = section
+                    time_val = base_time
+
+                    # 파싱 로직 (시간, 내용 분리 시도)
+                    if i > 0 and '\n내용:\n' in section:
+                        parts = section.split('\n내용:\n', 1)
+                        if len(parts) > 1:
+                            content = parts[1].strip()
+                            # 시간 추출 시도 [YYYY-MM-DD...]
+                            if '[' in parts[0] and ']' in parts[0]:
+                                try:
+                                    time_val = parts[0].split('[')[1].split(']')[0]
+                                except:
+                                    pass
+
+                    content = content.strip()
+                    if not content: continue
+
+                    # 🚨 중복 체크: 이미 메시지 테이블(A)에서 가져온 내용이면 건너뜀
+                    if ('worker', content) in seen:
+                        continue
+
+                    events.append({
+                        "who": "worker",
+                        "username": row["worker_name"],
+                        "at": time_val,
+                        "status_code": None,
+                        "comment": content,
+                        "sort_key": time_val
+                    })
+                    seen.add(('worker', content))
+
+            # 2. 사업주 답변 (resolution_comment)
+            o_comment = (row["resolution_comment"] or "").strip()
+            if o_comment:
+                # 🚨 중복 체크: 이미 메시지 테이블(A)에서 가져온 내용이면 건너뜀
+                if ('owner', o_comment) in seen:
+                    continue
+
+                # 사업주 이름 조회
+                o_name = "Owner"
+                if row["resolved_by"]:
+                    u_row = self.conn.execute("SELECT username FROM users WHERE id=?", (row["resolved_by"],)).fetchone()
+                    if u_row: o_name = u_row["username"]
+
+                o_time = row["resolved_at"] or row["created_at"]
+
+                events.append({
+                    "who": "owner",
+                    "username": o_name,
+                    "at": o_time,
+                    "status_code": None,  # 상태 표시는 필요하면 추가
+                    "comment": o_comment,
+                    "sort_key": o_time
+                })
+                seen.add(('owner', o_comment))
+
+        # 시간순 정렬 후 반환
+        events.sort(key=lambda x: x['sort_key'])
         return events
 
     # --- Disputes ---
 
-
     def create_dispute(self, request_id: int, user_id: int, dispute_type: str, comment: str):
         """
-        [최종 확정] 같은 request_id + user_id에 대해 가장 최근의 이의를 찾아 누적하고,
-        메시지에 '추가 제기' 포맷을 넣지 않습니다.
+        [최종 수정] 근로자 이의 제기 시:
+        1. 기존 사업주 답변이 있다면 dispute_messages 테이블로 즉시 백업합니다.
+        2. disputes 테이블의 resolution_comment는 절대 지우지 않습니다.
+        3. 새 메시지는 dispute_messages에 저장합니다.
         """
         comment = (comment or "").strip()
         now = now_str()
-        # messages 테이블에 저장할 내용 (추가 제기 포맷 없음)
-        message_content = f"[이의 유형: {dispute_type}]\n{comment}"
 
-        # 1) '처리 상태와 무관하게' 같은 요청ID에 대한 가장 최근의 이의를 찾습니다.
+        # 최신 이의 제기 건 조회
         row = self.conn.execute(
-            """
-            SELECT id, comment
-            FROM disputes
-            WHERE request_id=? AND user_id=?
-            ORDER BY id DESC
-            LIMIT 1
-            """,
+            "SELECT * FROM disputes WHERE request_id=? AND user_id=? ORDER BY id DESC LIMIT 1",
             (request_id, user_id),
         ).fetchone()
 
         if row:
             dispute_id = int(row["id"])
-            prev = row["comment"] or ""
 
-            # 1-1) disputes.comment에 누적 (UI 상단 고정 영역의 '누적 내용'에 사용됨)
-            # ✅ 수정: 누적 포맷을 간결하게 변경 (UI에서 사용하지 않으므로 덜 중요함)
-            new_entry_comment = f"\n\n--- 추가 제기 [{now}] ---\n{message_content}"
-            merged_comment = prev + new_entry_comment if prev else message_content
+            # [1] 기존 사업주 답변 백업 (메시지 테이블에 없으면 추가)
+            old_res = (row["resolution_comment"] or "").strip()
+            if old_res:
+                exists = self.conn.execute(
+                    "SELECT 1 FROM dispute_messages WHERE dispute_id=? AND message=? AND sender_role='owner'",
+                    (dispute_id, old_res)
+                ).fetchone()
 
-            # 1-2) disputes Row의 상태 업데이트
+                if not exists:
+                    self.add_dispute_message(
+                        dispute_id,
+                        sender_user_id=row["resolved_by"],
+                        sender_role="owner",
+                        message=old_res,
+                        status_code=row["status"]
+                    )
+
+            # [2] disputes 테이블 업데이트 (resolution_comment 삭제 안함!)
+            # 근로자 텍스트 누적(Legacy 유지)
+            old_comment = row["comment"] or ""
+            new_legacy_text = old_comment + f"\n\n--- 추가 제기 [{now}] ---\n{comment}"
+
             self.conn.execute(
                 """
                 UPDATE disputes SET 
-                    comment=?,             
-                    dispute_type=?,  
-                    status='PENDING',      
-                    resolved_at=NULL,
-                    resolution_comment=NULL
+                    comment=?,
+                    dispute_type=?,
+                    status='PENDING'
+                    -- resolved_at, resolution_comment 건드리지 않음 (보존)
                 WHERE id=?
                 """,
-                (merged_comment, dispute_type, dispute_id),
+                (new_legacy_text, dispute_type, dispute_id)
             )
-            self.conn.commit()
 
-            # ✅ dispute_messages에 순수한 메시지 내용만 추가
+            # [3] 새 메시지 저장
             self.add_dispute_message(
                 dispute_id,
                 sender_user_id=user_id,
                 sender_role="worker",
-                message=message_content,
-                status_code=None,
+                message=comment,
+                status_code=None
             )
+
+            self.conn.commit()
             return dispute_id
 
-        # 2) 없으면 새로 생성 (최초 제기)
+        # --- 신규 생성 (최초) ---
         cur = self.conn.execute(
             """
             INSERT INTO disputes(request_id, user_id, dispute_type, comment, created_at, status)
@@ -1010,17 +1146,16 @@ class DB:
             (request_id, user_id, dispute_type, comment, now, "PENDING"),
         )
         dispute_id = cur.lastrowid
-        self.conn.commit()
 
-        # ✅ disputes_messages에 최초 메시지 기록
         self.add_dispute_message(
             dispute_id,
             sender_user_id=user_id,
             sender_role="worker",
-            message=message_content,
-            status_code=None,
+            message=comment,
+            status_code=None
         )
 
+        self.conn.commit()
         return dispute_id
 
     # timeclock/db.py (DB 클래스 내부)
