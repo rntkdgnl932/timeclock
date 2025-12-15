@@ -1074,10 +1074,10 @@ class DB:
 
     def create_dispute(self, request_id: int, user_id: int, dispute_type: str, comment: str):
         """
-        [최종 수정] 근로자 이의 제기 시:
-        1. 기존 사업주 답변이 있다면 dispute_messages 테이블로 즉시 백업합니다.
-        2. disputes 테이블의 resolution_comment는 절대 지우지 않습니다.
-        3. 새 메시지는 dispute_messages에 저장합니다.
+        [수정됨] 근로자 이의 제기 저장 로직
+        ★중요 수정★: disputes 테이블의 comment 컬럼에 텍스트를 이어붙이는(Append) 레거시 로직을 제거했습니다.
+        이제 disputes.comment는 '최초 원문'만 유지하고,
+        추가 대화는 오직 dispute_messages 테이블에만 저장하여 중복 표시 및 시간 오류를 방지합니다.
         """
         comment = (comment or "").strip()
         now = now_str()
@@ -1108,24 +1108,22 @@ class DB:
                         status_code=row["status"]
                     )
 
-            # [2] disputes 테이블 업데이트 (resolution_comment 삭제 안함!)
-            # 근로자 텍스트 누적(Legacy 유지)
-            old_comment = row["comment"] or ""
-            new_legacy_text = old_comment + f"\n\n--- 추가 제기 [{now}] ---\n{comment}"
-
+            # [2] disputes 테이블 업데이트
+            # 🚨 핵심 수정: comment 컬럼 업데이트(이어붙이기)를 제거했습니다. 🚨
             self.conn.execute(
                 """
                 UPDATE disputes SET 
-                    comment=?,
                     dispute_type=?,
                     status='PENDING'
-                    -- resolved_at, resolution_comment 건드리지 않음 (보존)
+                    -- comment=?,  <-- 이 줄을 삭제하여 원문이 오염되지 않게 함
+                    -- resolved_at, resolution_comment 건드리지 않음
                 WHERE id=?
                 """,
-                (new_legacy_text, dispute_type, dispute_id)
+                # 인자에서도 new_legacy_text를 뺐습니다.
+                (dispute_type, dispute_id)
             )
 
-            # [3] 새 메시지 저장
+            # [3] 새 메시지는 오직 히스토리 테이블(dispute_messages)에만 저장
             self.add_dispute_message(
                 dispute_id,
                 sender_user_id=user_id,
@@ -1137,7 +1135,8 @@ class DB:
             self.conn.commit()
             return dispute_id
 
-        # --- 신규 생성 (최초) ---
+        # --- 신규 생성 (최초 이의 제기) ---
+        # 최초 생성일 때는 disputes 테이블에 comment를 넣어야 함 (이게 원문이 됨)
         cur = self.conn.execute(
             """
             INSERT INTO disputes(request_id, user_id, dispute_type, comment, created_at, status)
@@ -1147,6 +1146,7 @@ class DB:
         )
         dispute_id = cur.lastrowid
 
+        # 메시지 테이블에도 동일하게 하나 넣어줌 (타임라인 표시용)
         self.add_dispute_message(
             dispute_id,
             sender_user_id=user_id,

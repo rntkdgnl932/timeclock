@@ -1488,3 +1488,16 @@ sqlite3.IntegrityError: NOT NULL constraint failed: dispute_messages.thread_id
 2025-12-16 07:52:01,419 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
 2025-12-16 07:52:01,419 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
 2025-12-16 07:52:01,419 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-16 07:52:08,410 [INFO] Login success: worker (worker)
+2025-12-16 07:52:08,410 [INFO] Logged in: worker (worker)
+2025-12-16 07:52:08,478 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-16 07:52:08,478 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-16 07:52:08,478 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-16 07:52:08,479 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-16 07:52:32,405 [INFO] Dispute created: request_id=8 user=worker
+2025-12-16 07:53:24,321 [INFO] Dispute created: request_id=8 user=worker
+2025-12-16 08:04:05,907 [INFO] Login success: owner (owner)
+2025-12-16 08:04:05,907 [INFO] Logged in: owner (owner)
+2025-12-16 08:04:05,930 [INFO] Refreshing pending requests
+2025-12-16 08:04:05,931 [INFO] Refreshing disputes
+2025-12-16 08:04:05,932 [INFO] Refreshing signup requests
