@@ -194,6 +194,7 @@ class WorkerPage(QtWidgets.QWidget):
     def refresh_my_disputes(self):
         d1, d2 = self.filter_my_disputes.get_range()
         try:
+            # 🚨🚨🚨 수정된 DB 함수 사용: request_id별 최신 이의만 조회 🚨🚨🚨
             rows = self.db.list_my_disputes(self.session.user_id, d1, d2)
 
             # 더블클릭 팝업에서 "원문"을 보여주기 위해 보관

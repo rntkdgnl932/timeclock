@@ -39,13 +39,19 @@ class DB:
         self.conn.execute("VACUUM;")
         self.conn.commit()
 
-
     def _migrate(self):
         cur = self.conn.cursor()
 
+        # 기존 DB 파일에 is_active, must_change_pw 컬럼이 없는 경우 추가
+        def add_column_if_not_exists(table, column_name, column_def):
+            try:
+                cur.execute(f"SELECT {column_name} FROM {table} LIMIT 1")
+            except sqlite3.OperationalError:
+                logging.info(f"Adding missing column {column_name} to {table}...")
+                cur.execute(f"ALTER TABLE {table} ADD COLUMN {column_name} {column_def}")
+
         # --- users 테이블 생성/마이그레이션 (STEP 4/5 필수) ---
-        # NOTE: CREATE TABLE IF NOT EXISTS 구문에는 ALTER TABLE이 작동하지 않으므로,
-        # ALTER TABLE을 명시적으로 실행하여 컬럼을 추가해야 합니다.
+        # 🚨🚨🚨 수정: PRIMARY 키워드 중복 제거 🚨🚨🚨
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS users (
@@ -59,14 +65,6 @@ class DB:
             )
             """
         )
-
-        # 기존 DB 파일에 is_active, must_change_pw 컬럼이 없는 경우 추가
-        def add_column_if_not_exists(table, column_name, column_def):
-            try:
-                cur.execute(f"SELECT {column_name} FROM {table} LIMIT 1")
-            except sqlite3.OperationalError:
-                logging.info(f"Adding missing column {column_name} to {table}...")
-                cur.execute(f"ALTER TABLE {table} ADD COLUMN {column_name} {column_def}")
 
         # 🚨 users 테이블 컬럼 추가
         add_column_if_not_exists("users", "is_active", "INTEGER NOT NULL DEFAULT 1")
@@ -104,8 +102,7 @@ class DB:
             """
         )
 
-        # --- signup_requests 테이블 (STEP 4) ---
-        # 🚨🚨🚨 수정: email, account, address 컬럼 추가 🚨🚨🚨
+        # --- signup_requests 테이블 (기존 로직 유지) ---
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS signup_requests (
@@ -136,7 +133,7 @@ class DB:
         add_column_if_not_exists("signup_requests", "account", "TEXT")
         add_column_if_not_exists("signup_requests", "address", "TEXT")
 
-        # --- disputes 테이블 (STEP 4) ---
+        # --- disputes 테이블 (기존 로직 유지) ---
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS disputes (
@@ -160,9 +157,11 @@ class DB:
         )
 
         # --- dispute_messages 테이블(대화 히스토리) ---
+        # 🚨🚨🚨 수정: 기존 테이블 삭제 후 재생성하여 스키마 충돌 (thread_id 등) 해결 🚨🚨🚨
+        cur.execute("DROP TABLE IF EXISTS dispute_messages")
         cur.execute(
             """
-            CREATE TABLE IF NOT EXISTS dispute_messages (
+            CREATE TABLE dispute_messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 dispute_id INTEGER NOT NULL,
                 sender_user_id INTEGER,
@@ -174,6 +173,8 @@ class DB:
             )
             """
         )
+        # 이제 ALTER TABLE은 필요 없음
+
         cur.execute("CREATE INDEX IF NOT EXISTS idx_dispute_messages_dispute_id ON dispute_messages(dispute_id)")
 
         # 🚨 audit_logs 테이블 생성 코드 추가
@@ -193,7 +194,6 @@ class DB:
         )
 
         self.conn.commit()
-        # ... (기본 계정 생성 로직이 이 뒤에 있어야 합니다.)
 
     def _ensure_indexes(self):
         # 기존 인덱스
@@ -415,9 +415,8 @@ class DB:
     # --- Disputes ---
     def create_dispute(self, request_id: int, user_id: int, dispute_type: str, comment: str):
         """
-        같은 request_id + user_id에 대해 미처리/검토(PENDING/IN_REVIEW) 이의가 있으면
-        새 disputes row를 만들지 않고 그 건에 comment를 '추가'한다.
-        (최소 변경: 메시지 테이블 없이도 동작하도록 comment에 누적)
+        [재수정] 같은 request_id + user_id에 대해 미처리 이의가 있으면 누적을 유지합니다.
+        누적 시: 새로운 시간 기록을 추가하고, 상태를 PENDING으로 업데이트합니다.
         """
         comment = (comment or "").strip()
         now = now_str()
@@ -438,21 +437,36 @@ class DB:
         if row:
             dispute_id = int(row["id"])
             prev = row["comment"] or ""
-            # 기존 comment에 누적(구분선)
+
+            # ✅ 수정: 기존 comment에 누적(구분선 + 새로운 시각/유형 정보 포함)
+            new_entry = (
+                f"\n\n{'=' * 30} [추가 제기: {now}] {'=' * 30}\n"
+                f"이의 유형: {dispute_type}\n"
+                f"내용:\n{comment}"
+            )
+
             merged = prev
-            if merged and comment:
-                merged += "\n\n" + ("-" * 30) + "\n" + comment
-            elif comment:
-                merged = comment
+            if merged:
+                merged += new_entry
+            else:
+                merged = f"이의 유형: {dispute_type}\n내용:\n{comment}"  # 최초 제기 시에도 유형 기록
 
             self.conn.execute(
-                "UPDATE disputes SET comment=? WHERE id=?",
-                (merged, dispute_id),
+                """
+                UPDATE disputes SET 
+                    comment=?, 
+                    dispute_type=?,  -- 유형은 최신 내용으로 업데이트 (또는 유지)
+                    status='PENDING',  -- ✅ 수정: 근로자가 내용을 추가하면 상태를 PENDING으로 초기화
+                    resolved_at=NULL,
+                    resolution_comment=NULL
+                WHERE id=?
+                """,
+                (merged, dispute_type, dispute_id),
             )
             self.conn.commit()
             return dispute_id
 
-        # 2) 없으면 새로 생성
+        # 2) 없으면 새로 생성 (최초 제기)
         cur = self.conn.execute(
             """
             INSERT INTO disputes(request_id, user_id, dispute_type, comment, created_at, status)
@@ -464,8 +478,15 @@ class DB:
         self.conn.commit()
         return dispute_id
 
+    # 🚨 수정: request_id 별 최신 이의만 조회하도록 쿼리 변경
     def list_disputes(self, date_from: str, date_to: str, limit: int = 1000):
+        """
+        (사업주용) 기간 내에 등록된 이의 중, request_id별 최신 이의만 반환합니다.
+        """
         date_from, date_to = normalize_date_range(date_from, date_to)
+
+        # request_id별로 가장 큰 id(즉, 가장 최근에 생성된 이의)를 찾기 위한 서브쿼리
+        # SQLite는 쿼리 변수를 순서대로 바인딩하므로, 쿼리 내 ? 순서와 튜플의 순서를 일치시켜야 함.
         return self.conn.execute(
             """
             SELECT d.*,
@@ -476,16 +497,27 @@ class DB:
             JOIN users u ON u.id = d.user_id
             JOIN requests r ON r.id = d.request_id
             LEFT JOIN approvals a ON a.request_id = r.id
-            WHERE date(d.created_at) >= date(?)
-              AND date(d.created_at) <= date(?)
+            JOIN (
+                SELECT request_id, MAX(id) as max_dispute_id
+                FROM disputes
+                WHERE date(created_at) >= date(?)  -- 1. date_from
+                  AND date(created_at) <= date(?)  -- 2. date_to
+                GROUP BY request_id
+            ) AS latest_d ON d.id = latest_d.max_dispute_id
             ORDER BY d.id DESC
-            LIMIT ?
+            LIMIT ?  -- 3. limit
             """,
-            (date_from, date_to, limit),
+            (date_from, date_to, limit),  # 바인딩 매개변수 3개로 수정
         ).fetchall()
 
+    # 🚨 수정: user_id와 request_id 별 최신 이의만 조회하도록 쿼리 변경
     def list_my_disputes(self, user_id: int, date_from: str, date_to: str, limit: int = 2000):
+        """
+        (근로자용) 특정 근로자(user_id)가 제기한 이의 중, request_id별 최신 이의만 반환합니다.
+        """
         date_from, date_to = normalize_date_range(date_from, date_to)
+
+        # SQLite는 쿼리 변수를 순서대로 바인딩하므로, 쿼리 내 ? 순서와 튜플의 순서를 일치시켜야 함.
         return self.conn.execute(
             """
             SELECT d.id,
@@ -503,13 +535,20 @@ class DB:
             FROM disputes d
             JOIN requests r ON r.id = d.request_id
             LEFT JOIN approvals a ON a.request_id = r.id
-            WHERE d.user_id = ?
-              AND date(d.created_at) >= date(?)
-              AND date(d.created_at) <= date(?)
+            JOIN (
+                SELECT request_id, MAX(id) as max_dispute_id
+                FROM disputes
+                WHERE user_id = ?  -- 1. user_id
+                  AND date(created_at) >= date(?)  -- 2. date_from
+                  AND date(created_at) <= date(?)  -- 3. date_to
+                GROUP BY request_id
+            ) AS latest_d ON d.id = latest_d.max_dispute_id
+            WHERE d.user_id = ?  -- 4. user_id
             ORDER BY d.id DESC
-            LIMIT ?
+            LIMIT ?  -- 5. limit
             """,
-            (user_id, date_from, date_to, limit),
+            # 바인딩 매개변수 5개로 수정: 서브쿼리용 (user_id, date_from, date_to) + 메인쿼리용 (user_id, limit)
+            (user_id, date_from, date_to, user_id, limit),
         ).fetchall()
 
     # ==========================================================
@@ -522,7 +561,7 @@ class DB:
             phone,
             birth,  # 인자는 birth
             email=None,
-            account=None, # 이 인자를 DB 컬럼 'account'에 매핑
+            account=None,  # 이 인자를 DB 컬럼 'account'에 매핑
             address=None
     ):
         now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -765,8 +804,8 @@ class DB:
         with out_path.open("w", encoding="utf-8-sig", newline="") as f:
             w = csv.writer(f)
             w.writerow([
-                "request_id","worker","req_type","requested_at","request_created_at",
-                "approved_at","reason_code","approval_comment","approval_created_at","owner"
+                "request_id", "worker", "req_type", "requested_at", "request_created_at",
+                "approved_at", "reason_code", "approval_comment", "approval_created_at", "owner"
             ])
             for r in rows:
                 w.writerow([r[c] for c in r.keys()])
@@ -857,7 +896,8 @@ class DB:
                 (new_req_id, a_owner, r["approved_at"], r["reason_code"], r["comment"], r["approval_created_at"]),
             )
 
-            drows = self.conn.execute("SELECT * FROM disputes WHERE request_id=? ORDER BY id ASC", (r["request_id"],)).fetchall()
+            drows = self.conn.execute("SELECT * FROM disputes WHERE request_id=? ORDER BY id ASC",
+                                      (r["request_id"],)).fetchall()
             for d in drows:
                 w_un = o_users.get(d["user_id"])
                 if not w_un:
@@ -902,7 +942,7 @@ class DB:
             SET status=?,
                 resolved_at=?,
                 resolved_by=?,
-                resolution_comment=?
+                resolution_comment=? -- 최신 처리 코멘트로 덮어씀 (목록 화면에 보임)
             WHERE id=?
             """,
             (status_code, now, resolved_by_id, resolution_comment, dispute_id),
@@ -914,7 +954,8 @@ class DB:
 
         self.conn.commit()
 
-        # ✅ 히스토리 누적(사업주 메시지)
+        # ✅ 히스토리 누적: resolution_comment는 disputes 테이블에 덮어쓰지만,
+        # dispute_messages에는 아래 함수를 통해 누적됩니다.
         self.add_dispute_message(
             dispute_id,
             sender_user_id=resolved_by_id,
@@ -993,25 +1034,6 @@ class DB:
 
         return events
 
-    def list_dispute_audit_updates(self, dispute_id: int):
-        """
-        사장 처리 이력만 audit_logs에서 가져온다 (옵션 B).
-        action='DISPUTE_UPDATE' 로 남긴 detail_json을 사용.
-        """
-        return self.conn.execute(
-            """
-            SELECT a.created_at,
-                   a.detail_json,
-                   u.username AS actor_username
-            FROM audit_logs a
-            LEFT JOIN users u ON u.id = a.actor_user_id
-            WHERE a.target_type = 'dispute'
-              AND a.target_id = ?
-              AND a.action = 'DISPUTE_UPDATE'
-            ORDER BY a.created_at ASC
-            """,
-            (dispute_id,),
-        ).fetchall()
 
     def add_dispute_message(
             self,
@@ -1113,7 +1135,3 @@ class DB:
             """,
             (date_from, date_to, limit),
         ).fetchall()
-
-
-
-

@@ -249,6 +249,7 @@ class OwnerPage(QtWidgets.QWidget):
         date_to = self.filter_disputes.get_date_to()
 
         try:
+            # 🚨🚨🚨 수정된 DB 함수 사용: request_id별 최신 이의만 조회 🚨🚨🚨
             rows = self.db.list_disputes(date_from, date_to)
 
             # ✅ 상세 팝업에서 원문/전체 필드 쓰기 위해 보관
@@ -489,28 +490,23 @@ class OwnerPage(QtWidgets.QWidget):
             Message.err(self, "거절 실패", f"가입 거절 처리 중 오류 발생: {e}")
 
     def resolve_selected_dispute(self):
-        """선택된 이의 제기를 처리합니다. (처리 전 원문 팝업 포함)"""
+        """선택된 이의 제기를 처리합니다. (처리 전 원문 팝업 대신 타임라인 팝업 포함)"""
         row_idx = self.dispute_table.selected_first_row_index()
         if row_idx < 0:
             Message.warn(self, "이의 처리", "처리할 이의 제기 항목을 선택해주세요.")
             return
 
         dispute_id = int(self.dispute_table.get_cell(row_idx, 0))
+        username = self.dispute_table.get_cell(row_idx, 1)
 
-        # ✅ 처리 전에 원문(이의내용) 확인 팝업
-        original_text = self.dispute_table.get_cell(row_idx, 7)  # "이의내용" 컬럼
-        dlg = QtWidgets.QDialog(self)
-        dlg.setWindowTitle("이의 신청 원문")
-        dlg.resize(720, 420)
-        v = QtWidgets.QVBoxLayout(dlg)
-        edit = QtWidgets.QPlainTextEdit()
-        edit.setReadOnly(True)
-        edit.setPlainText(original_text or "(내용 없음)")
-        btn_ok = QtWidgets.QPushButton("확인")
-        btn_ok.clicked.connect(dlg.accept)
-        v.addWidget(edit)
-        v.addWidget(btn_ok)
-        dlg.exec_()
+        # ✅ 수정: 처리 전에 원문(이의내용) 확인 팝업 대신, 타임라인 전체보기를 먼저 띄운다.
+        # 타임라인 팝업은 사용자가 '닫기'를 누르거나 창을 닫아야 다음 단계로 넘어간다.
+
+        # 1. 타임라인 전체 보기 팝업을 먼저 띄운다.
+        # 이 함수는 Modal Dialog (exec_())를 띄우므로, 사용자가 팝업을 닫아야 다음 코드가 실행됨.
+        self.open_dispute_timeline_by_row(row_idx, title=f"이의 처리 전: {username} 님의 타임라인")
+
+        # 2. 처리 상태 및 코멘트 입력 단계로 진행
 
         labels = [label for _, label in DISPUTE_STATUS_ITEMS]
         selected_label, ok = QtWidgets.QInputDialog.getItem(
@@ -709,7 +705,7 @@ class OwnerPage(QtWidgets.QWidget):
             return
         self.open_dispute_timeline_by_row(row_idx)
 
-    def open_dispute_timeline_by_row(self, row_idx: int):
+    def open_dispute_timeline_by_row(self, row_idx: int, title: str = "이의 내용/처리 타임라인"):
         if not hasattr(self, "_dispute_rows") or not self._dispute_rows:
             Message.err(self, "오류", "원본 이의 데이터가 없습니다. 새로고침 후 다시 시도하세요.")
             return
@@ -807,7 +803,7 @@ class OwnerPage(QtWidgets.QWidget):
         timeline_text = "\n".join(blocks)
 
         dlg = QtWidgets.QDialog(self)
-        dlg.setWindowTitle("이의 내용/처리 타임라인")
+        dlg.setWindowTitle(title) # ✅ 타이틀을 인자로 받도록 수정
         dlg.resize(900, 600)
 
         v = QtWidgets.QVBoxLayout(dlg)
@@ -820,6 +816,7 @@ class OwnerPage(QtWidgets.QWidget):
         btn.clicked.connect(dlg.accept)
         v.addWidget(btn)
 
+        # ✅ exec_()이 반환될 때까지 다음 코드가 실행되지 않음
         dlg.exec_()
 
 

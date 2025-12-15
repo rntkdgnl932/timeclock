@@ -607,3 +607,261 @@ AttributeError: 'sqlite3.Connection' object has no attribute 'rowcount'
 2025-12-15 22:00:59,449 [INFO] Refreshing pending requests
 2025-12-15 22:00:59,449 [INFO] Refreshing disputes
 2025-12-15 22:00:59,450 [INFO] Refreshing signup requests
+2025-12-16 01:13:25,644 [INFO] Login success: owner (owner)
+2025-12-16 01:13:25,645 [INFO] Logged in: owner (owner)
+2025-12-16 01:13:25,668 [INFO] Refreshing pending requests
+2025-12-16 01:13:25,668 [INFO] Refreshing disputes
+2025-12-16 01:13:25,669 [INFO] Refreshing signup requests
+2025-12-16 01:13:48,542 [INFO] Logout: owner
+2025-12-16 01:13:50,964 [INFO] Login success: worker (worker)
+2025-12-16 01:13:50,965 [INFO] Logged in: worker (worker)
+2025-12-16 01:13:50,989 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-16 01:13:50,990 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-16 01:13:50,990 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-16 01:13:50,990 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-16 01:13:52,655 [INFO] Worker request created: user=worker type=IN at=2025-12-16 01:13:52
+2025-12-16 01:13:54,700 [INFO] Logout: worker
+2025-12-16 01:13:57,574 [INFO] Login success: owner (owner)
+2025-12-16 01:13:57,574 [INFO] Logged in: owner (owner)
+2025-12-16 01:13:57,587 [INFO] Refreshing pending requests
+2025-12-16 01:13:57,587 [INFO] Refreshing disputes
+2025-12-16 01:13:57,588 [INFO] Refreshing signup requests
+2025-12-16 01:14:49,109 [INFO] Refreshing pending requests
+2025-12-16 01:14:51,064 [INFO] Logout: owner
+2025-12-16 01:14:52,702 [INFO] Login success: worker (worker)
+2025-12-16 01:14:52,702 [INFO] Logged in: worker (worker)
+2025-12-16 01:14:52,727 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-16 01:14:52,727 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-16 01:14:52,727 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-16 01:14:52,727 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-16 01:15:20,631 [INFO] Dispute created: request_id=2 user=worker
+2025-12-16 01:15:23,357 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-16 01:15:23,357 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-16 01:15:29,267 [INFO] Logout: worker
+2025-12-16 01:15:32,611 [INFO] Login success: owner (owner)
+2025-12-16 01:15:32,611 [INFO] Logged in: owner (owner)
+2025-12-16 01:15:32,624 [INFO] Refreshing pending requests
+2025-12-16 01:15:32,624 [INFO] Refreshing disputes
+2025-12-16 01:15:32,624 [INFO] Refreshing signup requests
+2025-12-16 01:16:02,484 [INFO] Refreshing disputes
+2025-12-16 01:16:03,930 [INFO] Logout: owner
+2025-12-16 01:16:07,205 [INFO] Login success: worker (worker)
+2025-12-16 01:16:07,205 [INFO] Logged in: worker (worker)
+2025-12-16 01:16:07,232 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-16 01:16:07,233 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-16 01:16:07,233 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-16 01:16:07,233 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-16 01:17:19,607 [INFO] Dispute created: request_id=2 user=worker
+2025-12-16 01:17:21,608 [INFO] Logout: worker
+2025-12-16 01:17:23,909 [INFO] Login success: owner (owner)
+2025-12-16 01:17:23,910 [INFO] Logged in: owner (owner)
+2025-12-16 01:17:23,923 [INFO] Refreshing pending requests
+2025-12-16 01:17:23,923 [INFO] Refreshing disputes
+2025-12-16 01:17:23,924 [INFO] Refreshing signup requests
+2025-12-16 01:20:38,793 [INFO] Logout: owner
+2025-12-16 01:20:41,180 [INFO] Login success: worker (worker)
+2025-12-16 01:20:41,180 [INFO] Logged in: worker (worker)
+2025-12-16 01:20:41,209 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-16 01:20:41,209 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-16 01:20:41,209 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-16 01:20:41,209 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-16 02:41:36,957 [INFO] Logout: worker
+2025-12-16 02:41:39,537 [INFO] Login success: owner (owner)
+2025-12-16 02:41:39,537 [INFO] Logged in: owner (owner)
+2025-12-16 02:41:39,550 [INFO] Refreshing pending requests
+2025-12-16 02:41:39,550 [INFO] Refreshing disputes
+2025-12-16 02:41:39,551 [INFO] Refreshing signup requests
+2025-12-16 03:12:06,583 [INFO] Login success: owner (owner)
+2025-12-16 03:12:06,584 [INFO] Logged in: owner (owner)
+2025-12-16 03:12:06,605 [INFO] Refreshing pending requests
+2025-12-16 03:12:06,606 [INFO] Refreshing dispute threads
+2025-12-16 03:12:06,606 [ERROR] Failed to fetch dispute threads
+Traceback (most recent call last):
+  File "C:\my_games\timeclock\ui\owner_page.py", line 255, in refresh_disputes
+    rows = self.db.list_open_dispute_threads_owner()
+  File "C:\my_games\timeclock\timeclock\db.py", line 1200, in list_open_dispute_threads_owner
+    return self.conn.execute(
+sqlite3.OperationalError: no such column: m.thread_id
+2025-12-16 03:13:54,075 [INFO] Login success: owner (owner)
+2025-12-16 03:13:54,076 [INFO] Logged in: owner (owner)
+2025-12-16 03:13:54,097 [INFO] Refreshing pending requests
+2025-12-16 03:13:54,098 [INFO] Refreshing dispute threads
+2025-12-16 03:13:54,098 [ERROR] Failed to fetch dispute threads
+Traceback (most recent call last):
+  File "C:\my_games\timeclock\ui\owner_page.py", line 255, in refresh_disputes
+    rows = self.db.list_open_dispute_threads_owner()
+  File "C:\my_games\timeclock\timeclock\db.py", line 1181, in list_open_dispute_threads_owner
+    return self.conn.execute(
+sqlite3.OperationalError: no such column: m.thread_id
+2025-12-16 03:28:28,867 [INFO] Login success: owner (owner)
+2025-12-16 03:28:28,867 [INFO] Logged in: owner (owner)
+2025-12-16 03:28:28,889 [INFO] Refreshing pending requests
+2025-12-16 03:28:28,890 [INFO] Refreshing dispute threads
+2025-12-16 03:28:28,890 [INFO] Refreshing signup requests
+2025-12-16 03:28:38,028 [INFO] Refreshing dispute threads
+2025-12-16 03:28:40,877 [INFO] Refreshing dispute threads
+2025-12-16 03:28:50,591 [INFO] Refreshing dispute threads
+2025-12-16 03:33:53,864 [INFO] Refreshing dispute threads
+2025-12-16 03:33:54,642 [INFO] Refreshing dispute threads
+2025-12-16 03:33:59,731 [INFO] Logout: owner
+2025-12-16 03:34:01,358 [INFO] Login success: worker (worker)
+2025-12-16 03:34:01,358 [INFO] Logged in: worker (worker)
+2025-12-16 03:34:40,406 [INFO] Dispute created: request_id=2 user=worker
+2025-12-16 03:34:41,806 [INFO] Logout: worker
+2025-12-16 03:34:43,004 [INFO] Login success: owner (owner)
+2025-12-16 03:34:43,005 [INFO] Logged in: owner (owner)
+2025-12-16 03:34:43,018 [INFO] Refreshing pending requests
+2025-12-16 03:34:43,018 [INFO] Refreshing dispute threads
+2025-12-16 03:34:43,018 [INFO] Refreshing signup requests
+2025-12-16 03:34:49,046 [INFO] Refreshing dispute threads
+2025-12-16 03:34:50,375 [INFO] Refreshing dispute threads
+2025-12-16 03:34:51,627 [INFO] Refreshing dispute threads
+2025-12-16 03:35:26,338 [INFO] Logout: owner
+2025-12-16 03:35:28,140 [INFO] Login success: worker (worker)
+2025-12-16 03:35:28,140 [INFO] Logged in: worker (worker)
+2025-12-16 03:35:29,435 [INFO] Worker request created: user=worker type=IN at=2025-12-16 03:35:29
+2025-12-16 03:35:31,488 [INFO] Logout: worker
+2025-12-16 03:35:33,477 [INFO] Login success: owner (owner)
+2025-12-16 03:35:33,477 [INFO] Logged in: owner (owner)
+2025-12-16 03:35:33,490 [INFO] Refreshing pending requests
+2025-12-16 03:35:33,490 [INFO] Refreshing dispute threads
+2025-12-16 03:35:33,491 [INFO] Refreshing signup requests
+2025-12-16 03:35:42,346 [INFO] Refreshing pending requests
+2025-12-16 03:35:43,526 [INFO] Logout: owner
+2025-12-16 03:35:45,260 [INFO] Login success: worker (worker)
+2025-12-16 03:35:45,261 [INFO] Logged in: worker (worker)
+2025-12-16 03:35:54,805 [INFO] Dispute created: request_id=3 user=worker
+2025-12-16 03:35:56,192 [INFO] Logout: worker
+2025-12-16 03:35:57,841 [INFO] Login success: owner (owner)
+2025-12-16 03:35:57,841 [INFO] Logged in: owner (owner)
+2025-12-16 03:35:57,854 [INFO] Refreshing pending requests
+2025-12-16 03:35:57,854 [INFO] Refreshing dispute threads
+2025-12-16 03:35:57,855 [INFO] Refreshing signup requests
+2025-12-16 03:36:04,592 [INFO] Refreshing dispute threads
+2025-12-16 03:36:06,458 [INFO] Refreshing dispute threads
+2025-12-16 03:38:45,710 [INFO] Login success: owner (owner)
+2025-12-16 03:38:45,710 [INFO] Logged in: owner (owner)
+2025-12-16 03:38:45,733 [INFO] Refreshing pending requests
+2025-12-16 03:38:45,734 [INFO] Refreshing disputes
+2025-12-16 03:38:45,734 [INFO] Refreshing signup requests
+2025-12-16 04:56:09,739 [INFO] Login success: owner (owner)
+2025-12-16 04:56:09,739 [INFO] Logged in: owner (owner)
+2025-12-16 04:56:09,762 [INFO] Refreshing pending requests
+2025-12-16 04:56:09,762 [INFO] Refreshing disputes
+2025-12-16 04:56:09,762 [ERROR] Failed to fetch disputes
+Traceback (most recent call last):
+  File "C:\my_games\timeclock\ui\owner_page.py", line 253, in refresh_disputes
+    rows = self.db.list_disputes(date_from, date_to)
+  File "C:\my_games\timeclock\timeclock\db.py", line 482, in list_disputes
+    return self.conn.execute(
+sqlite3.ProgrammingError: Incorrect number of bindings supplied. The current statement uses 3, and there are 5 supplied.
+2025-12-16 04:58:11,876 [INFO] Login success: owner (owner)
+2025-12-16 04:58:11,876 [INFO] Logged in: owner (owner)
+2025-12-16 04:58:11,900 [INFO] Refreshing pending requests
+2025-12-16 04:58:11,900 [INFO] Refreshing disputes
+2025-12-16 04:58:11,901 [INFO] Refreshing signup requests
+2025-12-16 04:58:25,331 [INFO] Logout: owner
+2025-12-16 04:58:28,295 [INFO] Login success: worker (worker)
+2025-12-16 04:58:28,295 [INFO] Logged in: worker (worker)
+2025-12-16 04:58:28,326 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-16 04:58:28,326 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-16 04:58:28,326 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-16 04:58:28,326 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-16 04:58:50,268 [INFO] Dispute created: request_id=3 user=worker
+2025-12-16 04:58:51,838 [INFO] Logout: worker
+2025-12-16 04:58:53,559 [INFO] Login success: owner (owner)
+2025-12-16 04:58:53,559 [INFO] Logged in: owner (owner)
+2025-12-16 04:58:53,572 [INFO] Refreshing pending requests
+2025-12-16 04:58:53,572 [INFO] Refreshing disputes
+2025-12-16 04:58:53,573 [INFO] Refreshing signup requests
+2025-12-16 04:59:03,309 [INFO] Refreshing disputes
+2025-12-16 04:59:31,854 [ERROR] Dispute resolution failed
+Traceback (most recent call last):
+  File "C:\my_games\timeclock\ui\owner_page.py", line 548, in resolve_selected_dispute
+    self.db.resolve_dispute(
+  File "C:\my_games\timeclock\timeclock\db.py", line 943, in resolve_dispute
+    self.add_dispute_message(
+  File "C:\my_games\timeclock\timeclock\db.py", line 1031, in add_dispute_message
+    self.conn.execute(
+sqlite3.OperationalError: table dispute_messages has no column named dispute_id
+2025-12-16 05:00:49,246 [INFO] Adding missing column dispute_id to dispute_messages...
+2025-12-16 05:00:51,461 [INFO] Login success: owner (owner)
+2025-12-16 05:00:51,461 [INFO] Logged in: owner (owner)
+2025-12-16 05:00:51,484 [INFO] Refreshing pending requests
+2025-12-16 05:00:51,484 [INFO] Refreshing disputes
+2025-12-16 05:00:51,485 [INFO] Refreshing signup requests
+2025-12-16 05:05:03,036 [INFO] Logout: owner
+2025-12-16 05:05:05,821 [INFO] Login success: worker (worker)
+2025-12-16 05:05:05,821 [INFO] Logged in: worker (worker)
+2025-12-16 05:05:05,852 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-16 05:05:05,852 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-16 05:05:05,852 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-16 05:05:05,852 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-16 05:06:40,285 [INFO] Login success: owner (owner)
+2025-12-16 05:06:40,285 [INFO] Logged in: owner (owner)
+2025-12-16 05:06:40,309 [INFO] Refreshing pending requests
+2025-12-16 05:06:40,309 [INFO] Refreshing disputes
+2025-12-16 05:06:40,310 [INFO] Refreshing signup requests
+2025-12-16 05:07:00,880 [INFO] Login success: worker (worker)
+2025-12-16 05:07:00,880 [INFO] Logged in: worker (worker)
+2025-12-16 05:07:00,925 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-16 05:07:00,925 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-16 05:07:00,925 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-16 05:07:00,925 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-16 05:08:34,807 [INFO] Dispute created: request_id=3 user=worker
+2025-12-16 05:08:51,551 [INFO] Dispute created: request_id=3 user=worker
+2025-12-16 05:08:54,160 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-16 05:08:54,160 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-16 05:10:02,661 [INFO] Dispute created: request_id=3 user=worker
+2025-12-16 05:10:06,826 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-16 05:10:06,826 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-16 05:16:21,793 [INFO] Login success: worker (worker)
+2025-12-16 05:16:21,793 [INFO] Logged in: worker (worker)
+2025-12-16 05:16:21,836 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-16 05:16:21,837 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-16 05:16:21,837 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-16 05:16:21,837 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-16 05:16:33,122 [INFO] Dispute created: request_id=3 user=worker
+2025-12-16 05:16:35,002 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-16 05:16:35,002 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-16 05:17:18,738 [INFO] Logout: worker
+2025-12-16 05:17:19,806 [INFO] Login success: owner (owner)
+2025-12-16 05:17:19,806 [INFO] Logged in: owner (owner)
+2025-12-16 05:17:19,821 [INFO] Refreshing pending requests
+2025-12-16 05:17:19,821 [INFO] Refreshing disputes
+2025-12-16 05:17:19,822 [INFO] Refreshing signup requests
+2025-12-16 05:17:34,348 [ERROR] Dispute resolution failed
+Traceback (most recent call last):
+  File "C:\my_games\timeclock\ui\owner_page.py", line 543, in resolve_selected_dispute
+    self.db.resolve_dispute(
+  File "C:\my_games\timeclock\timeclock\db.py", line 958, in resolve_dispute
+    self.add_dispute_message(
+  File "C:\my_games\timeclock\timeclock\db.py", line 1046, in add_dispute_message
+    self.conn.execute(
+sqlite3.OperationalError: table dispute_messages has no column named status_code
+2025-12-16 05:18:53,149 [INFO] Adding missing column status_code to dispute_messages...
+2025-12-16 05:18:55,455 [INFO] Login success: owner (owner)
+2025-12-16 05:18:55,456 [INFO] Logged in: owner (owner)
+2025-12-16 05:18:55,479 [INFO] Refreshing pending requests
+2025-12-16 05:18:55,479 [INFO] Refreshing disputes
+2025-12-16 05:18:55,480 [INFO] Refreshing signup requests
+2025-12-16 05:19:19,070 [ERROR] Dispute resolution failed
+Traceback (most recent call last):
+  File "C:\my_games\timeclock\ui\owner_page.py", line 543, in resolve_selected_dispute
+    self.db.resolve_dispute(
+  File "C:\my_games\timeclock\timeclock\db.py", line 957, in resolve_dispute
+    self.add_dispute_message(
+  File "C:\my_games\timeclock\timeclock\db.py", line 1045, in add_dispute_message
+    self.conn.execute(
+sqlite3.IntegrityError: NOT NULL constraint failed: dispute_messages.thread_id
+2025-12-16 05:20:52,059 [INFO] Refreshing disputes
+2025-12-16 05:21:21,020 [ERROR] Dispute resolution failed
+Traceback (most recent call last):
+  File "C:\my_games\timeclock\ui\owner_page.py", line 543, in resolve_selected_dispute
+    self.db.resolve_dispute(
+  File "C:\my_games\timeclock\timeclock\db.py", line 957, in resolve_dispute
+    self.add_dispute_message(
+  File "C:\my_games\timeclock\timeclock\db.py", line 1045, in add_dispute_message
+    self.conn.execute(
+sqlite3.IntegrityError: NOT NULL constraint failed: dispute_messages.thread_id
+2025-12-16 05:21:23,785 [INFO] Refreshing disputes
