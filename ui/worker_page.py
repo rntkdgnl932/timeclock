@@ -3,7 +3,7 @@
 import logging
 from PyQt5 import QtWidgets, QtCore
 
-from timeclock.settings import REQ_STATUS, REASON_CODES
+from timeclock.settings import REQ_STATUS, REASON_CODES, DISPUTE_STATUS
 
 from timeclock.utils import now_str, Message
 from timeclock.settings import REQ_TYPES
@@ -78,10 +78,10 @@ class WorkerPage(QtWidgets.QWidget):
         self.btn_my_dispute_view = QtWidgets.QPushButton("선택 이의내용 전체보기")
         self.btn_my_dispute_view.clicked.connect(self.open_selected_dispute_comment)
 
-        self._my_dispute_rows = []
         self.my_dispute_table = Table([
             "이의ID", "요청ID", "유형", "요청시각", "상태",
-            "승인시각(확정)", "이의유형", "이의내용", "등록시각"
+            "승인시각(확정)", "이의유형", "이의내용", "등록시각",
+            "처리상태", "처리코멘트", "처리시각"
         ])
 
         QtCore.QTimer.singleShot(0, self._wire_my_dispute_doubleclick)
@@ -198,25 +198,42 @@ class WorkerPage(QtWidgets.QWidget):
 
             out = []
             for r in rows:
-                req_type_label = dict(REQ_TYPES).get(r["req_type"], r["req_type"])
+                # sqlite Row / dict 모두 대응
+                rr = dict(r)
 
+                req_type_label = dict(REQ_TYPES).get(rr.get("req_type"), rr.get("req_type", ""))
                 # ✅ 요청 상태 한글화 (APPROVED/PENDING)
-                status_label = dict(REQ_STATUS).get(r["status"], r["status"])
+                req_status_label = dict(REQ_STATUS).get(rr.get("status"), rr.get("status", ""))
 
                 # 테이블에는 한 줄로 보이게(줄바꿈 제거), 팝업은 원문 사용
-                comment_one_line = (r["comment"] or "").replace("\n", " ")
+                comment_one_line = (rr.get("comment", "") or "").replace("\n", " ")
+
+                # ✅ 이의 처리 상태/코멘트/시각 (사장 처리 결과)
+                # DB 쿼리에 따라 dispute_status 라는 별칭을 쓰거나 status를 그대로 쓸 수 있으니 둘 다 대응
+                dispute_status_code = rr.get("dispute_status") or rr.get("d_status") or rr.get(
+                    "status_dispute") or rr.get("status")
+                dispute_status_label = DISPUTE_STATUS.get(dispute_status_code, dispute_status_code or "")
+
+                resolution_comment_one_line = (rr.get("resolution_comment", "") or "").replace("\n", " ")
+                resolved_at = rr.get("resolved_at", "") or ""
 
                 out.append([
-                    str(r["id"]),
-                    str(r["request_id"]),
+                    str(rr.get("id", "")),
+                    str(rr.get("request_id", "")),
                     req_type_label,
-                    r["requested_at"],
-                    status_label,  # ← 여기 한글화
-                    r["approved_at"] or "",
-                    r["dispute_type"],
+                    rr.get("requested_at", "") or "",
+                    req_status_label,
+                    rr.get("approved_at", "") or "",
+                    rr.get("dispute_type", "") or "",
                     comment_one_line,
-                    r["created_at"],
+                    rr.get("created_at", "") or "",
+
+                    # ✅ 추가 3컬럼
+                    dispute_status_label,
+                    resolution_comment_one_line,
+                    resolved_at,
                 ])
+
             self.my_dispute_table.set_rows(out)
             QtCore.QTimer.singleShot(0, self._wire_my_dispute_doubleclick)
 
@@ -293,19 +310,27 @@ class WorkerPage(QtWidgets.QWidget):
 
     def _show_my_dispute_comment_popup(self, row: int):
         rows = getattr(self, "_my_dispute_rows", None)
-        full_text = ""
-        if rows and 0 <= row < len(rows):
-            try:
-                full_text = (rows[row]["comment"] or "").strip()
-            except Exception:
-                full_text = str(rows[row]["comment"]).strip() if "comment" in rows[row].keys() else ""
-
-        if not full_text:
-            Message.warn(self, "이의 내용", "표시할 이의내용이 없습니다.")
+        if not rows or not (0 <= row < len(rows)):
+            Message.warn(self, "이의 내용", "표시할 항목이 없습니다.")
             return
 
+        rr = dict(rows[row])
+
+        user_comment = (rr.get("comment") or "").strip()
+        status_code = rr.get("dispute_status") or ""
+        status_label = DISPUTE_STATUS.get(status_code, status_code)
+        owner_comment = (rr.get("resolution_comment") or "").strip()
+        resolved_at = (rr.get("resolved_at") or "").strip()
+
+        full_text = (
+            f"[나의 이의 내용]\n{user_comment}\n\n"
+            f"[처리 상태]\n{status_label}\n\n"
+            f"[사장 코멘트]\n{owner_comment or '(없음)'}\n\n"
+            f"[처리 시각]\n{resolved_at or '(없음)'}"
+        )
+
         dlg = QtWidgets.QDialog(self)
-        dlg.setWindowTitle("이의 내용 전체 보기")
+        dlg.setWindowTitle("이의 내용/처리 결과")
         dlg.resize(700, 450)
 
         layout = QtWidgets.QVBoxLayout(dlg)

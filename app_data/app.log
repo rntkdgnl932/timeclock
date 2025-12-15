@@ -489,3 +489,18 @@ Traceback (most recent call last):
   File "C:\my_games\timeclock\timeclock\db.py", line 844, in resolve_dispute
     if self.conn.rowcount == 0:
 AttributeError: 'sqlite3.Connection' object has no attribute 'rowcount'
+2025-12-15 12:24:07,894 [INFO] Login success: owner (owner)
+2025-12-15 12:24:07,895 [INFO] Logged in: owner (owner)
+2025-12-15 12:24:07,920 [INFO] Refreshing pending requests
+2025-12-15 12:24:07,920 [INFO] Refreshing disputes
+2025-12-15 12:24:07,921 [INFO] Refreshing signup requests
+2025-12-15 12:24:29,793 [INFO] Refreshing disputes
+2025-12-15 12:24:46,508 [INFO] Logout: owner
+2025-12-15 12:24:59,319 [INFO] Login success: test01 (worker)
+2025-12-15 12:24:59,319 [INFO] Logged in: test01 (worker)
+2025-12-15 12:25:15,575 [INFO] Login success: test01 (worker)
+2025-12-15 12:25:15,575 [INFO] Logged in: test01 (worker)
+2025-12-15 12:25:15,604 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-15 12:25:15,604 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-15 12:25:15,604 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-15 12:25:15,604 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)

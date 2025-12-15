@@ -438,7 +438,10 @@ class DB:
                    a.approved_at,
                    d.dispute_type,
                    d.comment,
-                   d.created_at
+                   d.created_at,
+                   d.status AS dispute_status,
+                   d.resolution_comment,
+                   d.resolved_at
             FROM disputes d
             JOIN requests r ON r.id = d.request_id
             LEFT JOIN approvals a ON a.request_id = r.id
@@ -806,26 +809,21 @@ class DB:
         return True, ""
 
     def resolve_dispute(self, dispute_id: int, resolved_by_id: int, status_code: str, resolution_comment: str):
-        """
-        이의 제기 상태를 RESOLVED, REJECTED 등으로 변경하고 처리 정보를 기록합니다.
-        """
         now = now_str()
 
-        cur = self.conn.execute(
-            """
-            UPDATE disputes
-            SET status=?,
-                resolved_at=?,
-                resolved_by=?,
-                resolution_comment=?
-            WHERE id=? AND status NOT IN ('RESOLVED', 'REJECTED')
-            """,
-            (status_code, now, resolved_by_id, resolution_comment, dispute_id),
-        )
+        with self.conn:
+            cur = self.conn.execute(
+                """
+                UPDATE disputes
+                SET status=?,
+                    resolved_at=?,
+                    resolved_by=?,
+                    resolution_comment=?
+                WHERE id=? AND status NOT IN ('RESOLVED', 'REJECTED')
+                """,
+                (status_code, now, resolved_by_id, resolution_comment, dispute_id),
+            )
 
-        if cur.rowcount == 0:
-            self.conn.rollback()
-            raise ValueError("해당 ID의 미처리 이의 제기를 찾을 수 없거나 이미 처리된 상태입니다.")
-
-        self.conn.commit()
+            if cur.rowcount == 0:
+                raise ValueError("해당 ID의 미처리 이의 제기를 찾을 수 없거나 이미 처리된 상태입니다.")
 
