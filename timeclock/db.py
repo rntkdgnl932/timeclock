@@ -26,6 +26,7 @@ class DB:
         self.conn.commit()
 
         self._migrate()
+        self._migrate_dispute_comments_to_messages()  # ✅ 마이그레이션 함수를 _migrate 이후에 호출
         self._ensure_indexes()
         self._ensure_defaults()
 
@@ -1022,6 +1023,68 @@ class DB:
 
         return dispute_id
 
+    # timeclock/db.py (DB 클래스 내부)
+
+    def _migrate_dispute_comments_to_messages(self):
+            """
+            기존 disputes.comment에 누적된 텍스트 대화 내용을
+            dispute_messages 테이블의 개별 메시지 레코드로 마이그레이션합니다.
+            (주로 과거 데이터 복구용이며, 단 한 번만 실행되어야 합니다.)
+            """
+            cur = self.conn.cursor()
+
+            # 🚨 마이그레이션 실행 플래그 체크 (DB에 임시 테이블을 사용하여 실행 여부를 체크)
+            try:
+                cur.execute("SELECT 1 FROM migration_status WHERE name='dispute_comment_to_message'")
+                if cur.fetchone():
+                    return
+            except sqlite3.OperationalError:
+                # migration_status 테이블이 없으면 생성
+                cur.execute("CREATE TABLE IF NOT EXISTS migration_status (name TEXT PRIMARY KEY)")
+                self.conn.commit()
+
+            logging.info("Starting migration of old dispute comments to dispute_messages...")
+
+            # 1. messages 테이블이 비어있음을 가정하고, 모든 disputes를 조회
+            disputes = self.conn.execute("SELECT * FROM disputes ORDER BY id ASC").fetchall()
+
+            total_migrated = 0
+
+            for d in disputes:
+                dispute_id = d["id"]
+                comment_text = d["comment"] or ""
+                created_at = d["created_at"]
+                user_id = d["user_id"]
+
+                if not comment_text.strip():
+                    continue
+
+                # messages 테이블에 해당 dispute_id의 기록이 이미 있는지 확인 (중복 마이그레이션 방지)
+                # (이전에 사업주 코멘트가 기록되었을 경우)
+                count = \
+                cur.execute("SELECT COUNT(1) FROM dispute_messages WHERE dispute_id=?", (dispute_id,)).fetchone()[0]
+                if count > 0:
+                    # 이미 기록이 있다면, 이 레코드는 최신 코드로 처리된 것이므로 마이그레이션 건너뜀
+                    continue
+
+                # 🚨 단순화: comment 필드 전체를 최초 Worker 메시지로 통째로 옮기고,
+                # UI에서 메시지 분리 및 중복 제거를 담당하도록 합니다. (가장 안전한 복구 방식)
+
+                # 1. 최초 이의 제기 (disputes.comment 원문 전체)
+                cur.execute(
+                    """
+                    INSERT INTO dispute_messages(dispute_id, sender_user_id, sender_role, message, status_code, created_at)
+                    VALUES(?,?,?,?,?,?)
+                    """,
+                    (dispute_id, user_id, "worker", comment_text, None, created_at),
+                )
+
+                total_migrated += 1
+
+            # 🚨 마이그레이션 완료 플래그 기록
+            cur.execute("INSERT INTO migration_status(name) VALUES('dispute_comment_to_message')")
+            self.conn.commit()
+            logging.info(f"Completed migration. {total_migrated} dispute records processed.")
 
     def add_dispute_message(
             self,

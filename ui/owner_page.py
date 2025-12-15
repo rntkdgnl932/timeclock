@@ -707,7 +707,6 @@ class OwnerPage(QtWidgets.QWidget):
 
     #
 
-
     def open_dispute_timeline_by_row(self, row_idx: int, title: str = "이의 내용/처리 타임라인"):
         if not hasattr(self, "_dispute_rows") or not self._dispute_rows:
             Message.err(self, "오류", "원본 이의 데이터가 없습니다. 새로고침 후 다시 시도하세요.")
@@ -769,7 +768,7 @@ class OwnerPage(QtWidgets.QWidget):
             /* WORKER: 왼쪽 정렬 */
             .worker-cell {{ text-align: left; }}
             .worker-bubble {{ 
-                background-color: #e6e6e6; 
+                background-color: #e6e6e6; /* 왼쪽, 회색 */
                 border-radius: 8px; 
                 padding: 8px 12px; 
                 max-width: 90%;
@@ -779,7 +778,7 @@ class OwnerPage(QtWidgets.QWidget):
             /* OWNER: 오른쪽 정렬 */
             .owner-cell {{ text-align: right; }}
             .owner-bubble {{ 
-                background-color: #dcf8c6; 
+                background-color: #dcf8c6; /* 오른쪽, 초록 */
                 border-radius: 8px; 
                 padding: 8px 12px; 
                 max-width: 90%;
@@ -816,17 +815,17 @@ class OwnerPage(QtWidgets.QWidget):
 
             # ✅ 수정: 중복 및 포맷 제거 로직
             if event["who"] == "worker":
-                # 1. 누적된 원문(comment_full)과 정확히 일치하는 메시지는 건너뜁니다. (최초 메시지 중복 제거)
+                # 1. 중복 제거: 마이그레이션된 최초 메시지 (dispute_comment_full)와 완전히 일치하는 메시지 건너뛰기
                 if comment == dispute_comment_full:
                     continue
 
-                # 2. '이의 유형:' 포맷 제거 (대화형 유지)
+                # 2. 포맷 제거: 재이의 시 붙는 '[이의 유형:...' 포맷 제거
                 if comment.startswith('[이의 유형:'):
                     lines = comment.split('\n', 1)
                     safe_comment = lines[1] if len(lines) > 1 else lines[0]
                     safe_comment = safe_comment.replace('<', '&lt;').replace('>', '&gt;')
 
-            # 메시지 내용이 비어있으면 건너뜀
+            # 메시지 내용이 비어있으면 건너김
             if not safe_comment.strip():
                 continue
 

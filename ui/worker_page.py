@@ -351,6 +351,7 @@ class WorkerPage(QtWidgets.QWidget):
 
         timeline_events = []
         try:
+            # DB에서 오직 메시지 기록만 가져옴
             timeline_events = self.db.get_dispute_timeline(dispute_id)
         except Exception as e:
             logging.exception("Failed to get dispute timeline")
@@ -359,7 +360,7 @@ class WorkerPage(QtWidgets.QWidget):
 
         html_content = []
 
-        # ------------------ 요청 정보 추출 ------------------
+        # ------------------ 요청 정보 추출 및 정리 ------------------
         worker_username = self.session.username
         request_id = rr.get("request_id", "N/A")
         req_type = REQ_TYPES.get(rr.get("req_type"), rr.get("req_type", "N/A"))
@@ -446,11 +447,11 @@ class WorkerPage(QtWidgets.QWidget):
 
             # ✅ 수정: 중복 및 포맷 제거 로직
             if event["who"] == "worker":
-                # 1. 중복 제거
+                # 1. 중복 제거: 마이그레이션된 최초 메시지 (dispute_comment_full)와 완전히 일치하는 메시지 건너뛰기
                 if comment == dispute_comment_full:
                     continue
 
-                # 2. 포맷 제거
+                # 2. 포맷 제거: 재이의 시 붙는 '[이의 유형:...' 포맷 제거
                 if comment.startswith('[이의 유형:'):
                     lines = comment.split('\n', 1)
                     safe_comment = lines[1] if len(lines) > 1 else lines[0]

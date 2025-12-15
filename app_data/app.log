@@ -1194,3 +1194,65 @@ sqlite3.IntegrityError: NOT NULL constraint failed: dispute_messages.thread_id
 2025-12-16 06:38:07,859 [INFO] Refreshing disputes
 2025-12-16 06:38:07,860 [INFO] Refreshing signup requests
 2025-12-16 06:38:19,437 [INFO] Refreshing disputes
+2025-12-16 06:38:35,524 [INFO] Login success: owner (owner)
+2025-12-16 06:38:35,524 [INFO] Logged in: owner (owner)
+2025-12-16 06:38:35,548 [INFO] Refreshing pending requests
+2025-12-16 06:38:35,548 [INFO] Refreshing disputes
+2025-12-16 06:38:35,549 [INFO] Refreshing signup requests
+2025-12-16 06:46:52,246 [INFO] Starting migration of old dispute comments to dispute_messages...
+2025-12-16 06:46:52,247 [INFO] Completed migration. 11 dispute records processed.
+2025-12-16 06:46:55,810 [INFO] Login success: owner (owner)
+2025-12-16 06:46:55,810 [INFO] Logged in: owner (owner)
+2025-12-16 06:46:55,833 [INFO] Refreshing pending requests
+2025-12-16 06:46:55,833 [INFO] Refreshing disputes
+2025-12-16 06:46:55,834 [INFO] Refreshing signup requests
+2025-12-16 06:47:02,174 [INFO] Logout: owner
+2025-12-16 06:47:04,150 [INFO] Login success: worker (worker)
+2025-12-16 06:47:04,150 [INFO] Logged in: worker (worker)
+2025-12-16 06:47:04,197 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-16 06:47:04,197 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-16 06:47:04,197 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-16 06:47:04,197 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-16 06:47:23,967 [INFO] Dispute created: request_id=7 user=worker
+2025-12-16 06:47:36,643 [INFO] Dispute created: request_id=7 user=worker
+2025-12-16 06:47:44,040 [INFO] Logout: worker
+2025-12-16 06:47:46,167 [INFO] Login success: owner (owner)
+2025-12-16 06:47:46,167 [INFO] Logged in: owner (owner)
+2025-12-16 06:47:46,181 [INFO] Refreshing pending requests
+2025-12-16 06:47:46,181 [INFO] Refreshing disputes
+2025-12-16 06:47:46,182 [INFO] Refreshing signup requests
+2025-12-16 06:48:07,016 [INFO] Refreshing disputes
+2025-12-16 06:48:16,589 [INFO] Logout: owner
+2025-12-16 06:48:19,884 [INFO] Login success: worker (worker)
+2025-12-16 06:48:19,884 [INFO] Logged in: worker (worker)
+2025-12-16 06:48:19,929 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-16 06:48:19,929 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-16 06:48:19,929 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-16 06:48:19,929 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-16 06:48:21,645 [INFO] Worker request created: user=worker type=OUT at=2025-12-16 06:48:21
+2025-12-16 06:48:24,671 [INFO] Logout: worker
+2025-12-16 06:48:26,041 [INFO] Login success: owner (owner)
+2025-12-16 06:48:26,041 [INFO] Logged in: owner (owner)
+2025-12-16 06:48:26,055 [INFO] Refreshing pending requests
+2025-12-16 06:48:26,055 [INFO] Refreshing disputes
+2025-12-16 06:48:26,056 [INFO] Refreshing signup requests
+2025-12-16 06:48:34,727 [INFO] Refreshing pending requests
+2025-12-16 06:48:35,525 [INFO] Logout: owner
+2025-12-16 06:48:37,627 [INFO] Login success: worker (worker)
+2025-12-16 06:48:37,628 [INFO] Logged in: worker (worker)
+2025-12-16 06:48:37,673 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-16 06:48:37,673 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-16 06:48:37,673 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-16 06:48:37,673 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-16 06:48:47,528 [INFO] Dispute created: request_id=8 user=worker
+2025-12-16 06:48:50,228 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-16 06:48:50,228 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-16 06:49:05,487 [INFO] Dispute created: request_id=8 user=worker
+2025-12-16 06:49:07,082 [INFO] Logout: worker
+2025-12-16 06:49:08,180 [INFO] Login success: owner (owner)
+2025-12-16 06:49:08,180 [INFO] Logged in: owner (owner)
+2025-12-16 06:49:08,195 [INFO] Refreshing pending requests
+2025-12-16 06:49:08,195 [INFO] Refreshing disputes
+2025-12-16 06:49:08,196 [INFO] Refreshing signup requests
+2025-12-16 06:49:20,611 [INFO] Refreshing disputes
+2025-12-16 06:49:37,830 [INFO] Logout: owner
