@@ -320,46 +320,51 @@ class WorkerPage(QtWidgets.QWidget):
         rr = dict(rows[row])
         dispute_id = int(rr.get("id", 0))
 
-        lines = []
+        sep = "-" * 70
 
-        # =========================
-        # 1️⃣ 근로자 이의 원문
-        # =========================
-        worker_name = self.session.username
+        def _prefix_lines(msg: str) -> str:
+            msg = (msg or "").strip()
+            if not msg:
+                return "=> (내용 없음)"
+            return "\n".join([f"=> {line}" for line in msg.splitlines()])
+
+        blocks = []
+
+        # 1) 근로자 원문
+        worker_name = getattr(self.session, "username", "worker")
         worker_at = rr.get("created_at") or ""
         worker_comment = rr.get("comment") or ""
+        worker_body = _prefix_lines(worker_comment)
 
-        lines.append(f"근로자({worker_name})  {worker_at}")
-        if worker_comment:
-            for l in worker_comment.splitlines():
-                lines.append(f"  {l}")
-        else:
-            lines.append("  (내용 없음)")
-        lines.append("")
+        blocks.append(
+            f"{sep}\n"
+            f"[근로자({worker_name})]  {worker_at}\n"
+            f"{worker_body}"
+        )
 
-        # =========================
-        # 2️⃣ 사장 최신 처리 결과 (disputes 테이블 기준)
-        # ❗❗ 이게 지금까지 빠져 있었던 핵심
-        # =========================
+        # 2) 사업주 최신 처리 결과
         dispute_status = rr.get("dispute_status") or rr.get("status")
         status_label = DISPUTE_STATUS.get(dispute_status, dispute_status or "")
         resolution_comment = rr.get("resolution_comment") or ""
         resolved_at = rr.get("resolved_at") or ""
 
-        if status_label or resolution_comment:
-            lines.append(f"사업주  {resolved_at or '(처리시각 없음)'}")
+        if status_label or (resolution_comment or "").strip() or resolved_at:
+            owner_lines = []
             if status_label:
-                lines.append(f"  처리상태: {status_label}")
-            if resolution_comment:
-                for l in resolution_comment.splitlines():
-                    lines.append(f"  {l}")
-            else:
-                lines.append("  (코멘트 없음)")
-            lines.append("")
+                owner_lines.append(f"처리상태: {status_label}")
+            if (resolution_comment or "").strip():
+                owner_lines.append(resolution_comment)
 
-        # =========================
-        # 3️⃣ 추가 처리 이력 (audit_logs, 있으면)
-        # =========================
+            owner_text = "\n".join(owner_lines) if owner_lines else ""
+            owner_body = _prefix_lines(owner_text)
+
+            blocks.append(
+                f"{sep}\n"
+                f"[사업주]  {resolved_at or '(처리시각 없음)'}\n"
+                f"{owner_body}"
+            )
+
+        # 3) 처리 이력(audit_logs)
         try:
             audit_rows = self.db.list_dispute_audit_updates(dispute_id)
         except Exception:
@@ -368,40 +373,46 @@ class WorkerPage(QtWidgets.QWidget):
         import json
         for a in audit_rows:
             ar = dict(a)
+            aid = ar.get("id")
             actor = ar.get("actor_username") or "owner"
             at = ar.get("created_at") or ""
 
             detail = {}
-            if ar.get("detail_json"):
+            dj = ar.get("detail_json") or ""
+            if dj:
                 try:
-                    detail = json.loads(ar["detail_json"])
+                    detail = json.loads(dj)
                 except Exception:
-                    pass
+                    detail = {"comment": str(dj)}
 
-            status = detail.get("status_label") or detail.get("status_code") or ""
-            comment = detail.get("comment") or ""
+            s2 = (detail.get("status_label") or detail.get("status_code") or "").strip()
+            c2 = (detail.get("comment") or "").strip()
 
-            lines.append(f"처리기록  {actor}  {at}")
-            if status:
-                lines.append(f"  상태: {status}")
-            if comment:
-                for l in comment.splitlines():
-                    lines.append(f"  {l}")
-            else:
-                lines.append("  (내용 없음)")
-            lines.append("")
+            hist_lines = []
+            if s2:
+                hist_lines.append(f"처리상태: {s2}")
+            if c2:
+                hist_lines.append(c2)
 
-        # =========================
-        # 다이얼로그 표시
-        # =========================
+            hist_text = "\n".join(hist_lines) if hist_lines else ""
+            hist_body = _prefix_lines(hist_text)
+
+            blocks.append(
+                f"{sep}\n"
+                f"[처리기록 #{aid}] {actor}  {at}\n"
+                f"{hist_body}"
+            )
+
+        timeline_text = "\n".join(blocks)
+
         dlg = QtWidgets.QDialog(self)
         dlg.setWindowTitle("이의 내용/처리 타임라인")
-        dlg.resize(800, 520)
+        dlg.resize(900, 600)
 
         layout = QtWidgets.QVBoxLayout(dlg)
         edit = QtWidgets.QPlainTextEdit()
         edit.setReadOnly(True)
-        edit.setPlainText("\n".join(lines))
+        edit.setPlainText(timeline_text)
 
         btn = QtWidgets.QPushButton("닫기")
         btn.clicked.connect(dlg.accept)
