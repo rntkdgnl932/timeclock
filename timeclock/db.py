@@ -412,87 +412,7 @@ class DB:
             logging.error(f"DB 오류: approve_request 처리 중 실패, req_id={request_id}: {e}")
             raise Exception(f"요청 승인 중 치명적인 DB 오류가 발생했습니다: {e}")
 
-    # --- Disputes ---
 
-    def create_dispute(self, request_id: int, user_id: int, dispute_type: str, comment: str):
-        """
-        [최종 확정] 같은 request_id + user_id에 대해 가장 최근의 이의를 찾아 누적하고,
-        메시지 중복을 피하기 위해 disputes.comment 사용을 최소화합니다.
-        """
-        comment = (comment or "").strip()
-        now = now_str()
-        # messages 테이블에 저장할 메시지 내용
-        message_content = f"[이의 유형: {dispute_type}]\n{comment}"
-
-        # 1) '처리 상태와 무관하게' 같은 요청ID에 대한 가장 최근의 이의를 찾습니다.
-        row = self.conn.execute(
-            """
-            SELECT id, comment
-            FROM disputes
-            WHERE request_id=? AND user_id=?
-            ORDER BY id DESC
-            LIMIT 1
-            """,
-            (request_id, user_id),
-        ).fetchone()
-
-        if row:
-            dispute_id = int(row["id"])
-            prev = row["comment"] or ""
-
-            # 1-1) disputes.comment에 누적 (UI 출력용이 아닌, 기존 로직과의 호환성 유지용)
-            new_entry_comment = (
-                f"\n\n{'=' * 30} [추가 제기: {now}] {'=' * 30}\n"
-                f"{message_content}"
-            )
-            merged_comment = prev + new_entry_comment if prev else new_entry_comment
-
-            # 1-2) disputes Row의 상태 업데이트 (PENDING으로 초기화)
-            self.conn.execute(
-                """
-                UPDATE disputes SET 
-                    comment=?,             -- ✅ comment 필드에 누적
-                    dispute_type=?,  
-                    status='PENDING',      -- 상태를 PENDING으로 강제 초기화
-                    resolved_at=NULL,
-                    resolution_comment=NULL
-                WHERE id=?
-                """,
-                (merged_comment, dispute_type, dispute_id),
-            )
-            self.conn.commit()
-
-            # ✅ 수정: message_content를 dispute_messages에 한 번만 추가 (중복 해결)
-            self.add_dispute_message(
-                dispute_id,
-                sender_user_id=user_id,
-                sender_role="worker",
-                message=message_content,
-                status_code=None,
-            )
-            return dispute_id
-
-        # 2) 없으면 새로 생성 (최초 제기)
-        cur = self.conn.execute(
-            """
-            INSERT INTO disputes(request_id, user_id, dispute_type, comment, created_at, status)
-            VALUES(?,?,?,?,?,?)
-            """,
-            (request_id, user_id, dispute_type, comment, now, "PENDING"),
-        )
-        dispute_id = cur.lastrowid
-        self.conn.commit()
-
-        # ✅ 수정: disputes_messages에 최초 이의 제기 사실도 기록합니다. (중복 해결)
-        self.add_dispute_message(
-            dispute_id,
-            sender_user_id=user_id,
-            sender_role="worker",
-            message=message_content,
-            status_code=None,
-        )
-
-        return dispute_id
 
     # 🚨 수정: request_id 별 최신 이의만 조회하도록 쿼리 변경
     def list_disputes(self, date_from: str, date_to: str, limit: int = 1000):
@@ -982,44 +902,15 @@ class DB:
 
     #
 
+
     def get_dispute_timeline(self, dispute_id: int):
         """
-        [최종 복구/수정] disputes(최초 원문/누적)와 dispute_messages(사업주 메시지)를 합쳐서 시간 순서대로 반환합니다.
-        - 중복되는 최초 Worker 메시지를 건너뜁니다.
+        [최종 확정] dispute_messages 테이블의 모든 메시지(근로자/사업주)를 시간순으로 반환합니다.
+        - disputes.comment (누적 원문)는 UI 상단 고정 영역에만 사용되므로, 대화 이벤트 목록에서는 제외합니다.
         """
 
-        # 1) disputes에서 근로자 원문/등록시각 (최초 이벤트이자 누적된 히스토리)
-        base = self.conn.execute(
-            """
-            SELECT d.id,
-                   d.user_id,
-                   u.username AS worker_username,
-                   d.comment AS worker_comment,
-                   d.created_at AS worker_created_at
-            FROM disputes d
-            JOIN users u ON u.id = d.user_id
-            WHERE d.id = ?
-            """,
-            (dispute_id,),
-        ).fetchone()
-
-        if not base:
-            return []
-
-        events = []
-
-        # A. 근로자 최초 이의 (disputes.comment 전체)를 첫 번째 이벤트로 추가 (사라진 대화 내용 복구)
-        events.append({
-            "who": "worker",
-            "username": base["worker_username"],
-            "at": base["worker_created_at"],
-            "status_code": None,
-            "status_label": None,
-            "comment": (base["worker_comment"] or "").strip(),
-            "sort_key": base["worker_created_at"]
-        })
-
-        # 2) dispute_messages에서 모든 메시지/처리 이력 가져오기
+        # disputes 테이블 조회는 UI의 상단 고정 영역을 위해 이미 list_disputes에서 수행됨.
+        # 대화 이벤트 목록은 오직 dispute_messages만 사용합니다.
         messages = self.conn.execute(
             """
             SELECT m.created_at,
@@ -1035,11 +926,8 @@ class DB:
             (dispute_id,),
         ).fetchall()
 
-        # ✅ 중복 방지: 첫 번째 메시지 (최초 이의 제기)를 건너뜁니다.
-        for i, row in enumerate(messages):
-            if i == 0 and row["sender_role"] == "worker":
-                continue
-
+        events = []
+        for row in messages:
             events.append({
                 "who": row["sender_role"],
                 "username": row["sender_username"] or "System",
@@ -1050,10 +938,89 @@ class DB:
                 "sort_key": row["created_at"]
             })
 
-        # 최종적으로 시간 순서대로 정렬
-        events.sort(key=lambda x: x['sort_key'])
-
+        # 시간 순서대로 정렬 (id ASC로 이미 정렬됨)
         return events
+
+    # --- Disputes ---
+
+
+    def create_dispute(self, request_id: int, user_id: int, dispute_type: str, comment: str):
+        """
+        [최종 확정] 같은 request_id + user_id에 대해 가장 최근의 이의를 찾아 누적하고,
+        메시지에 '추가 제기' 포맷을 넣지 않습니다.
+        """
+        comment = (comment or "").strip()
+        now = now_str()
+        # messages 테이블에 저장할 내용 (추가 제기 포맷 없음)
+        message_content = f"[이의 유형: {dispute_type}]\n{comment}"
+
+        # 1) '처리 상태와 무관하게' 같은 요청ID에 대한 가장 최근의 이의를 찾습니다.
+        row = self.conn.execute(
+            """
+            SELECT id, comment
+            FROM disputes
+            WHERE request_id=? AND user_id=?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (request_id, user_id),
+        ).fetchone()
+
+        if row:
+            dispute_id = int(row["id"])
+            prev = row["comment"] or ""
+
+            # 1-1) disputes.comment에 누적 (UI 상단 고정 영역의 '누적 내용'에 사용됨)
+            # ✅ 수정: 누적 포맷을 간결하게 변경 (UI에서 사용하지 않으므로 덜 중요함)
+            new_entry_comment = f"\n\n--- 추가 제기 [{now}] ---\n{message_content}"
+            merged_comment = prev + new_entry_comment if prev else message_content
+
+            # 1-2) disputes Row의 상태 업데이트
+            self.conn.execute(
+                """
+                UPDATE disputes SET 
+                    comment=?,             
+                    dispute_type=?,  
+                    status='PENDING',      
+                    resolved_at=NULL,
+                    resolution_comment=NULL
+                WHERE id=?
+                """,
+                (merged_comment, dispute_type, dispute_id),
+            )
+            self.conn.commit()
+
+            # ✅ dispute_messages에 순수한 메시지 내용만 추가
+            self.add_dispute_message(
+                dispute_id,
+                sender_user_id=user_id,
+                sender_role="worker",
+                message=message_content,
+                status_code=None,
+            )
+            return dispute_id
+
+        # 2) 없으면 새로 생성 (최초 제기)
+        cur = self.conn.execute(
+            """
+            INSERT INTO disputes(request_id, user_id, dispute_type, comment, created_at, status)
+            VALUES(?,?,?,?,?,?)
+            """,
+            (request_id, user_id, dispute_type, comment, now, "PENDING"),
+        )
+        dispute_id = cur.lastrowid
+        self.conn.commit()
+
+        # ✅ disputes_messages에 최초 메시지 기록
+        self.add_dispute_message(
+            dispute_id,
+            sender_user_id=user_id,
+            sender_role="worker",
+            message=message_content,
+            status_code=None,
+        )
+
+        return dispute_id
 
 
     def add_dispute_message(

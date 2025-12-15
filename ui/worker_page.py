@@ -384,12 +384,11 @@ class WorkerPage(QtWidgets.QWidget):
             }}
             .header-info strong {{ font-size: 1.1em; }}
             .dispute-original {{ 
-                background-color: #ffffe0; /* 연노랑 */
+                background-color: #ffffe0; 
                 border: 1px solid #e0e0e0;
                 padding: 10px; 
                 margin-bottom: 15px;
                 border-radius: 5px;
-                white-space: pre-wrap;
                 font-size: 0.9em;
             }}
             .chat-table {{ width: 100%; border-collapse: collapse; table-layout: fixed; }}
@@ -424,8 +423,7 @@ class WorkerPage(QtWidgets.QWidget):
             <strong>대상 요청 정보:</strong> {req_type} (ID: {request_id}) | 요청시각: {requested_at}
         </div>
         <div class="dispute-original">
-            <strong>최초 이의 유형:</strong> {dispute_type}<br>
-            <strong>누적 이의 내용:</strong><pre>{dispute_comment_full}</pre>
+            <strong>최초 이의 유형:</strong> {dispute_type}
         </div>
 
         <table class="chat-table">
@@ -442,8 +440,20 @@ class WorkerPage(QtWidgets.QWidget):
 
             safe_comment = comment.replace('<', '&lt;').replace('>', '&gt;')
 
-            # 근로자의 누적 원문(첫 번째 이벤트)은 상단 고정 영역에 이미 표시되었으므로, 건너뜁니다.
-            if event["who"] == "worker" and event["comment"] == dispute_comment_full:
+            # ✅ 수정:
+            # 1. 중복 제거
+            if event["who"] == "worker" and comment == dispute_comment_full:
+                continue
+
+            # 2. 포맷 제거
+            if event["who"] == "worker":
+                if comment.startswith('[이의 유형:'):
+                    lines = comment.split('\n', 1)
+                    safe_comment = lines[1] if len(lines) > 1 else lines[0]
+                    safe_comment = safe_comment.replace('<', '&lt;').replace('>', '&gt;')
+
+            # 메시지 내용이 비어있으면 건너뜀 (코멘트 없이 상태 변경만 했을 경우)
+            if not safe_comment.strip():
                 continue
 
             is_worker = (who == "worker")

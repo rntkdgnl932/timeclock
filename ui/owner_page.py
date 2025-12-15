@@ -707,7 +707,6 @@ class OwnerPage(QtWidgets.QWidget):
 
     #
 
-
     def open_dispute_timeline_by_row(self, row_idx: int, title: str = "이의 내용/처리 타임라인"):
         if not hasattr(self, "_dispute_rows") or not self._dispute_rows:
             Message.err(self, "오류", "원본 이의 데이터가 없습니다. 새로고침 후 다시 시도하세요.")
@@ -729,12 +728,13 @@ class OwnerPage(QtWidgets.QWidget):
 
         html_content = []
 
-        # ------------------ 요청 정보 추출 ------------------
+        # ------------------ 요청 정보 추출 및 정리 ------------------
         worker_username = rr.get("worker_username", "Unknown")
         request_id = rr.get("request_id", "N/A")
         req_type = REQ_TYPES.get(rr.get("req_type"), rr.get("req_type", "N/A"))
         requested_at = rr.get("requested_at", "N/A")
 
+        # ✅ 상단 고정 영역에 표시할 정보
         dispute_type = rr.get("dispute_type", "N/A")
         dispute_comment_full = rr.get("comment", "")  # disputes 테이블에 누적된 원문 전체
 
@@ -754,12 +754,11 @@ class OwnerPage(QtWidgets.QWidget):
             }}
             .header-info strong {{ font-size: 1.1em; }}
             .dispute-original {{ 
-                background-color: #ffffe0; /* 연노랑 */
+                background-color: #ffffe0; 
                 border: 1px solid #e0e0e0;
                 padding: 10px; 
                 margin-bottom: 15px;
                 border-radius: 5px;
-                white-space: pre-wrap;
                 font-size: 0.9em;
             }}
             .chat-table {{ width: 100%; border-collapse: collapse; table-layout: fixed; }}
@@ -768,7 +767,7 @@ class OwnerPage(QtWidgets.QWidget):
             /* WORKER: 왼쪽 정렬 */
             .worker-cell {{ text-align: left; }}
             .worker-bubble {{ 
-                background-color: #e6e6e6; /* 왼쪽, 회색 */
+                background-color: #e6e6e6; 
                 border-radius: 8px; 
                 padding: 8px 12px; 
                 max-width: 90%;
@@ -778,7 +777,7 @@ class OwnerPage(QtWidgets.QWidget):
             /* OWNER: 오른쪽 정렬 */
             .owner-cell {{ text-align: right; }}
             .owner-bubble {{ 
-                background-color: #dcf8c6; /* 오른쪽, 초록 */
+                background-color: #dcf8c6; 
                 border-radius: 8px; 
                 padding: 8px 12px; 
                 max-width: 90%;
@@ -794,8 +793,7 @@ class OwnerPage(QtWidgets.QWidget):
             <strong>대상 요청 정보:</strong> {req_type} (ID: {request_id}) | 요청시각: {requested_at}
         </div>
         <div class="dispute-original">
-            <strong>최초 이의 유형:</strong> {dispute_type}<br>
-            <strong>누적 이의 내용:</strong><pre>{dispute_comment_full}</pre>
+            <strong>최초 이의 유형:</strong> {dispute_type}
         </div>
 
         <table class="chat-table">
@@ -812,9 +810,23 @@ class OwnerPage(QtWidgets.QWidget):
 
             safe_comment = comment.replace('<', '&lt;').replace('>', '&gt;')
 
-            # 근로자의 누적 원문(첫 번째 이벤트)은 상단 고정 영역에 이미 표시되었으므로, 건너뜁니다.
-            # 이 부분이 없으면 대화 내용이 2번 반복되거나, 근로자의 재이의만 나오게 됩니다.
-            if event["who"] == "worker" and event["comment"] == dispute_comment_full:
+            # ✅ 수정:
+            # 1. disputes.comment와 정확히 일치하는 메시지 (최초 메시지) 건너뛰기
+            # 2. '이의 유형:' 포맷 제거 (대화처럼 보이게 하기 위함)
+            if event["who"] == "worker":
+                # 1. 중복 제거
+                if comment == dispute_comment_full:
+                    continue
+
+                # 2. 포맷 제거
+                # "[이의 유형: XX]\n본문" 형태에서 본문만 남깁니다.
+                if comment.startswith('[이의 유형:'):
+                    lines = comment.split('\n', 1)
+                    safe_comment = lines[1] if len(lines) > 1 else lines[0]
+                    safe_comment = safe_comment.replace('<', '&lt;').replace('>', '&gt;')
+
+            # 메시지 내용이 비어있으면 건너뜀 (코멘트 없이 상태 변경만 했을 경우)
+            if not safe_comment.strip():
                 continue
 
             is_owner = (who == "owner")
