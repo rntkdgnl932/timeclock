@@ -312,7 +312,6 @@ class WorkerPage(QtWidgets.QWidget):
             return
         self._show_my_dispute_comment_popup(index.row()) # 전체보기 팝업 호출
 
-    # timeclock/ui/worker_page.py
 
     def _show_my_dispute_comment_popup(self, row: int):
         rows = getattr(self, "_my_dispute_rows", None)
@@ -323,7 +322,7 @@ class WorkerPage(QtWidgets.QWidget):
         rr = dict(rows[row])
         dispute_id = int(rr.get("id", 0))
 
-        sep = "-" * 70
+        sep = "=" * 30
 
         def _prefix_lines(msg: str) -> str:
             msg = (msg or "").strip()
@@ -333,7 +332,7 @@ class WorkerPage(QtWidgets.QWidget):
 
         timeline_events = []
         try:
-            # ✅ 수정: dispute_messages 기반 타임라인 데이터 사용
+            # ✅ DB에서 모든 이력 (원문 + 메시지)을 가져옵니다.
             timeline_events = self.db.get_dispute_timeline(dispute_id)
         except Exception as e:
             logging.exception("Failed to get dispute timeline")
@@ -349,13 +348,16 @@ class WorkerPage(QtWidgets.QWidget):
             comment = event.get("comment")
             status_code = event.get("status_code")
 
-            if who == "worker" and status_code is None:  # 근로자의 이의 제기 원문 (get_dispute_timeline의 첫 번째 이벤트)
+            # 근로자 메시지
+            if who == "worker":
+                header_text = f"[근로자({username})]  {at}"
                 blocks.append(
                     f"{sep}\n"
-                    f"[근로자({username})]  {at}\n"
+                    f"{header_text}\n"
                     f"{_prefix_lines(comment)}"
                 )
-            elif who == "owner":  # 사업주의 메시지/처리 (dispute_messages 기반)
+            # 사업주 메시지/처리
+            elif who == "owner":
                 # DISPUTE_STATUS는 timeclock.settings에서 import 됨
                 status_label = DISPUTE_STATUS.get(status_code, status_code or "")
 
@@ -367,9 +369,10 @@ class WorkerPage(QtWidgets.QWidget):
 
                 owner_text = "\n".join(owner_lines) if owner_lines else ""
 
+                header_text = f"[사업주({username})]  {at}"
                 blocks.append(
                     f"{sep}\n"
-                    f"[사업주({username})]  {at}\n"
+                    f"{header_text}\n"
                     f"{_prefix_lines(owner_text)}"
                 )
 

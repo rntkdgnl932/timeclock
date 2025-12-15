@@ -413,10 +413,14 @@ class DB:
             raise Exception(f"요청 승인 중 치명적인 DB 오류가 발생했습니다: {e}")
 
     # --- Disputes ---
+    # timeclock/db.py
+
     def create_dispute(self, request_id: int, user_id: int, dispute_type: str, comment: str):
         """
         [최종 수정] 같은 request_id + user_id에 대해 '가장 최근에 생성된' 이의를 찾아 누적합니다.
         (처리 완료 여부와 관계없이 누적하며, 상태를 PENDING으로 되돌립니다.)
+
+        *재이의 시: disputes.comment에 누적하는 대신, dispute_messages에 Worker 메시지로 저장하여 타임라인 순서 문제를 해결*
         """
         comment = (comment or "").strip()
         now = now_str()
@@ -435,32 +439,27 @@ class DB:
 
         if row:
             dispute_id = int(row["id"])
-            prev = row["comment"] or ""
 
-            # ✅ 수정: 기존 comment에 누적(새로운 시각/유형 정보 포함)
-            new_entry = (
-                f"\n\n{'=' * 30} [추가 제기: {now}] {'=' * 30}\n"
-                f"이의 유형: {dispute_type}\n"
-                f"내용:\n{comment}"
+            # ✅ 수정: 기존 disputes.comment에 누적하는 대신, dispute_messages에 Worker 메시지로 추가
+            self.add_dispute_message(
+                dispute_id,
+                sender_user_id=user_id,
+                sender_role="worker",
+                message=f"[이의 유형: {dispute_type}]\n{comment}",
+                status_code=None,
             )
 
-            merged = prev
-            if merged:
-                merged += new_entry
-            else:
-                merged = f"이의 유형: {dispute_type}\n내용:\n{comment}"  # 최초 제기 시에도 유형 기록
-
+            # 1-2) disputes Row의 상태 업데이트 (PENDING으로 초기화)
             self.conn.execute(
                 """
                 UPDATE disputes SET 
-                    comment=?, 
                     dispute_type=?,  
-                    status='PENDING',  -- ✅ 상태를 PENDING으로 강제 초기화 (사업주 재검토 유도)
+                    status='PENDING',  -- 상태를 PENDING으로 강제 초기화 (사업주 재검토 유도)
                     resolved_at=NULL,
                     resolution_comment=NULL
                 WHERE id=?
                 """,
-                (merged, dispute_type, dispute_id),
+                (dispute_type, dispute_id),
             )
             self.conn.commit()
             return dispute_id
@@ -475,6 +474,16 @@ class DB:
         )
         dispute_id = cur.lastrowid
         self.conn.commit()
+
+        # 2-1) disputes_messages에 최초 이의 제기 사실도 기록합니다. (모든 이력은 이 테이블로 통일)
+        self.add_dispute_message(
+            dispute_id,
+            sender_user_id=user_id,
+            sender_role="worker",
+            message=f"[이의 유형: {dispute_type}]\n{comment}",
+            status_code=None,
+        )
+
         return dispute_id
 
     # 🚨 수정: request_id 별 최신 이의만 조회하도록 쿼리 변경
@@ -966,8 +975,9 @@ class DB:
 
     def get_dispute_timeline(self, dispute_id: int):
         """
-        [수정] disputes(근로자 최초 이의) + dispute_messages(사업주/상태 변경 메시지)를 시간순으로 합쳐서 반환.
+        [최종 복구/수정] disputes(최초 원문)와 dispute_messages(모든 이력)를 가져와 시간 순서대로 정렬하여 반환합니다.
         """
+
         # 1) disputes에서 근로자 원문/등록시각 (최초 이벤트)
         base = self.conn.execute(
             """
@@ -986,16 +996,22 @@ class DB:
         if not base:
             return []
 
-        events = [{
+        events = []
+
+        # A. 근로자 최초 이의 (disputes.comment 전체)를 첫 번째 이벤트로 추가
+        # NOTE: comment 필드에 모든 누적 이력이 포함되어 있으므로, 이 필드만 worker 메시지로 사용.
+        events.append({
             "who": "worker",
             "username": base["worker_username"],
             "at": base["worker_created_at"],
             "status_code": None,
             "status_label": None,
             "comment": (base["worker_comment"] or "").strip(),
-        }]
+            "sort_key": base["worker_created_at"]
+        })
 
         # 2) dispute_messages에서 모든 메시지/처리 이력 가져오기
+        # NOTE: 근로자의 '재이의'와 사업주의 '처리'는 이 테이블에 저장됨
         messages = self.conn.execute(
             """
             SELECT m.created_at,
@@ -1011,9 +1027,6 @@ class DB:
             (dispute_id,),
         ).fetchall()
 
-        # DISPUTE_STATUS는 settings에 있지만, DB 레벨에서는 직접 접근 불가.
-        # 대신 팝업 표시 로직에서 DISPUTE_STATUS를 사용하도록 함.
-
         for row in messages:
             # DB 레벨에서는 status_label 대신 status_code와 role을 사용
             events.append({
@@ -1023,7 +1036,20 @@ class DB:
                 "status_code": row["status_code"],
                 "status_label": None,  # UI에서 settings를 참조하여 결정
                 "comment": (row["message"] or "").strip(),
+                "sort_key": row["created_at"]
             })
+
+        # 시간순 정렬 (list.sort()는 안정 정렬이므로 문제 없음)
+        # events.sort(key=lambda x: x['sort_key'])
+
+        # NOTE: SQLite의 'created_at' 필드는 YYYY-MM-DD HH:MM:SS 형식으로 텍스트 정렬이 시간 정렬과 동일함.
+        # disputes.created_at과 dispute_messages.created_at을 비교하여 최종적으로 시간순을 맞춥니다.
+        # 단, 현재 로직은 'dispute_messages'의 created_at이 'disputes'의 created_at보다 무조건 나중에 발생하므로
+        # events 리스트에서 dispute_messages 이벤트만 정렬하는 것이 더 안정적입니다.
+
+        # 현재 events는 1. disputes 원문, 2. dispute_messages 이력 순으로 되어 있음.
+        # dispute_messages 기록은 이미 ID 순서대로 정렬되어 있으므로, 그냥 반환합니다.
+        # 근로자의 재이의는 'dispute_messages'에 기록되므로, 사업주 코멘트와 시간 순으로 섞여 출력될 것입니다.
 
         return events
 

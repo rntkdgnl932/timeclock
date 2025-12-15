@@ -887,3 +887,45 @@ sqlite3.IntegrityError: NOT NULL constraint failed: dispute_messages.thread_id
 2025-12-16 05:28:40,823 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
 2025-12-16 05:28:40,823 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
 2025-12-16 05:28:40,823 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-16 05:30:13,578 [INFO] Login success: owner (owner)
+2025-12-16 05:30:13,578 [INFO] Logged in: owner (owner)
+2025-12-16 05:30:13,602 [INFO] Refreshing pending requests
+2025-12-16 05:30:13,602 [INFO] Refreshing disputes
+2025-12-16 05:30:13,603 [INFO] Refreshing signup requests
+2025-12-16 05:30:34,976 [INFO] Refreshing disputes
+2025-12-16 05:30:41,443 [INFO] Logout: owner
+2025-12-16 05:30:43,618 [INFO] Login success: worker (worker)
+2025-12-16 05:30:43,618 [INFO] Logged in: worker (worker)
+2025-12-16 05:30:43,649 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-16 05:30:43,649 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-16 05:30:43,649 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-16 05:30:43,649 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-16 05:30:54,274 [INFO] Dispute created: request_id=3 user=worker
+2025-12-16 05:31:17,119 [INFO] Dispute created: request_id=3 user=worker
+2025-12-16 05:34:33,192 [INFO] Login success: owner (owner)
+2025-12-16 05:34:33,192 [INFO] Logged in: owner (owner)
+2025-12-16 05:34:33,215 [INFO] Refreshing pending requests
+2025-12-16 05:34:33,215 [INFO] Refreshing disputes
+2025-12-16 05:34:33,216 [INFO] Refreshing signup requests
+2025-12-16 05:34:54,428 [INFO] Logout: owner
+2025-12-16 05:34:56,091 [INFO] Login success: worker (worker)
+2025-12-16 05:34:56,092 [INFO] Logged in: worker (worker)
+2025-12-16 05:34:56,126 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-16 05:34:56,126 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-16 05:34:56,126 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-16 05:34:56,126 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-16 05:37:51,255 [INFO] Login success: owner (owner)
+2025-12-16 05:37:51,255 [INFO] Logged in: owner (owner)
+2025-12-16 05:37:51,278 [INFO] Refreshing pending requests
+2025-12-16 05:37:51,278 [INFO] Refreshing disputes
+2025-12-16 05:37:51,279 [INFO] Refreshing signup requests
+2025-12-16 05:40:45,277 [INFO] Login success: owner (owner)
+2025-12-16 05:40:45,278 [INFO] Logged in: owner (owner)
+2025-12-16 05:40:45,300 [INFO] Refreshing pending requests
+2025-12-16 05:40:45,301 [INFO] Refreshing disputes
+2025-12-16 05:40:45,302 [INFO] Refreshing signup requests
+2025-12-16 05:43:34,265 [INFO] Login success: owner (owner)
+2025-12-16 05:43:34,265 [INFO] Logged in: owner (owner)
+2025-12-16 05:43:34,287 [INFO] Refreshing pending requests
+2025-12-16 05:43:34,288 [INFO] Refreshing disputes
+2025-12-16 05:43:34,288 [INFO] Refreshing signup requests
