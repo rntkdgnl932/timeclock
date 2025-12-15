@@ -1583,3 +1583,49 @@ sqlite3.IntegrityError: NOT NULL constraint failed: dispute_messages.thread_id
 2025-12-16 08:25:41,480 [INFO] Refreshing disputes
 2025-12-16 08:25:41,481 [INFO] Refreshing signup requests
 2025-12-16 08:26:12,103 [INFO] Refreshing disputes
+2025-12-16 08:26:16,888 [INFO] Login success: worker (worker)
+2025-12-16 08:26:16,889 [INFO] Logged in: worker (worker)
+2025-12-16 08:26:16,962 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-16 08:26:16,962 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-16 08:26:16,962 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-16 08:26:16,962 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-16 08:29:34,461 [INFO] Login success: owner (owner)
+2025-12-16 08:29:34,461 [INFO] Logged in: owner (owner)
+2025-12-16 08:29:34,484 [INFO] Refreshing pending requests
+2025-12-16 08:29:34,485 [INFO] Refreshing disputes
+2025-12-16 08:29:34,486 [INFO] Refreshing signup requests
+2025-12-16 08:33:09,542 [INFO] Login success: owner (owner)
+2025-12-16 08:33:09,542 [INFO] Logged in: owner (owner)
+2025-12-16 08:33:09,565 [INFO] Refreshing pending requests
+2025-12-16 08:33:09,565 [INFO] Refreshing disputes
+2025-12-16 08:33:09,566 [INFO] Refreshing signup requests
+2025-12-16 08:34:45,528 [INFO] Logout: owner
+2025-12-16 08:34:47,690 [INFO] Login success: worker (worker)
+2025-12-16 08:34:47,691 [INFO] Logged in: worker (worker)
+2025-12-16 08:34:47,750 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-16 08:34:47,751 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-16 08:34:47,751 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-16 08:34:47,751 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-16 08:35:05,553 [INFO] Dispute created: request_id=10 user=worker
+2025-12-16 08:35:07,472 [INFO] Logout: worker
+2025-12-16 08:35:08,997 [INFO] Login success: owner (owner)
+2025-12-16 08:35:08,997 [INFO] Logged in: owner (owner)
+2025-12-16 08:35:09,023 [INFO] Refreshing pending requests
+2025-12-16 08:35:09,024 [INFO] Refreshing disputes
+2025-12-16 08:35:09,026 [INFO] Refreshing signup requests
+2025-12-16 08:35:24,991 [INFO] Refreshing disputes
+2025-12-16 08:35:58,649 [INFO] Login success: owner (owner)
+2025-12-16 08:35:58,649 [INFO] Logged in: owner (owner)
+2025-12-16 08:35:58,672 [INFO] Refreshing pending requests
+2025-12-16 08:35:58,672 [INFO] Refreshing disputes
+2025-12-16 08:35:58,674 [INFO] Refreshing signup requests
+2025-12-16 08:37:34,696 [INFO] Login success: owner (owner)
+2025-12-16 08:37:34,696 [INFO] Logged in: owner (owner)
+2025-12-16 08:37:34,718 [INFO] Refreshing pending requests
+2025-12-16 08:37:34,718 [INFO] Refreshing disputes
+2025-12-16 08:37:34,720 [INFO] Refreshing signup requests
+2025-12-16 08:38:37,517 [INFO] Login success: owner (owner)
+2025-12-16 08:38:37,517 [INFO] Logged in: owner (owner)
+2025-12-16 08:38:37,541 [INFO] Refreshing pending requests
+2025-12-16 08:38:37,541 [INFO] Refreshing disputes
+2025-12-16 08:38:37,542 [INFO] Refreshing signup requests

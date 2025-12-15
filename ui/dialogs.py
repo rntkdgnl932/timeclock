@@ -206,110 +206,166 @@ class RejectSignupDialog(QtWidgets.QDialog):
         return self.te_comment.toPlainText().strip()
 
 
-# (ui/dialogs.py 맨 아래에 추가)
+# (ui/dialogs.py 맨 아래 클래스 교체)
 
 class DisputeTimelineDialog(QtWidgets.QDialog):
     """
-    이의 제기 타임라인을 보여주는 전용 팝업창
-    - my_role: 'worker'이면 근로자(나)가 오른쪽, 'owner'이면 사업주(나)가 오른쪽
+    [수정됨] 4:2:4 비율 + 말풍선이 글자 크기에 딱 맞게 줄어들도록(Fit-Content) 수정
     """
 
     def __init__(self, parent=None, title="", timeline_events=None, my_role="worker"):
         super().__init__(parent)
         self.setWindowTitle(title)
-        self.resize(800, 600)
+        self.resize(550, 750)
 
-        # ------------------ HTML 생성 로직 ------------------
+        # ------------------ HTML 생성 ------------------
         html_content = []
 
-        # 스타일 정의 (공통)
-        html_content.append("""
-        <html><head><style>
-            body { font-family: sans-serif; margin: 0; padding: 10px; }
-            .header-info { 
-                background-color: #f0f0f0; padding: 10px; margin: 0 auto 15px auto;
-                border-radius: 5px; text-align: center; font-size: 1.0em; width: 85%;
-            }
-            .chat-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-            .message-row { display: table-row; }
+        # 색상 테마
+        KAKAO_BG = "#b2c7d9"
+        MY_BUBBLE_COLOR = "#fef01b"
+        OTHER_BUBBLE_COLOR = "#ffffff"
 
-            /* 말풍선 스타일 */
-            .my-cell { text-align: right; }
-            .my-bubble { 
-                background-color: #dcf8c6; border-radius: 8px; 
-                padding: 8px 12px; display: inline-block; text-align: left; max-width: 85%;
-            }
+        html_content.append(f"""
+        <html>
+        <head>
+            <style>
+                body {{ background-color: {KAKAO_BG}; font-family: 'Malgun Gothic', sans-serif; margin: 0; padding: 15px; }}
 
-            .other-cell { text-align: left; }
-            .other-bubble { 
-                background-color: #e6e6e6; border-radius: 8px; 
-                padding: 8px 12px; display: inline-block; text-align: left; max-width: 85%;
-            }
+                /* 텍스트 스타일 */
+                .name {{ font-size: 12px; color: #555; margin-bottom: 4px; margin-left: 2px; }}
+                .time {{ font-size: 10px; color: #555; margin-top: 0px; margin-left: 4px; margin-right: 4px; }}
+                .status {{ font-size: 10px; color: #d9534f; font-weight: bold; margin-top: 2px; }}
 
-            .meta { font-size: 0.75em; color: #666; margin-top: 4px; display: block; }
-            .user-name { font-weight: bold; font-size: 0.9em; margin-bottom: 4px; display: block; }
-            pre { margin: 0; white-space: pre-wrap; word-wrap: break-word; font-family: sans-serif; font-size: 1em; }
-        </style></head><body>
+                /* 테이블 레이아웃 */
+                table {{ width: 100%; border-spacing: 0; table-layout: fixed; }}
+                td {{ padding-bottom: 8px; vertical-align: top; }}
+
+                /* ★ 말풍선 디자인 핵심 수정 ★ 
+                   div 대신 span + inline-block을 사용하여 
+                   내용물이 있는 만큼만 너비를 차지하게 만듦 */
+                .bubble-content {{
+                    display: inline-block;    /* 글자 크기에 맞게 박스 크기 조절 */
+                    padding: 8px 12px;        /* 안쪽 여백 */
+                    font-size: 14px;
+                    color: #000;
+                    line-height: 140%;
+                    border-radius: 12px;      /* 둥근 모서리 */
+                    box-shadow: 1px 1px 2px rgba(0,0,0,0.1);
+                    word-wrap: break-word;    /* 긴 단어 줄바꿈 */
+                    max-width: 100%;          /* 칸을 넘어가지 않게 */
+                }}
+
+            </style>
+        </head>
+        <body>
+            <div style="text-align: center; margin-bottom: 20px;">
+                <span style="background-color: rgba(0,0,0,0.1); color: #fff; font-size: 12px; padding: 6px 12px; border-radius: 12px;">
+                    {title}
+                </span>
+            </div>
+
+            <table border="0" cellspacing="0" cellpadding="0">
+                <tr>
+                    <td width="40%"></td>
+                    <td width="20%"></td>
+                    <td width="40%"></td>
+                </tr>
         """)
 
-        # 상단 헤더 정보 (옵션)
-        # (호출하는 쪽에서 title에 다 넣어서 보내거나 별도 파라미터로 받아도 됨)
-        # 여기서는 심플하게 구현
-
-        html_content.append('<table class="chat-table">')
-
         if timeline_events:
-            from timeclock.settings import DISPUTE_STATUS  # 필요시 import
-
             for event in timeline_events:
-                who = event.get("who", "unknown")  # 'worker' or 'owner'
+                who = event.get("who", "unknown")
                 username = event.get("username", "")
-                at = event.get("at", "") or ""
+                at = event.get("at", "") or ""  # 시간 (예: 2025-12-16 08:12:31)
+
+                # 시간 포맷을 좀 더 짧게 (오전/오후 HH:mm) 바꾸고 싶다면 여기서 처리 가능
+                # 현재는 DB 원본 그대로 사용
+
                 comment = event.get("comment", "") or ""
                 status_code = event.get("status_code")
 
-                # HTML 이스케이프
                 safe_comment = comment.replace('<', '&lt;').replace('>', '&gt;')
+                # 줄바꿈 문자를 <br>로 치환하여 HTML에서 줄바꿈 적용되게 함
+                safe_comment = safe_comment.replace('\n', '<br>')
+
                 if not safe_comment.strip():
                     continue
 
-                # ★ 핵심 로직: 내 역할(my_role)과 메시지 작성자(who)를 비교해서 좌우 결정
                 is_me = (who == my_role)
 
-                cell_class = "my-cell" if is_me else "other-cell"
-                bubble_class = "my-bubble" if is_me else "other-bubble"
+                # ---------------- [나 (오른쪽)] ----------------
+                if is_me:
+                    html_content.append(f"""
+                    <tr>
+                        <td></td>
+                        <td></td>
 
-                # 메타 정보 (시간, 상태)
-                meta_info = f"<span class='meta'>{at}"
-                if status_code:  # 상태값이 있으면 표시 (검토중, 완료 등)
-                    # DISPUTE_STATUS 딕셔너리가 필요하면 import하거나 텍스트로 받음
-                    meta_info += f" | {status_code}"
-                meta_info += "</span>"
+                        <td align="right">
+                            <div style="text-align: right;">
+                                <span class="bubble-content" style="background-color: {MY_BUBBLE_COLOR}; text-align: left;">
+                                    {safe_comment}
+                                </span>
+                                <div class="time">{at}</div>
+                            </div>
+                        </td>
+                    </tr>
+                    """)
 
-                row_html = f"""
-                <tr class="message-row">
-                    <td class="{cell_class}">
-                        <div class="{bubble_class}">
-                            <span class="user-name">{username}</span>
-                            <pre>{safe_comment}</pre>
-                            {meta_info}
-                        </div>
-                    </td>
-                </tr>
-                <tr><td style="height: 10px;"></td></tr> """
-                html_content.append(row_html)
+                # ---------------- [상대방 (왼쪽)] ----------------
+                else:
+                    status_html = f"<div class='status'>{status_code}</div>" if status_code else ""
+                    html_content.append(f"""
+                    <tr>
+                        <td align="left">
+                            <div style="text-align: left;">
+                                <div class="name">{username}</div>
+                                <span class="bubble-content" style="background-color: {OTHER_BUBBLE_COLOR};">
+                                    {safe_comment}
+                                </span>
+                                <div class="time">{at}</div>
+                                {status_html}
+                            </div>
+                        </td>
 
-        html_content.append("</table></body></html>")
+                        <td></td>
+                        <td></td>
+                    </tr>
+                    """)
+
+        html_content.append("</table><br><br></body></html>")
 
         # UI 구성
         layout = QtWidgets.QVBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+
         self.browser = QtWidgets.QTextBrowser()
+        self.browser.setFrameShape(QtWidgets.QFrame.NoFrame)
         self.browser.setHtml("".join(html_content))
 
+        # 하단 닫기 버튼
+        btn_layout = QtWidgets.QHBoxLayout()
+        btn_layout.setContentsMargins(15, 10, 15, 15)
         self.btn_close = QtWidgets.QPushButton("닫기")
         self.btn_close.clicked.connect(self.accept)
+        self.btn_close.setStyleSheet("""
+            QPushButton {
+                background-color: #423630; 
+                color: white; 
+                padding: 12px; 
+                border-radius: 6px; 
+                font-weight: bold;
+                border: none;
+                font-size: 14px;
+            }
+            QPushButton:hover { background-color: #5b4a42; }
+        """)
+        self.btn_close.setCursor(QtCore.Qt.PointingHandCursor)
+
+        btn_layout.addWidget(self.btn_close)
 
         layout.addWidget(self.browser)
-        layout.addWidget(self.btn_close)
+        layout.addLayout(btn_layout)
         self.setLayout(layout)
+
 
