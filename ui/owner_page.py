@@ -246,30 +246,34 @@ class OwnerPage(QtWidgets.QWidget):
         try:
             rows = self.db.list_disputes(date_from, date_to)
 
+            # ✅ 상세보기/더블클릭 팝업에서 원문/전체 필드를 쓰기 위해 보관
+            self._dispute_rows = rows
+
             out = []
             for row in rows:
                 r = dict(row)
-                status_label = DISPUTE_STATUS.get(
-                    r["status"],  # DB 값 (PENDING 등)
-                    r["status"]  # fallback
-                )
+
+                status_label = DISPUTE_STATUS.get(r.get("status"), r.get("status", ""))
 
                 out.append([
-                    str(r["id"]),
-                    r["worker_username"],
-                    str(r["request_id"]),
-                    REQ_TYPES.get(r["req_type"], r["req_type"]),
-                    r["requested_at"],
+                    str(r.get("id", "")),
+                    r.get("worker_username", ""),
+                    str(r.get("request_id", "")),
+                    REQ_TYPES.get(r.get("req_type"), r.get("req_type", "")),
+                    r.get("requested_at", "") or "",
                     r.get("approved_at", "") or "",
-                    r["dispute_type"],
-                    (r.get("comment", "") or "").replace("\n", " "),
-                    r["created_at"],
+                    r.get("dispute_type", "") or "",
+                    (r.get("comment", "") or "").replace("\n", " "),  # 목록은 1줄 요약
+                    r.get("created_at", "") or "",
                     status_label,
                     r.get("resolution_comment", "") or "",
                     r.get("resolved_at", "") or "",
                 ])
 
             self.dispute_table.set_rows(out)
+
+            # ✅ 더블클릭 연결(중복 연결 방지 로직은 _wire_dispute_doubleclick에서 처리 권장)
+            QtCore.QTimer.singleShot(0, self._wire_dispute_doubleclick)
 
         except Exception as e:
             logging.exception("Failed to fetch disputes")
@@ -481,7 +485,7 @@ class OwnerPage(QtWidgets.QWidget):
             Message.err(self, "거절 실패", f"가입 거절 처리 중 오류 발생: {e}")
 
     def resolve_selected_dispute(self):
-        """선택된 이의 제기를 처리합니다."""
+        """선택된 이의 제기를 처리합니다. (처리 전 원문 팝업 포함)"""
         row_idx = self.dispute_table.selected_first_row_index()
         if row_idx < 0:
             Message.warn(self, "이의 처리", "처리할 이의 제기 항목을 선택해주세요.")
@@ -489,8 +493,22 @@ class OwnerPage(QtWidgets.QWidget):
 
         dispute_id = int(self.dispute_table.get_cell(row_idx, 0))
 
-        labels = [label for _, label in DISPUTE_STATUS_ITEMS]
+        # ✅ 처리 전에 원문(이의내용) 확인 팝업
+        original_text = self.dispute_table.get_cell(row_idx, 7)  # "이의내용" 컬럼
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle("이의 신청 원문")
+        dlg.resize(720, 420)
+        v = QtWidgets.QVBoxLayout(dlg)
+        edit = QtWidgets.QPlainTextEdit()
+        edit.setReadOnly(True)
+        edit.setPlainText(original_text or "(내용 없음)")
+        btn_ok = QtWidgets.QPushButton("확인")
+        btn_ok.clicked.connect(dlg.accept)
+        v.addWidget(edit)
+        v.addWidget(btn_ok)
+        dlg.exec_()
 
+        labels = [label for _, label in DISPUTE_STATUS_ITEMS]
         selected_label, ok = QtWidgets.QInputDialog.getItem(
             self,
             "이의 처리",
@@ -528,12 +546,23 @@ class OwnerPage(QtWidgets.QWidget):
                 status_code,
                 (comment or "").strip()
             )
-            Message.info(
-                self,
-                "처리 완료",
-                f"이의ID {dispute_id}에 대한 처리가 완료되었습니다."
+
+            # ✅ 옵션 B: 한 번 처리 = audit_logs 1건
+            self.db.log_audit(
+                "DISPUTE_UPDATE",
+                actor_user_id=self.session.user_id,
+                target_type="dispute",
+                target_id=dispute_id,
+                detail={
+                    "status_code": status_code,
+                    "status_label": selected_label,
+                    "comment": (comment or "").strip(),
+                }
             )
+
+            Message.info(self, "처리 완료", f"이의ID {dispute_id}에 대한 처리가 완료되었습니다.")
             self.refresh_disputes()
+
         except Exception as e:
             logging.exception("Dispute resolution failed")
             Message.err(self, "처리 실패", f"이의 처리 중 오류 발생: {e}")
@@ -584,3 +613,89 @@ class OwnerPage(QtWidgets.QWidget):
         except Exception as e:
             logging.exception("Password change failed")
             Message.err(self, "오류", f"비밀번호 변경 중 오류: {e}")
+
+    def view_selected_dispute_detail(self):
+        row_idx = self.dispute_table.selected_first_row_index()
+        if row_idx < 0:
+            Message.warn(self, "상세보기", "이의 제기 목록에서 항목을 선택하세요.")
+            return
+
+        # dispute_table 컬럼 인덱스:
+        # 0:id, 1:근로자, 2:요청ID, 3:유형, 4:요청시각, 5:승인시각, 6:이의유형,
+        # 7:이의내용, 8:등록시각, 9:처리상태, 10:처리코멘트, 11:처리시각
+        dispute_id = self.dispute_table.get_cell(row_idx, 0)
+        worker = self.dispute_table.get_cell(row_idx, 1)
+        dispute_type = self.dispute_table.get_cell(row_idx, 6)
+        content = self.dispute_table.get_cell(row_idx, 7)
+        created_at = self.dispute_table.get_cell(row_idx, 8)
+
+        status = self.dispute_table.get_cell(row_idx, 9)
+        res_comment = self.dispute_table.get_cell(row_idx, 10)
+        resolved_at = self.dispute_table.get_cell(row_idx, 11)
+
+        full = (
+            f"[이의ID] {dispute_id}\n"
+            f"[근로자] {worker}\n"
+            f"[이의유형] {dispute_type}\n"
+            f"[등록시각] {created_at}\n\n"
+            f"[이의내용]\n{content or '(없음)'}\n\n"
+            f"[처리상태]\n{status or '(없음)'}\n\n"
+            f"[처리코멘트]\n{res_comment or '(없음)'}\n\n"
+            f"[처리시각]\n{resolved_at or '(없음)'}\n"
+        )
+
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle("이의내용 상세보기")
+        dlg.resize(780, 520)
+
+        layout = QtWidgets.QVBoxLayout(dlg)
+        edit = QtWidgets.QPlainTextEdit()
+        edit.setReadOnly(True)
+        edit.setPlainText(full)
+
+        btn = QtWidgets.QPushButton("닫기")
+        btn.clicked.connect(dlg.accept)
+
+        layout.addWidget(edit)
+        layout.addWidget(btn)
+        dlg.exec_()
+
+    def _show_dispute_detail_popup(self, row: int):
+        rr = dict(self._dispute_rows[row])
+
+        full = (
+            f"[근로자]\n{rr.get('worker_name')}\n\n"
+            f"[이의유형]\n{rr.get('dispute_type')}\n\n"
+            f"[이의내용]\n{rr.get('comment')}\n\n"
+            f"[처리상태]\n{rr.get('status_label')}\n\n"
+            f"[처리코멘트]\n{rr.get('resolution_comment') or '(없음)'}\n\n"
+            f"[처리시각]\n{rr.get('resolved_at') or '(없음)'}"
+        )
+
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle("이의 내용 상세")
+        dlg.resize(780, 520)
+
+        v = QtWidgets.QVBoxLayout(dlg)
+        edit = QtWidgets.QPlainTextEdit()
+        edit.setReadOnly(True)
+        edit.setPlainText(full)
+
+        btn = QtWidgets.QPushButton("닫기")
+        btn.clicked.connect(dlg.accept)
+
+        v.addWidget(edit)
+        v.addWidget(btn)
+        dlg.exec_()
+
+    def _wire_dispute_doubleclick(self):
+        view = self.dispute_table.findChild(QtWidgets.QTableView)
+        if view:
+            view.doubleClicked.connect(
+                lambda idx: self._show_dispute_detail_popup(idx.row())
+            )
+
+
+
+
+

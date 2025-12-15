@@ -504,3 +504,69 @@ AttributeError: 'sqlite3.Connection' object has no attribute 'rowcount'
 2025-12-15 12:25:15,604 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
 2025-12-15 12:25:15,604 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
 2025-12-15 12:25:15,604 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-15 13:29:21,412 [INFO] Login success: owner (owner)
+2025-12-15 13:29:21,412 [INFO] Logged in: owner (owner)
+2025-12-15 13:29:21,437 [INFO] Refreshing pending requests
+2025-12-15 13:29:21,438 [INFO] Refreshing disputes
+2025-12-15 13:29:21,438 [INFO] Refreshing signup requests
+2025-12-15 13:29:42,512 [INFO] Logout: owner
+2025-12-15 13:29:54,648 [INFO] Login success: test01 (worker)
+2025-12-15 13:29:54,648 [INFO] Logged in: test01 (worker)
+2025-12-15 13:29:54,680 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-15 13:29:54,680 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-15 13:29:54,680 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-15 13:29:54,680 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-15 13:53:51,756 [INFO] Login success: owner (owner)
+2025-12-15 13:53:51,756 [INFO] Logged in: owner (owner)
+2025-12-15 13:53:51,783 [INFO] Refreshing pending requests
+2025-12-15 13:53:51,783 [INFO] Refreshing disputes
+2025-12-15 13:53:51,783 [INFO] Refreshing signup requests
+2025-12-15 13:54:22,480 [INFO] Logout: owner
+2025-12-15 13:54:34,376 [INFO] Login success: test01 (worker)
+2025-12-15 13:54:34,376 [INFO] Logged in: test01 (worker)
+2025-12-15 13:54:34,408 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-15 13:54:34,408 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-15 13:54:34,408 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-15 13:54:34,408 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-15 14:26:37,050 [INFO] Login success: test01 (worker)
+2025-12-15 14:26:37,050 [INFO] Logged in: test01 (worker)
+2025-12-15 14:26:37,092 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-15 14:26:37,093 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-15 14:26:37,093 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-15 14:26:37,093 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-15 15:23:33,621 [INFO] Login success: test01 (worker)
+2025-12-15 15:23:33,621 [INFO] Logged in: test01 (worker)
+2025-12-15 15:23:33,664 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-15 15:23:33,664 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-15 15:23:33,664 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-15 15:23:33,665 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-15 15:24:24,225 [INFO] Logout: test01
+2025-12-15 15:24:27,198 [INFO] Login success: owner (owner)
+2025-12-15 15:24:27,198 [INFO] Logged in: owner (owner)
+2025-12-15 15:24:27,216 [INFO] Refreshing pending requests
+2025-12-15 15:24:27,217 [INFO] Refreshing disputes
+2025-12-15 15:24:27,217 [INFO] Refreshing signup requests
+2025-12-15 16:14:20,041 [INFO] Login success: owner (owner)
+2025-12-15 16:14:20,042 [INFO] Logged in: owner (owner)
+2025-12-15 16:14:20,067 [INFO] Refreshing pending requests
+2025-12-15 16:14:20,068 [INFO] Refreshing disputes
+2025-12-15 16:14:20,068 [INFO] Refreshing signup requests
+2025-12-15 16:15:03,130 [INFO] Logout: owner
+2025-12-15 16:15:13,923 [INFO] Login success: test01 (worker)
+2025-12-15 16:15:13,923 [INFO] Logged in: test01 (worker)
+2025-12-15 16:15:13,954 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-15 16:15:13,954 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-15 16:15:13,954 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-15 16:15:13,954 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-15 16:31:32,560 [INFO] Login success: owner (owner)
+2025-12-15 16:31:32,560 [INFO] Logged in: owner (owner)
+2025-12-15 16:31:32,585 [INFO] Refreshing pending requests
+2025-12-15 16:31:32,585 [INFO] Refreshing disputes
+2025-12-15 16:31:32,586 [INFO] Refreshing signup requests
+2025-12-15 16:31:47,217 [INFO] Logout: owner
+2025-12-15 16:31:56,670 [INFO] Login success: test01 (worker)
+2025-12-15 16:31:56,670 [INFO] Logged in: test01 (worker)
+2025-12-15 16:31:56,702 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-15 16:31:56,702 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-15 16:31:56,702 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-15 16:31:56,702 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)

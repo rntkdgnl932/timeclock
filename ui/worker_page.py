@@ -3,7 +3,8 @@
 import logging
 from PyQt5 import QtWidgets, QtCore
 
-from timeclock.settings import REQ_STATUS, REASON_CODES, DISPUTE_STATUS
+from timeclock.settings import REQ_STATUS, REASON_CODES, REQ_TYPES, DISPUTE_STATUS
+
 
 from timeclock.utils import now_str, Message
 from timeclock.settings import REQ_TYPES
@@ -18,6 +19,8 @@ class WorkerPage(QtWidgets.QWidget):
         super().__init__(parent)
         self.db = db
         self.session = session
+
+        self._my_dispute_rows = []  # ✅ 여기서 미리 선언
 
         header = QtWidgets.QLabel(f"근로자 화면 - {session.username}")
         f = header.font()
@@ -311,32 +314,94 @@ class WorkerPage(QtWidgets.QWidget):
     def _show_my_dispute_comment_popup(self, row: int):
         rows = getattr(self, "_my_dispute_rows", None)
         if not rows or not (0 <= row < len(rows)):
-            Message.warn(self, "이의 내용", "표시할 항목이 없습니다.")
+            Message.warn(self, "이의 내용/처리 타임라인", "표시할 항목이 없습니다.")
             return
 
         rr = dict(rows[row])
+        dispute_id = int(rr.get("id", 0))
 
-        user_comment = (rr.get("comment") or "").strip()
-        status_code = rr.get("dispute_status") or ""
-        status_label = DISPUTE_STATUS.get(status_code, status_code)
-        owner_comment = (rr.get("resolution_comment") or "").strip()
-        resolved_at = (rr.get("resolved_at") or "").strip()
+        lines = []
 
-        full_text = (
-            f"[나의 이의 내용]\n{user_comment}\n\n"
-            f"[처리 상태]\n{status_label}\n\n"
-            f"[사장 코멘트]\n{owner_comment or '(없음)'}\n\n"
-            f"[처리 시각]\n{resolved_at or '(없음)'}"
-        )
+        # =========================
+        # 1️⃣ 근로자 이의 원문
+        # =========================
+        worker_name = self.session.username
+        worker_at = rr.get("created_at") or ""
+        worker_comment = rr.get("comment") or ""
 
+        lines.append(f"근로자({worker_name})  {worker_at}")
+        if worker_comment:
+            for l in worker_comment.splitlines():
+                lines.append(f"  {l}")
+        else:
+            lines.append("  (내용 없음)")
+        lines.append("")
+
+        # =========================
+        # 2️⃣ 사장 최신 처리 결과 (disputes 테이블 기준)
+        # ❗❗ 이게 지금까지 빠져 있었던 핵심
+        # =========================
+        dispute_status = rr.get("dispute_status") or rr.get("status")
+        status_label = DISPUTE_STATUS.get(dispute_status, dispute_status or "")
+        resolution_comment = rr.get("resolution_comment") or ""
+        resolved_at = rr.get("resolved_at") or ""
+
+        if status_label or resolution_comment:
+            lines.append(f"사업주  {resolved_at or '(처리시각 없음)'}")
+            if status_label:
+                lines.append(f"  처리상태: {status_label}")
+            if resolution_comment:
+                for l in resolution_comment.splitlines():
+                    lines.append(f"  {l}")
+            else:
+                lines.append("  (코멘트 없음)")
+            lines.append("")
+
+        # =========================
+        # 3️⃣ 추가 처리 이력 (audit_logs, 있으면)
+        # =========================
+        try:
+            audit_rows = self.db.list_dispute_audit_updates(dispute_id)
+        except Exception:
+            audit_rows = []
+
+        import json
+        for a in audit_rows:
+            ar = dict(a)
+            actor = ar.get("actor_username") or "owner"
+            at = ar.get("created_at") or ""
+
+            detail = {}
+            if ar.get("detail_json"):
+                try:
+                    detail = json.loads(ar["detail_json"])
+                except Exception:
+                    pass
+
+            status = detail.get("status_label") or detail.get("status_code") or ""
+            comment = detail.get("comment") or ""
+
+            lines.append(f"처리기록  {actor}  {at}")
+            if status:
+                lines.append(f"  상태: {status}")
+            if comment:
+                for l in comment.splitlines():
+                    lines.append(f"  {l}")
+            else:
+                lines.append("  (내용 없음)")
+            lines.append("")
+
+        # =========================
+        # 다이얼로그 표시
+        # =========================
         dlg = QtWidgets.QDialog(self)
-        dlg.setWindowTitle("이의 내용/처리 결과")
-        dlg.resize(700, 450)
+        dlg.setWindowTitle("이의 내용/처리 타임라인")
+        dlg.resize(800, 520)
 
         layout = QtWidgets.QVBoxLayout(dlg)
         edit = QtWidgets.QPlainTextEdit()
         edit.setReadOnly(True)
-        edit.setPlainText(full_text)
+        edit.setPlainText("\n".join(lines))
 
         btn = QtWidgets.QPushButton("닫기")
         btn.clicked.connect(dlg.accept)

@@ -827,3 +827,94 @@ class DB:
             if cur.rowcount == 0:
                 raise ValueError("해당 ID의 미처리 이의 제기를 찾을 수 없거나 이미 처리된 상태입니다.")
 
+    def get_dispute_timeline(self, dispute_id: int):
+        """
+        옵션 B: disputes(근로자 최초 이의) + audit_logs(사장 처리 이력)를 시간순으로 합쳐서 반환.
+        audit_logs에는 OwnerPage에서 action='DISPUTE_UPDATE'로 1건씩 남긴 detail_json을 사용한다.
+        """
+        import json
+
+        # 1) disputes에서 근로자 원문/등록시각
+        base = self.conn.execute(
+            """
+            SELECT d.id,
+                   d.user_id,
+                   u.username AS worker_username,
+                   d.comment AS worker_comment,
+                   d.created_at AS worker_created_at
+            FROM disputes d
+            JOIN users u ON u.id = d.user_id
+            WHERE d.id = ?
+            """,
+            (dispute_id,),
+        ).fetchone()
+
+        if not base:
+            return []
+
+        events = [{
+            "who": "worker",
+            "username": base["worker_username"],
+            "at": base["worker_created_at"],
+            "status_code": None,
+            "status_label": None,
+            "comment": (base["worker_comment"] or "").strip(),
+        }]
+
+        # 2) audit_logs에서 사장 처리 이력 (한 번 처리 = 한 이벤트로 묶임)
+        logs = self.conn.execute(
+            """
+            SELECT a.created_at,
+                   a.detail_json,
+                   u.username AS actor_username
+            FROM audit_logs a
+            LEFT JOIN users u ON u.id = a.actor_user_id
+            WHERE a.target_type = 'dispute'
+              AND a.target_id = ?
+              AND a.action = 'DISPUTE_UPDATE'
+            ORDER BY a.created_at ASC
+            """,
+            (dispute_id,),
+        ).fetchall()
+
+        for row in logs:
+            detail = {}
+            dj = row["detail_json"]
+            if dj:
+                try:
+                    detail = json.loads(dj)
+                except Exception:
+                    detail = {"comment": str(dj)}
+
+            events.append({
+                "who": "owner",
+                "username": row["actor_username"] or "owner",
+                "at": row["created_at"],
+                "status_code": detail.get("status_code"),
+                "status_label": detail.get("status_label"),
+                "comment": (detail.get("comment") or "").strip(),
+            })
+
+        return events
+
+    def list_dispute_audit_updates(self, dispute_id: int):
+        """
+        사장 처리 이력만 audit_logs에서 가져온다 (옵션 B).
+        action='DISPUTE_UPDATE' 로 남긴 detail_json을 사용.
+        """
+        return self.conn.execute(
+            """
+            SELECT a.created_at,
+                   a.detail_json,
+                   u.username AS actor_username
+            FROM audit_logs a
+            LEFT JOIN users u ON u.id = a.actor_user_id
+            WHERE a.target_type = 'dispute'
+              AND a.target_id = ?
+              AND a.action = 'DISPUTE_UPDATE'
+            ORDER BY a.created_at ASC
+            """,
+            (dispute_id,),
+        ).fetchall()
+
+
