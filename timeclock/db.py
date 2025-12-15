@@ -257,7 +257,10 @@ class DB:
 
     def change_password(self, user_id: int, new_password: str):
         pw_hash = pbkdf2_hash_password(new_password)
-        self.conn.execute("UPDATE users SET pw_hash=? WHERE id=?", (pw_hash, user_id))
+        self.conn.execute(
+            "UPDATE users SET pw_hash=?, must_change_pw=0 WHERE id=?",
+            (pw_hash, user_id)
+        )
         self.conn.commit()
 
     # --- Requests/Approvals ---
@@ -807,34 +810,21 @@ class DB:
         이의 제기 상태를 RESOLVED, REJECTED 등으로 변경하고 처리 정보를 기록합니다.
         """
         now = now_str()
-        self.conn.execute(
+
+        cur = self.conn.execute(
             """
-            UPDATE disputes 
-            SET status=?, 
-                resolved_at=?, 
-                resolved_by=?, 
+            UPDATE disputes
+            SET status=?,
+                resolved_at=?,
+                resolved_by=?,
                 resolution_comment=?
             WHERE id=? AND status NOT IN ('RESOLVED', 'REJECTED')
             """,
             (status_code, now, resolved_by_id, resolution_comment, dispute_id),
         )
 
-        # Audit Log 기록 (OwnerPage에서 호출되므로, OwnerPage의 로직을 따라감)
-        # OwnerPage.py에서 resolve_selected_dispute가 호출되면 OwnerPage에 Audit Log 코드가
-        # 포함되어야 하지만, db.py에서도 안전하게 기록합니다.
-
-        # 🚨 이 부분은 OwnerPage에서 log_audit를 호출하도록 되어 있다면 생략 가능
-        # 🚨 하지만 안전을 위해 DB단에서 처리 여부만 기록하는 로그를 남깁니다.
-
-        # self.log_audit(
-        #     action="DISPUTE_RESOLVED" if status_code == "RESOLVED" else "DISPUTE_REJECTED",
-        #     target_type="disputes",
-        #     target_id=dispute_id,
-        #     actor_user_id=resolved_by_id,
-        #     detail={"status": status_code, "comment": resolution_comment},
-        # )
-
-        if self.conn.rowcount == 0:
+        if cur.rowcount == 0:
+            self.conn.rollback()
             raise ValueError("해당 ID의 미처리 이의 제기를 찾을 수 없거나 이미 처리된 상태입니다.")
 
         self.conn.commit()

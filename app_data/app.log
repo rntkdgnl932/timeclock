@@ -435,3 +435,57 @@ sqlite3.OperationalError: table signup_requests has no column named bank_account
 2025-12-15 06:27:03,270 [INFO] Refreshing pending requests
 2025-12-15 06:27:03,271 [INFO] Refreshing disputes
 2025-12-15 06:27:03,271 [INFO] Refreshing signup requests
+2025-12-15 06:32:58,016 [INFO] Login success: owner (owner)
+2025-12-15 06:32:58,016 [INFO] Logged in: owner (owner)
+2025-12-15 06:32:58,016 [INFO] Attempting to create OwnerPage...
+2025-12-15 06:32:58,038 [INFO] Refreshing pending requests
+2025-12-15 06:32:58,039 [INFO] Refreshing disputes
+2025-12-15 06:32:58,039 [INFO] Refreshing signup requests
+2025-12-15 06:33:08,097 [INFO] Refreshing pending requests
+2025-12-15 06:33:11,512 [INFO] Logout: owner
+2025-12-15 06:33:18,730 [INFO] Login success: test01 (worker)
+2025-12-15 06:33:18,730 [INFO] Logged in: test01 (worker)
+2025-12-15 06:33:18,730 [INFO] Attempting to create WorkerPage...
+2025-12-15 06:33:18,755 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-15 06:33:18,755 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-15 06:33:18,755 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-15 06:33:18,755 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-15 06:33:46,093 [INFO] Dispute created: request_id=1 user=test01
+2025-12-15 06:33:48,179 [INFO] Logout: test01
+2025-12-15 06:33:49,527 [INFO] Login success: owner (owner)
+2025-12-15 06:33:49,528 [INFO] Logged in: owner (owner)
+2025-12-15 06:33:49,528 [INFO] Attempting to create OwnerPage...
+2025-12-15 06:33:49,541 [INFO] Refreshing pending requests
+2025-12-15 06:33:49,541 [INFO] Refreshing disputes
+2025-12-15 06:33:49,542 [INFO] Refreshing signup requests
+2025-12-15 08:26:25,421 [INFO] Signup requested from LoginPage
+2025-12-15 08:27:16,143 [INFO] Login success: owner (owner)
+2025-12-15 08:27:16,143 [INFO] Logged in: owner (owner)
+2025-12-15 08:27:16,168 [INFO] Refreshing pending requests
+2025-12-15 08:27:16,168 [INFO] Refreshing disputes
+2025-12-15 08:27:16,169 [INFO] Refreshing signup requests
+2025-12-15 08:27:50,186 [INFO] Refreshing signup requests
+2025-12-15 08:27:54,029 [INFO] Logout: owner
+2025-12-15 10:02:05,925 [INFO] Login success: owner (owner)
+2025-12-15 10:02:05,925 [INFO] Logged in: owner (owner)
+2025-12-15 10:02:05,941 [INFO] Refreshing pending requests
+2025-12-15 10:02:05,941 [INFO] Refreshing disputes
+2025-12-15 10:02:05,941 [INFO] Refreshing signup requests
+2025-12-15 10:02:46,721 [INFO] Refreshing disputes
+2025-12-15 10:37:04,205 [INFO] Login success: owner (owner)
+2025-12-15 10:37:04,205 [INFO] Logged in: owner (owner)
+2025-12-15 10:37:04,231 [INFO] Refreshing pending requests
+2025-12-15 10:37:04,231 [INFO] Refreshing disputes
+2025-12-15 10:37:04,232 [INFO] Refreshing signup requests
+2025-12-15 10:51:28,676 [INFO] Login success: owner (owner)
+2025-12-15 10:51:28,677 [INFO] Logged in: owner (owner)
+2025-12-15 10:51:28,703 [INFO] Refreshing pending requests
+2025-12-15 10:51:28,703 [INFO] Refreshing disputes
+2025-12-15 10:51:28,704 [INFO] Refreshing signup requests
+2025-12-15 10:51:58,755 [ERROR] Dispute resolution failed
+Traceback (most recent call last):
+  File "C:\my_games\timeclock\ui\owner_page.py", line 525, in resolve_selected_dispute
+    self.db.resolve_dispute(
+  File "C:\my_games\timeclock\timeclock\db.py", line 844, in resolve_dispute
+    if self.conn.rowcount == 0:
+AttributeError: 'sqlite3.Connection' object has no attribute 'rowcount'

@@ -249,7 +249,10 @@ class OwnerPage(QtWidgets.QWidget):
             out = []
             for row in rows:
                 r = dict(row)
-                status_label = DISPUTE_STATUS.get(r["status"], r["status"])
+                status_label = DISPUTE_STATUS.get(
+                    r["status"],  # DB 값 (PENDING 등)
+                    r["status"]  # fallback
+                )
 
                 out.append([
                     str(r["id"]),

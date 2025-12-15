@@ -1,7 +1,6 @@
 # timeclock/ui/main_window.py
 # -*- coding: utf-8 -*-
 import logging
-import traceback
 from datetime import datetime, timedelta
 from PyQt5 import QtWidgets, QtCore
 
@@ -11,6 +10,8 @@ from ui.login_page import LoginPage
 from ui.worker_page import WorkerPage
 from ui.owner_page import OwnerPage
 from ui.signup_page import SignupPage
+from ui.dialogs import ChangePasswordDialog
+
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -156,30 +157,51 @@ class MainWindow(QtWidgets.QMainWindow):
         self.session = session
         logging.info(f"Logged in: {session.username} ({session.role})")
 
-        new_page = None  # 🚨 new_page 변수 초기화
+        # 🔴 STEP 5: 비밀번호 변경 강제
+        if session.must_change_pw:
+            dlg = ChangePasswordDialog(parent=self)
+            if dlg.exec_() != QtWidgets.QDialog.Accepted:
+                Message.warn(self, "비밀번호 변경", "비밀번호 변경이 필요합니다.")
+                self.session = None
+                self._back_to_login()
+                return
 
+            new_pw = dlg.get_password()
+            if not new_pw:
+                Message.warn(self, "비밀번호 변경", "비밀번호 변경이 완료되지 않았습니다.")
+                self.session = None
+                self._back_to_login()
+                return
+
+            try:
+                self.db.change_password(session.user_id, new_pw)
+                session.must_change_pw = False
+            except Exception as e:
+                logging.exception("Password change failed")
+                Message.err(self, "오류", f"비밀번호 변경 실패: {e}")
+                self.session = None
+                self._back_to_login()
+                return
+
+            Message.info(self, "완료", "비밀번호가 변경되었습니다. 다시 로그인해주세요.")
+            self.session = None
+            self._back_to_login()
+            return
+
+        # 🔽 정상 로그인 흐름
         try:
             if session.role == "worker":
-                logging.info("Attempting to create WorkerPage...")
                 self._worker_page = WorkerPage(self.db, session)
                 self._worker_page.logout_requested.connect(self.on_logout)
-                new_page = self._worker_page
+                self._set_page(self._worker_page)
             else:
-                logging.info("Attempting to create OwnerPage...")
-                # 🚨 충돌 지점: OwnerPage 객체 생성 (현재는 __init__ 최소화 상태)
                 self._owner_page = OwnerPage(self.db, session)
                 self._owner_page.logout_requested.connect(self.on_logout)
-                new_page = self._owner_page
-
-            if new_page:
-                self._set_page(new_page)  # 🚨 new_page가 생성되었을 때만 전환 시도
-            else:
-                raise Exception("Page object was not created.")
+                self._set_page(self._owner_page)
 
         except Exception as e:
             logging.exception("Failed to create page after login")
-            # 🚨 오류 메시지를 띄우고 로그인 화면으로 복귀
-            Message.err(self, "오류", f"로그인 후 화면 생성 중 오류:\n{e}\n\n{traceback.format_exc()}")
+            Message.err(self, "오류", f"로그인 후 화면 생성 중 오류:\n{e}")
             self.session = None
             self._back_to_login()
 

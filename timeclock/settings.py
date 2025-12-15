@@ -41,11 +41,13 @@ REASON_CODES = {
 
 # 이의 상태
 DISPUTE_STATUS = {
+    "PENDING": "처리 대기",     # ✅ 추가 (지금 DB 값 대응)
     "OPEN": "접수됨",
     "IN_PROGRESS": "검토 중",
     "RESOLVED": "처리 완료",
     "REJECTED": "기각",
 }
+
 
 # 이의 처리 상태 선택용 (UI 표시 한글 / 저장은 코드)
 DISPUTE_STATUS_ITEMS = [
