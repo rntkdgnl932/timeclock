@@ -313,86 +313,7 @@ class WorkerPage(QtWidgets.QWidget):
         self._show_my_dispute_comment_popup(index.row()) # 전체보기 팝업 호출
 
 
-    def _show_my_dispute_comment_popup(self, row: int):
-        rows = getattr(self, "_my_dispute_rows", None)
-        if not rows or not (0 <= row < len(rows)):
-            Message.warn(self, "이의 내용/처리 타임라인", "표시할 항목이 없습니다.")
-            return
 
-        rr = dict(rows[row])
-        dispute_id = int(rr.get("id", 0))
-
-        sep = "=" * 30
-
-        def _prefix_lines(msg: str) -> str:
-            msg = (msg or "").strip()
-            if not msg:
-                return "=> (내용 없음)"
-            return "\n".join([f"=> {line}" for line in msg.splitlines()])
-
-        timeline_events = []
-        try:
-            # ✅ DB에서 모든 이력 (원문 + 메시지)을 가져옵니다.
-            timeline_events = self.db.get_dispute_timeline(dispute_id)
-        except Exception as e:
-            logging.exception("Failed to get dispute timeline")
-            Message.err(self, "오류", f"타임라인 로드 중 오류: {e}")
-            return
-
-        blocks = []
-
-        for event in timeline_events:
-            who = event.get("who", "unknown")
-            username = event.get("username", "")
-            at = event.get("at", "") or "(시각 없음)"
-            comment = event.get("comment")
-            status_code = event.get("status_code")
-
-            # 근로자 메시지
-            if who == "worker":
-                header_text = f"[근로자({username})]  {at}"
-                blocks.append(
-                    f"{sep}\n"
-                    f"{header_text}\n"
-                    f"{_prefix_lines(comment)}"
-                )
-            # 사업주 메시지/처리
-            elif who == "owner":
-                # DISPUTE_STATUS는 timeclock.settings에서 import 됨
-                status_label = DISPUTE_STATUS.get(status_code, status_code or "")
-
-                owner_lines = []
-                if status_label:
-                    owner_lines.append(f"처리상태: {status_label}")
-                if (comment or "").strip():
-                    owner_lines.append(comment)
-
-                owner_text = "\n".join(owner_lines) if owner_lines else ""
-
-                header_text = f"[사업주({username})]  {at}"
-                blocks.append(
-                    f"{sep}\n"
-                    f"{header_text}\n"
-                    f"{_prefix_lines(owner_text)}"
-                )
-
-        timeline_text = "\n".join(blocks)
-
-        dlg = QtWidgets.QDialog(self)
-        dlg.setWindowTitle("이의 내용/처리 타임라인")
-        dlg.resize(900, 600)
-
-        layout = QtWidgets.QVBoxLayout(dlg)
-        edit = QtWidgets.QPlainTextEdit()
-        edit.setReadOnly(True)
-        edit.setPlainText(timeline_text)
-
-        btn = QtWidgets.QPushButton("닫기")
-        btn.clicked.connect(dlg.accept)
-
-        layout.addWidget(edit)
-        layout.addWidget(btn)
-        dlg.exec_()
 
     def on_my_dispute_double_click(self, row: int, col: int):
         COMMENT_COL = 7
@@ -415,3 +336,108 @@ class WorkerPage(QtWidgets.QWidget):
         self._show_my_dispute_comment_popup(row)
 
 
+
+
+
+    def _show_my_dispute_comment_popup(self, row: int):
+        rows = getattr(self, "_my_dispute_rows", None)
+        if not rows or not (0 <= row < len(rows)):
+            Message.warn(self, "이의 내용/처리 타임라인", "표시할 항목이 없습니다.")
+            return
+
+        rr = dict(rows[row])
+        dispute_id = int(rr.get("id", 0))
+
+        timeline_events = []
+        try:
+            # ✅ 최종 DB 함수 사용
+            timeline_events = self.db.get_dispute_timeline(dispute_id)
+        except Exception as e:
+            logging.exception("Failed to get dispute timeline")
+            Message.err(self, "오류", f"타임라인 로드 중 오류: {e}")
+            return
+
+        html_content = []
+
+        # ------------------ CSS 스타일 정의 (WORKER: 오른쪽, OWNER: 왼쪽) ------------------
+        html_content.append("""
+        <html><head>
+        <style>
+            .chat-area { padding: 10px; }
+            .message-container { display: flex; margin-bottom: 10px; }
+
+            /* WORKER: 오른쪽 정렬 */
+            .worker-container { justify-content: flex-end; } 
+            /* OWNER: 왼쪽 정렬 */
+            .owner-container { justify-content: flex-start; } 
+
+            /* OWNER: 왼쪽 (근로자 화면 기준) */
+            .owner-bubble { 
+                background-color: #e6e6e6; 
+                border-radius: 8px; 
+                padding: 8px 12px; 
+                max-width: 65%;
+            }
+            /* WORKER: 오른쪽 (근로자 화면 기준) */
+            .worker-bubble { 
+                background-color: #dcf8c6; 
+                border-radius: 8px; 
+                padding: 8px 12px; 
+                max-width: 65%;
+            }
+            .meta { font-size: 0.8em; color: #555; margin-top: 2px; }
+            .user-name { font-weight: bold; font-size: 0.9em; margin-bottom: 3px; display: block;}
+            pre { margin: 0; white-space: pre-wrap; word-wrap: break-word; font-family: sans-serif; font-size: 1em;}
+        </style></head><body><div class="chat-area">
+        """)
+
+        # ------------------ 메시지 내용 구성 ------------------
+
+        for event in timeline_events:
+            who = event.get("who", "unknown")
+            username = event.get("username", "")
+            at = event.get("at", "") or ""
+            comment = event.get("comment", "")
+            status_code = event.get("status_code")
+
+            safe_comment = comment.replace('<', '&lt;').replace('>', '&gt;')
+
+            is_worker = (who == "worker")
+            container_class = "worker-container" if is_worker else "owner-container"
+            bubble_class = "worker-bubble" if is_worker else "owner-bubble"
+
+            meta_info = f"<span class='meta'>{at}</span>"
+            if not is_worker and status_code:
+                status_label = DISPUTE_STATUS.get(status_code, status_code or "")
+                meta_info += f" | <span class='meta'>상태: {status_label}</span>"
+
+            message_html = f"""
+            <div class="{container_class}">
+                <div class="{bubble_class}">
+                    <span class="user-name">{username}</span>
+                    <pre>{safe_comment}</pre>
+                    {meta_info}
+                </div>
+            </div>
+            """
+
+            html_content.append(message_html)
+
+        # ------------------ UI 적용 ------------------
+        html_content.append("</div></body></html>")
+
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle("이의 내용/처리 타임라인")
+        dlg.resize(800, 600)
+
+        layout = QtWidgets.QVBoxLayout(dlg)
+
+        edit = QtWidgets.QTextBrowser()
+        edit.setHtml("".join(html_content))
+
+        btn = QtWidgets.QPushButton("닫기")
+        btn.clicked.connect(dlg.accept)
+
+        layout.addWidget(edit)
+        layout.addWidget(btn)
+        dlg.exec_()

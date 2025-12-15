@@ -717,69 +717,90 @@ class OwnerPage(QtWidgets.QWidget):
         rr = dict(self._dispute_rows[row_idx])
         dispute_id = int(rr.get("id", 0))
 
-        sep = "=" * 30
-
-        def _prefix_lines(msg: str) -> str:
-            msg = (msg or "").strip()
-            if not msg:
-                return "=> (내용 없음)"
-            return "\n".join([f"=> {line}" for line in msg.splitlines()])
-
         timeline_events = []
         try:
-            # ✅ DB에서 모든 이력 (원문 + 메시지)을 가져옵니다.
+            # ✅ 최종 DB 함수 사용
             timeline_events = self.db.get_dispute_timeline(dispute_id)
         except Exception as e:
             logging.exception("Failed to get dispute timeline")
             Message.err(self, "오류", f"타임라인 로드 중 오류: {e}")
             return
 
-        blocks = []
+        html_content = []
+
+        # ------------------ CSS 스타일 정의 ------------------
+        html_content.append("""
+        <html><head>
+        <style>
+            .chat-area { padding: 10px; }
+            .message-container { display: flex; margin-bottom: 10px; }
+            .worker-container { justify-content: flex-start; }
+            .owner-container { justify-content: flex-end; }
+
+            /* WORKER: 왼쪽 (사업주 화면 기준) */
+            .worker-bubble { 
+                background-color: #e6e6e6; 
+                border-radius: 8px; 
+                padding: 8px 12px; 
+                max-width: 65%;
+            }
+            /* OWNER: 오른쪽 (사업주 화면 기준) */
+            .owner-bubble { 
+                background-color: #dcf8c6; 
+                border-radius: 8px; 
+                padding: 8px 12px; 
+                max-width: 65%;
+            }
+            .meta { font-size: 0.8em; color: #555; margin-top: 2px; }
+            .user-name { font-weight: bold; font-size: 0.9em; margin-bottom: 3px; display: block;}
+            pre { margin: 0; white-space: pre-wrap; word-wrap: break-word; font-family: sans-serif; font-size: 1em;}
+        </style></head><body><div class="chat-area">
+        """)
+
+        # ------------------ 메시지 내용 구성 ------------------
 
         for event in timeline_events:
             who = event.get("who", "unknown")
             username = event.get("username", "")
-            at = event.get("at", "") or "(시각 없음)"
-            comment = event.get("comment")
+            at = event.get("at", "") or ""
+            comment = event.get("comment", "")
             status_code = event.get("status_code")
 
-            # 근로자 메시지 (최초 원문 또는 재이의)
-            if who == "worker":
-                header_text = f"[근로자({username})]  {at}"
-                blocks.append(
-                    f"{sep}\n"
-                    f"{header_text}\n"
-                    f"{_prefix_lines(comment)}"
-                )
-            # 사업주 메시지/처리
-            elif who == "owner":
+            safe_comment = comment.replace('<', '&lt;').replace('>', '&gt;')
+
+            is_owner = (who == "owner")
+            container_class = "owner-container" if is_owner else "worker-container"
+            bubble_class = "owner-bubble" if is_owner else "worker-bubble"
+
+            meta_info = f"<span class='meta'>{at}</span>"
+            if is_owner and status_code:
                 status_label = DISPUTE_STATUS.get(status_code, status_code or "")
+                meta_info += f" | <span class='meta'>상태: {status_label}</span>"
 
-                owner_lines = []
-                if status_label:
-                    owner_lines.append(f"처리상태: {status_label}")
-                if (comment or "").strip():
-                    owner_lines.append(comment)
+            message_html = f"""
+            <div class="{container_class}">
+                <div class="{bubble_class}">
+                    <span class="user-name">{username}</span>
+                    <pre>{safe_comment}</pre>
+                    {meta_info}
+                </div>
+            </div>
+            """
 
-                owner_text = "\n".join(owner_lines) if owner_lines else ""
+            html_content.append(message_html)
 
-                header_text = f"[사업주({username})]  {at}"
-                blocks.append(
-                    f"{sep}\n"
-                    f"{header_text}\n"
-                    f"{_prefix_lines(owner_text)}"
-                )
-
-        timeline_text = "\n".join(blocks)
+        # ------------------ UI 적용 ------------------
+        html_content.append("</div></body></html>")
 
         dlg = QtWidgets.QDialog(self)
         dlg.setWindowTitle(title)
-        dlg.resize(900, 600)
+        dlg.resize(800, 600)
 
         v = QtWidgets.QVBoxLayout(dlg)
-        edit = QtWidgets.QPlainTextEdit()
-        edit.setReadOnly(True)
-        edit.setPlainText(timeline_text)
+
+        edit = QtWidgets.QTextBrowser()
+        edit.setHtml("".join(html_content))
+
         v.addWidget(edit)
 
         btn = QtWidgets.QPushButton("닫기")

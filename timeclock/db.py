@@ -972,10 +972,9 @@ class DB:
             status_code=status_code,
         )
 
-
     def get_dispute_timeline(self, dispute_id: int):
         """
-        [최종 복구/수정] disputes(최초 원문)와 dispute_messages(모든 이력)를 가져와 시간 순서대로 정렬하여 반환합니다.
+        [최종 복구/수정] disputes(최초 원문/누적)와 dispute_messages(사업주 메시지)를 합쳐서 시간 순서대로 반환합니다.
         """
 
         # 1) disputes에서 근로자 원문/등록시각 (최초 이벤트)
@@ -999,7 +998,7 @@ class DB:
         events = []
 
         # A. 근로자 최초 이의 (disputes.comment 전체)를 첫 번째 이벤트로 추가
-        # NOTE: comment 필드에 모든 누적 이력이 포함되어 있으므로, 이 필드만 worker 메시지로 사용.
+        # NOTE: comment 필드에 모든 누적 이력이 포함되어 있으므로, 이 필드를 worker 메시지로 사용.
         events.append({
             "who": "worker",
             "username": base["worker_username"],
@@ -1011,7 +1010,7 @@ class DB:
         })
 
         # 2) dispute_messages에서 모든 메시지/처리 이력 가져오기
-        # NOTE: 근로자의 '재이의'와 사업주의 '처리'는 이 테이블에 저장됨
+        # NOTE: 이 테이블에는 사업주 메시지와 근로자의 '재이의'가 시간 순서대로 저장되어 있음
         messages = self.conn.execute(
             """
             SELECT m.created_at,
@@ -1028,28 +1027,19 @@ class DB:
         ).fetchall()
 
         for row in messages:
-            # DB 레벨에서는 status_label 대신 status_code와 role을 사용
             events.append({
                 "who": row["sender_role"],
                 "username": row["sender_username"] or "System",
                 "at": row["created_at"],
                 "status_code": row["status_code"],
-                "status_label": None,  # UI에서 settings를 참조하여 결정
+                "status_label": None,
                 "comment": (row["message"] or "").strip(),
                 "sort_key": row["created_at"]
             })
 
-        # 시간순 정렬 (list.sort()는 안정 정렬이므로 문제 없음)
-        # events.sort(key=lambda x: x['sort_key'])
-
-        # NOTE: SQLite의 'created_at' 필드는 YYYY-MM-DD HH:MM:SS 형식으로 텍스트 정렬이 시간 정렬과 동일함.
-        # disputes.created_at과 dispute_messages.created_at을 비교하여 최종적으로 시간순을 맞춥니다.
-        # 단, 현재 로직은 'dispute_messages'의 created_at이 'disputes'의 created_at보다 무조건 나중에 발생하므로
-        # events 리스트에서 dispute_messages 이벤트만 정렬하는 것이 더 안정적입니다.
-
-        # 현재 events는 1. disputes 원문, 2. dispute_messages 이력 순으로 되어 있음.
-        # dispute_messages 기록은 이미 ID 순서대로 정렬되어 있으므로, 그냥 반환합니다.
-        # 근로자의 재이의는 'dispute_messages'에 기록되므로, 사업주 코멘트와 시간 순으로 섞여 출력될 것입니다.
+        # NOTE: 시간순 정렬은 UI에서 수행하거나, DB 쿼리 순서에 의존합니다.
+        # 현재 events는 [disputes 원문, messages 1, messages 2, ...] 순서입니다.
+        # UI에서 HTML 블록을 순서대로 출력하면 됩니다.
 
         return events
 
