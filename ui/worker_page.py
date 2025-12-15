@@ -312,6 +312,8 @@ class WorkerPage(QtWidgets.QWidget):
             return
         self._show_my_dispute_comment_popup(index.row()) # 전체보기 팝업 호출
 
+    # timeclock/ui/worker_page.py
+
     def _show_my_dispute_comment_popup(self, row: int):
         rows = getattr(self, "_my_dispute_rows", None)
         if not rows or not (0 <= row < len(rows)):
@@ -329,80 +331,47 @@ class WorkerPage(QtWidgets.QWidget):
                 return "=> (내용 없음)"
             return "\n".join([f"=> {line}" for line in msg.splitlines()])
 
+        timeline_events = []
+        try:
+            # ✅ 수정: dispute_messages 기반 타임라인 데이터 사용
+            timeline_events = self.db.get_dispute_timeline(dispute_id)
+        except Exception as e:
+            logging.exception("Failed to get dispute timeline")
+            Message.err(self, "오류", f"타임라인 로드 중 오류: {e}")
+            return
+
         blocks = []
 
-        # 1) 근로자 원문
-        worker_name = getattr(self.session, "username", "worker")
-        worker_at = rr.get("created_at") or ""
-        worker_comment = rr.get("comment") or ""
-        worker_body = _prefix_lines(worker_comment)
+        for event in timeline_events:
+            who = event.get("who", "unknown")
+            username = event.get("username", "")
+            at = event.get("at", "") or "(시각 없음)"
+            comment = event.get("comment")
+            status_code = event.get("status_code")
 
-        blocks.append(
-            f"{sep}\n"
-            f"[근로자({worker_name})]  {worker_at}\n"
-            f"{worker_body}"
-        )
+            if who == "worker" and status_code is None:  # 근로자의 이의 제기 원문 (get_dispute_timeline의 첫 번째 이벤트)
+                blocks.append(
+                    f"{sep}\n"
+                    f"[근로자({username})]  {at}\n"
+                    f"{_prefix_lines(comment)}"
+                )
+            elif who == "owner":  # 사업주의 메시지/처리 (dispute_messages 기반)
+                # DISPUTE_STATUS는 timeclock.settings에서 import 됨
+                status_label = DISPUTE_STATUS.get(status_code, status_code or "")
 
-        # 2) 사업주 최신 처리 결과
-        dispute_status = rr.get("dispute_status") or rr.get("status")
-        status_label = DISPUTE_STATUS.get(dispute_status, dispute_status or "")
-        resolution_comment = rr.get("resolution_comment") or ""
-        resolved_at = rr.get("resolved_at") or ""
+                owner_lines = []
+                if status_label:
+                    owner_lines.append(f"처리상태: {status_label}")
+                if (comment or "").strip():
+                    owner_lines.append(comment)
 
-        if status_label or (resolution_comment or "").strip() or resolved_at:
-            owner_lines = []
-            if status_label:
-                owner_lines.append(f"처리상태: {status_label}")
-            if (resolution_comment or "").strip():
-                owner_lines.append(resolution_comment)
+                owner_text = "\n".join(owner_lines) if owner_lines else ""
 
-            owner_text = "\n".join(owner_lines) if owner_lines else ""
-            owner_body = _prefix_lines(owner_text)
-
-            blocks.append(
-                f"{sep}\n"
-                f"[사업주]  {resolved_at or '(처리시각 없음)'}\n"
-                f"{owner_body}"
-            )
-
-        # 3) 처리 이력(audit_logs)
-        try:
-            audit_rows = self.db.list_dispute_audit_updates(dispute_id)
-        except Exception:
-            audit_rows = []
-
-        import json
-        for a in audit_rows:
-            ar = dict(a)
-            aid = ar.get("id")
-            actor = ar.get("actor_username") or "owner"
-            at = ar.get("created_at") or ""
-
-            detail = {}
-            dj = ar.get("detail_json") or ""
-            if dj:
-                try:
-                    detail = json.loads(dj)
-                except Exception:
-                    detail = {"comment": str(dj)}
-
-            s2 = (detail.get("status_label") or detail.get("status_code") or "").strip()
-            c2 = (detail.get("comment") or "").strip()
-
-            hist_lines = []
-            if s2:
-                hist_lines.append(f"처리상태: {s2}")
-            if c2:
-                hist_lines.append(c2)
-
-            hist_text = "\n".join(hist_lines) if hist_lines else ""
-            hist_body = _prefix_lines(hist_text)
-
-            blocks.append(
-                f"{sep}\n"
-                f"[처리기록 #{aid}] {actor}  {at}\n"
-                f"{hist_body}"
-            )
+                blocks.append(
+                    f"{sep}\n"
+                    f"[사업주({username})]  {at}\n"
+                    f"{_prefix_lines(owner_text)}"
+                )
 
         timeline_text = "\n".join(blocks)
 

@@ -865,3 +865,25 @@ Traceback (most recent call last):
     self.conn.execute(
 sqlite3.IntegrityError: NOT NULL constraint failed: dispute_messages.thread_id
 2025-12-16 05:21:23,785 [INFO] Refreshing disputes
+2025-12-16 05:24:34,768 [INFO] Login success: owner (owner)
+2025-12-16 05:24:34,768 [INFO] Logged in: owner (owner)
+2025-12-16 05:24:34,791 [INFO] Refreshing pending requests
+2025-12-16 05:24:34,791 [INFO] Refreshing disputes
+2025-12-16 05:24:34,792 [INFO] Refreshing signup requests
+2025-12-16 05:24:56,870 [INFO] Refreshing disputes
+2025-12-16 05:25:06,157 [INFO] Logout: owner
+2025-12-16 05:25:07,471 [INFO] Login success: worker (worker)
+2025-12-16 05:25:07,472 [INFO] Logged in: worker (worker)
+2025-12-16 05:25:07,504 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-16 05:25:07,504 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-16 05:25:07,504 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-16 05:25:07,504 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-16 05:25:19,258 [INFO] Dispute created: request_id=3 user=worker
+2025-12-16 05:25:25,258 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-16 05:25:25,258 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-16 05:28:40,779 [INFO] Login success: worker (worker)
+2025-12-16 05:28:40,779 [INFO] Logged in: worker (worker)
+2025-12-16 05:28:40,823 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-16 05:28:40,823 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-16 05:28:40,823 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-16 05:28:40,823 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)

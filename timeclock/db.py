@@ -415,19 +415,18 @@ class DB:
     # --- Disputes ---
     def create_dispute(self, request_id: int, user_id: int, dispute_type: str, comment: str):
         """
-        [재수정] 같은 request_id + user_id에 대해 미처리 이의가 있으면 누적을 유지합니다.
-        누적 시: 새로운 시간 기록을 추가하고, 상태를 PENDING으로 업데이트합니다.
+        [최종 수정] 같은 request_id + user_id에 대해 '가장 최근에 생성된' 이의를 찾아 누적합니다.
+        (처리 완료 여부와 관계없이 누적하며, 상태를 PENDING으로 되돌립니다.)
         """
         comment = (comment or "").strip()
         now = now_str()
 
-        # 1) 열려있는 이의 찾기(묶기)
+        # 1) '처리 상태와 무관하게' 같은 요청ID에 대한 가장 최근의 이의를 찾습니다.
         row = self.conn.execute(
             """
             SELECT id, comment
             FROM disputes
             WHERE request_id=? AND user_id=?
-              AND status IN ('PENDING', 'IN_REVIEW')
             ORDER BY id DESC
             LIMIT 1
             """,
@@ -438,7 +437,7 @@ class DB:
             dispute_id = int(row["id"])
             prev = row["comment"] or ""
 
-            # ✅ 수정: 기존 comment에 누적(구분선 + 새로운 시각/유형 정보 포함)
+            # ✅ 수정: 기존 comment에 누적(새로운 시각/유형 정보 포함)
             new_entry = (
                 f"\n\n{'=' * 30} [추가 제기: {now}] {'=' * 30}\n"
                 f"이의 유형: {dispute_type}\n"
@@ -455,8 +454,8 @@ class DB:
                 """
                 UPDATE disputes SET 
                     comment=?, 
-                    dispute_type=?,  -- 유형은 최신 내용으로 업데이트 (또는 유지)
-                    status='PENDING',  -- ✅ 수정: 근로자가 내용을 추가하면 상태를 PENDING으로 초기화
+                    dispute_type=?,  
+                    status='PENDING',  -- ✅ 상태를 PENDING으로 강제 초기화 (사업주 재검토 유도)
                     resolved_at=NULL,
                     resolution_comment=NULL
                 WHERE id=?
@@ -964,14 +963,12 @@ class DB:
             status_code=status_code,
         )
 
+
     def get_dispute_timeline(self, dispute_id: int):
         """
-        옵션 B: disputes(근로자 최초 이의) + audit_logs(사장 처리 이력)를 시간순으로 합쳐서 반환.
-        audit_logs에는 OwnerPage에서 action='DISPUTE_UPDATE'로 1건씩 남긴 detail_json을 사용한다.
+        [수정] disputes(근로자 최초 이의) + dispute_messages(사업주/상태 변경 메시지)를 시간순으로 합쳐서 반환.
         """
-        import json
-
-        # 1) disputes에서 근로자 원문/등록시각
+        # 1) disputes에서 근로자 원문/등록시각 (최초 이벤트)
         base = self.conn.execute(
             """
             SELECT d.id,
@@ -998,38 +995,34 @@ class DB:
             "comment": (base["worker_comment"] or "").strip(),
         }]
 
-        # 2) audit_logs에서 사장 처리 이력 (한 번 처리 = 한 이벤트로 묶임)
-        logs = self.conn.execute(
+        # 2) dispute_messages에서 모든 메시지/처리 이력 가져오기
+        messages = self.conn.execute(
             """
-            SELECT a.created_at,
-                   a.detail_json,
-                   u.username AS actor_username
-            FROM audit_logs a
-            LEFT JOIN users u ON u.id = a.actor_user_id
-            WHERE a.target_type = 'dispute'
-              AND a.target_id = ?
-              AND a.action = 'DISPUTE_UPDATE'
-            ORDER BY a.created_at ASC
+            SELECT m.created_at,
+                   m.sender_role,
+                   m.message,
+                   m.status_code,
+                   u.username AS sender_username
+            FROM dispute_messages m
+            LEFT JOIN users u ON u.id = m.sender_user_id
+            WHERE m.dispute_id = ?
+            ORDER BY m.id ASC
             """,
             (dispute_id,),
         ).fetchall()
 
-        for row in logs:
-            detail = {}
-            dj = row["detail_json"]
-            if dj:
-                try:
-                    detail = json.loads(dj)
-                except Exception:
-                    detail = {"comment": str(dj)}
+        # DISPUTE_STATUS는 settings에 있지만, DB 레벨에서는 직접 접근 불가.
+        # 대신 팝업 표시 로직에서 DISPUTE_STATUS를 사용하도록 함.
 
+        for row in messages:
+            # DB 레벨에서는 status_label 대신 status_code와 role을 사용
             events.append({
-                "who": "owner",
-                "username": row["actor_username"] or "owner",
+                "who": row["sender_role"],
+                "username": row["sender_username"] or "System",
                 "at": row["created_at"],
-                "status_code": detail.get("status_code"),
-                "status_label": detail.get("status_label"),
-                "comment": (detail.get("comment") or "").strip(),
+                "status_code": row["status_code"],
+                "status_label": None,  # UI에서 settings를 참조하여 결정
+                "comment": (row["message"] or "").strip(),
             })
 
         return events
