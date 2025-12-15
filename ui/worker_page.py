@@ -340,7 +340,6 @@ class WorkerPage(QtWidgets.QWidget):
     #
 
     def _show_my_dispute_comment_popup(self, row: int):
-        # 1. 데이터 준비 (기존과 동일)
         rows = getattr(self, "_my_dispute_rows", None)
         if not rows or not (0 <= row < len(rows)):
             return
@@ -348,16 +347,19 @@ class WorkerPage(QtWidgets.QWidget):
         rr = dict(rows[row])
         dispute_id = int(rr.get("id", 0))
 
-        try:
-            events = self.db.get_dispute_timeline(dispute_id)
-        except Exception as e:
-            Message.err(self, "오류", f"타임라인 로드 실패: {e}")
-            return
+        # ★ 수정된 호출 방식 ★
+        # Timeline 뷰어+채팅창 호출
+        from ui.dialogs import DisputeTimelineDialog
 
-        # 제목 만들기
-        title = f"내 이의 | 요청ID: {rr.get('request_id')} ({rr.get('requested_at')})"
-
-        # 2. ★ 다이얼로그 호출 (깔끔해짐) ★
-        # 근로자 화면이므로 my_role="worker" (내가 오른쪽)
-        dlg = DisputeTimelineDialog(self, title, events, my_role="worker")
+        # session.user_id 와 db 객체를 넘깁니다.
+        dlg = DisputeTimelineDialog(
+            parent=self,
+            db=self.db,
+            user_id=self.session.user_id,
+            dispute_id=dispute_id,
+            my_role="worker"
+        )
         dlg.exec_()
+
+        # 창 닫으면 목록 새로고침 (새 메시지 반영 위해)
+        self.refresh_my_disputes()

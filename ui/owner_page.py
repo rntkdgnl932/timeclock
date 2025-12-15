@@ -708,29 +708,26 @@ class OwnerPage(QtWidgets.QWidget):
     #
 
     def open_dispute_timeline_by_row(self, row_idx: int, title=None):
-        """
-        [수정됨] 인자 이름을 title로 변경하여 호출부와의 충돌 해결
-        """
-        # 1. 데이터 준비
         if not hasattr(self, "_dispute_rows") or not self._dispute_rows:
             return
 
         rr = dict(self._dispute_rows[row_idx])
         dispute_id = int(rr.get("id", 0))
 
-        try:
-            events = self.db.get_dispute_timeline(dispute_id)
-        except Exception:
-            return
+        # ★ 수정된 호출 방식 ★
+        from ui.dialogs import DisputeTimelineDialog
 
-        # 제목 만들기 (넘겨받은 title이 있으면 그걸 쓰고, 없으면 자동 생성)
-        if not title:
-            title = f"{rr.get('worker_username')}님의 이의 | {rr.get('requested_at')}"
-
-        # 2. ★ 다이얼로그 호출 ★
-        # 사업주 화면이므로 my_role="owner" (내가 오른쪽)
-        dlg = DisputeTimelineDialog(self, title, events, my_role="owner")
+        dlg = DisputeTimelineDialog(
+            parent=self,
+            db=self.db,
+            user_id=self.session.user_id,
+            dispute_id=dispute_id,
+            my_role="owner"
+        )
         dlg.exec_()
+
+        # 창 닫으면 목록 새로고침 (상태 변경 반영 위해)
+        self.refresh_disputes()
 
 
 
