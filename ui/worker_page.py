@@ -375,21 +375,23 @@ class WorkerPage(QtWidgets.QWidget):
         <html><head>
         <style>
             body {{ font-family: sans-serif; margin: 0; padding: 10px; }}
+            .header-container {{ text-align: center; margin-bottom: 15px; }}
             .header-info {{ 
                 background-color: #f0f0f0; 
                 padding: 10px; 
-                margin-bottom: 10px;
+                margin: 0 auto 5px auto; /* 중앙 정렬 */
                 border-radius: 5px;
                 font-size: 1.0em;
+                width: 80%; /* 중앙 정렬을 위해 너비 제한 */
             }}
-            .header-info strong {{ font-size: 1.1em; }}
             .dispute-original {{ 
                 background-color: #ffffe0; 
                 border: 1px solid #e0e0e0;
                 padding: 10px; 
-                margin-bottom: 15px;
+                margin: 0 auto; /* 중앙 정렬 */
                 border-radius: 5px;
                 font-size: 0.9em;
+                width: 80%; /* 중앙 정렬을 위해 너비 제한 */
             }}
             .chat-table {{ width: 100%; border-collapse: collapse; table-layout: fixed; }}
             .message-row {{ margin-bottom: 10px; display: table-row; }}
@@ -419,11 +421,13 @@ class WorkerPage(QtWidgets.QWidget):
             pre {{ margin: 0; white-space: pre-wrap; word-wrap: break-word; font-family: sans-serif; font-size: 1em;}}
         </style></head><body>
 
-        <div class="header-info">
-            <strong>대상 요청 정보:</strong> {req_type} (ID: {request_id}) | 요청시각: {requested_at}
-        </div>
-        <div class="dispute-original">
-            <strong>최초 이의 유형:</strong> {dispute_type}
+        <div class="header-container">
+            <div class="header-info">
+                대상 요청: {req_type} (ID: {request_id}) | 요청시각: {requested_at}
+            </div>
+            <div class="dispute-original">
+                최초 이의 유형: {dispute_type}
+            </div>
         </div>
 
         <table class="chat-table">
@@ -440,19 +444,19 @@ class WorkerPage(QtWidgets.QWidget):
 
             safe_comment = comment.replace('<', '&lt;').replace('>', '&gt;')
 
-            # ✅ 수정:
-            # 1. 중복 제거
-            if event["who"] == "worker" and comment == dispute_comment_full:
-                continue
-
-            # 2. 포맷 제거
+            # ✅ 수정: 중복 및 포맷 제거 로직
             if event["who"] == "worker":
+                # 1. 중복 제거
+                if comment == dispute_comment_full:
+                    continue
+
+                # 2. 포맷 제거
                 if comment.startswith('[이의 유형:'):
                     lines = comment.split('\n', 1)
                     safe_comment = lines[1] if len(lines) > 1 else lines[0]
                     safe_comment = safe_comment.replace('<', '&lt;').replace('>', '&gt;')
 
-            # 메시지 내용이 비어있으면 건너뜀 (코멘트 없이 상태 변경만 했을 경우)
+            # 메시지 내용이 비어있으면 건너뜀
             if not safe_comment.strip():
                 continue
 
