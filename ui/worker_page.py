@@ -359,15 +359,18 @@ class WorkerPage(QtWidgets.QWidget):
 
         html_content = []
 
-        # ------------------ 요청 정보 추출 및 제목 변경 ------------------
-        worker_username = self.session.username  # 근로자 이름은 세션에서 가져옴
+        # ------------------ 요청 정보 추출 ------------------
+        worker_username = self.session.username
         request_id = rr.get("request_id", "N/A")
         req_type = REQ_TYPES.get(rr.get("req_type"), rr.get("req_type", "N/A"))
         requested_at = rr.get("requested_at", "N/A")
 
+        dispute_type = rr.get("dispute_type", "N/A")
+        dispute_comment_full = rr.get("comment", "")  # disputes 테이블에 누적된 원문 전체
+
         new_title = f"내 이의 | 요청ID: {request_id} ({req_type} {requested_at})"
 
-        # ------------------ CSS 스타일 정의 및 요청 정보 출력 ------------------
+        # ------------------ CSS 스타일 정의 및 상단 정보 출력 ------------------
         html_content.append(f"""
         <html><head>
         <style>
@@ -375,10 +378,19 @@ class WorkerPage(QtWidgets.QWidget):
             .header-info {{ 
                 background-color: #f0f0f0; 
                 padding: 10px; 
+                margin-bottom: 10px;
+                border-radius: 5px;
+                font-size: 1.0em;
+            }}
+            .header-info strong {{ font-size: 1.1em; }}
+            .dispute-original {{ 
+                background-color: #ffffe0; /* 연노랑 */
+                border: 1px solid #e0e0e0;
+                padding: 10px; 
                 margin-bottom: 15px;
                 border-radius: 5px;
-                font-size: 1.1em;
-                font-weight: bold;
+                white-space: pre-wrap;
+                font-size: 0.9em;
             }}
             .chat-table {{ width: 100%; border-collapse: collapse; table-layout: fixed; }}
             .message-row {{ margin-bottom: 10px; display: table-row; }}
@@ -409,13 +421,17 @@ class WorkerPage(QtWidgets.QWidget):
         </style></head><body>
 
         <div class="header-info">
-            대상 요청: {req_type} (ID: {request_id}) | 요청시각: {requested_at}
+            <strong>대상 요청 정보:</strong> {req_type} (ID: {request_id}) | 요청시각: {requested_at}
+        </div>
+        <div class="dispute-original">
+            <strong>최초 이의 유형:</strong> {dispute_type}<br>
+            <strong>누적 이의 내용:</strong><pre>{dispute_comment_full}</pre>
         </div>
 
         <table class="chat-table">
         """)
 
-        # ------------------ 메시지 내용 구성 ------------------
+        # ------------------ 메시지 내용 구성 (대화 파트) ------------------
 
         for event in timeline_events:
             who = event.get("who", "unknown")
@@ -425,6 +441,10 @@ class WorkerPage(QtWidgets.QWidget):
             status_code = event.get("status_code")
 
             safe_comment = comment.replace('<', '&lt;').replace('>', '&gt;')
+
+            # 근로자의 누적 원문(첫 번째 이벤트)은 상단 고정 영역에 이미 표시되었으므로, 건너뜁니다.
+            if event["who"] == "worker" and event["comment"] == dispute_comment_full:
+                continue
 
             is_worker = (who == "worker")
             cell_class = "worker-cell" if is_worker else "owner-cell"
@@ -453,7 +473,7 @@ class WorkerPage(QtWidgets.QWidget):
         html_content.append("</table></body></html>")
 
         dlg = QtWidgets.QDialog(self)
-        dlg.setWindowTitle(new_title)  # ✅ 제목 업데이트
+        dlg.setWindowTitle(new_title)
         dlg.resize(800, 600)
 
         layout = QtWidgets.QVBoxLayout(dlg)

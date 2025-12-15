@@ -980,6 +980,7 @@ class DB:
             status_code=status_code,
         )
 
+    #
 
     def get_dispute_timeline(self, dispute_id: int):
         """
@@ -1007,7 +1008,7 @@ class DB:
 
         events = []
 
-        # A. 근로자 최초 이의 (disputes.comment 전체)를 첫 번째 이벤트로 추가 (기존 히스토리 보존)
+        # A. 근로자 최초 이의 (disputes.comment 전체)를 첫 번째 이벤트로 추가 (사라진 대화 내용 복구)
         events.append({
             "who": "worker",
             "username": base["worker_username"],
@@ -1034,10 +1035,8 @@ class DB:
             (dispute_id,),
         ).fetchall()
 
-        # ✅ 수정: 첫 번째 메시지가 근로자의 최초 이의 제기인 경우 건너뛰어 중복을 방지합니다.
-        # (첫 번째 메시지는 항상 worker의 최초 이의 제기입니다.)
+        # ✅ 중복 방지: 첫 번째 메시지 (최초 이의 제기)를 건너뜁니다.
         for i, row in enumerate(messages):
-            # 첫 번째 메시지이고 sender_role이 worker인 경우 (최초 이의제기 중복) 건너뜁니다.
             if i == 0 and row["sender_role"] == "worker":
                 continue
 
@@ -1051,7 +1050,7 @@ class DB:
                 "sort_key": row["created_at"]
             })
 
-        # 시간 순서대로 정렬 (SQLite 날짜 포맷은 텍스트 정렬이 시간 정렬과 동일)
+        # 최종적으로 시간 순서대로 정렬
         events.sort(key=lambda x: x['sort_key'])
 
         return events
