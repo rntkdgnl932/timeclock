@@ -3,6 +3,10 @@
 import logging
 from PyQt5 import QtWidgets, QtCore
 from datetime import datetime
+import os
+from pathlib import Path  # <--- 이 줄을 꼭 추가해주세요!
+from timeclock.excel_maker import generate_payslip
+from timeclock.settings import DATA_DIR
 
 from timeclock.utils import Message
 from ui.widgets import DateRangeBar, Table
@@ -176,10 +180,10 @@ class OwnerPage(QtWidgets.QWidget):
     # 2. 회원(급여) 관리 탭
     # ==========================================================
     def _build_member_tab(self):
-        # 상단 필터 영역
+        # 1. 검색 및 필터 컨트롤
         self.le_member_search = QtWidgets.QLineEdit()
         self.le_member_search.setPlaceholderText("이름 검색...")
-        self.le_member_search.returnPressed.connect(self.refresh_members) # 엔터 치면 검색
+        self.le_member_search.returnPressed.connect(self.refresh_members)
 
         self.cb_member_filter = QtWidgets.QComboBox()
         self.cb_member_filter.addItem("재직자 보기", "ACTIVE")
@@ -190,39 +194,57 @@ class OwnerPage(QtWidgets.QWidget):
         self.btn_member_search = QtWidgets.QPushButton("검색")
         self.btn_member_search.clicked.connect(self.refresh_members)
 
-        # 기능 버튼 영역
+        # 2. 기능 버튼들 생성 (★ 순서 중요: addWidget 전에 무조건 생성되어야 함)
+
+        # [시급 변경]
         self.btn_edit_wage = QtWidgets.QPushButton("시급 변경")
         self.btn_edit_wage.setStyleSheet("background-color: #E3F2FD; color: #0D47A1;")
         self.btn_edit_wage.clicked.connect(self.edit_wage)
 
-        self.btn_calc_salary = QtWidgets.QPushButton("급여 정산(예상)")
+        # [급여 정산]
+        self.btn_calc_salary = QtWidgets.QPushButton("급여 정산")
         self.btn_calc_salary.setStyleSheet("background-color: #fff3e0; color: #e65100; font-weight: bold;")
         self.btn_calc_salary.clicked.connect(self.calculate_salary)
 
+        # [명세서 발급] (★ 여기가 누락되었거나 순서가 뒤였을 수 있음)
+        self.btn_export_payslip = QtWidgets.QPushButton("명세서 발급 (Excel)")
+        try:
+            self.btn_export_payslip.clicked.disconnect()
+        except:
+            pass
+        self.btn_export_payslip.setStyleSheet("background-color: #e8f5e9; color: #1b5e20; font-weight: bold;")
+        self.btn_export_payslip.clicked.connect(self.export_payslip)
 
+
+
+        # [퇴사 처리]
         self.btn_resign = QtWidgets.QPushButton("퇴사 처리")
         self.btn_resign.setStyleSheet("background-color: #ffebee; color: #b71c1c;")
         self.btn_resign.clicked.connect(self.resign_worker)
 
-        # 테이블
+        # 3. 레이아웃 배치
+        top_layout = QtWidgets.QHBoxLayout()
+        top_layout.addWidget(self.le_member_search)
+        top_layout.addWidget(self.cb_member_filter)
+        top_layout.addWidget(self.btn_member_search)
+        top_layout.addStretch(1)  # 중간 여백
+
+        # 버튼들 순서대로 추가
+        top_layout.addWidget(self.btn_edit_wage)
+        top_layout.addWidget(self.btn_calc_salary)
+        top_layout.addWidget(self.btn_export_payslip)  # 생성된 버튼 추가
+        top_layout.addWidget(self.btn_resign)
+
+        # 4. 테이블 구성
         self.member_table = Table([
             "ID", "아이디", "성함", "전화번호", "생년월일", "시급", "가입일", "상태"
         ])
         self.member_table.setColumnWidth(0, 0)
         self.member_table.itemDoubleClicked.connect(self.edit_wage)
 
-        # 레이아웃 배치
-        top_filter = QtWidgets.QHBoxLayout()
-        top_filter.addWidget(self.le_member_search)
-        top_filter.addWidget(self.cb_member_filter)
-        top_filter.addWidget(self.btn_member_search)
-        top_filter.addStretch(1)
-        top_filter.addWidget(self.btn_edit_wage)
-        top_filter.addWidget(self.btn_calc_salary)
-        top_filter.addWidget(self.btn_resign)
-
+        # 전체 레이아웃 조합
         l = QtWidgets.QVBoxLayout()
-        l.addLayout(top_filter)
+        l.addLayout(top_layout)
         l.addWidget(self.member_table)
 
         w = QtWidgets.QWidget()
@@ -498,105 +520,190 @@ class OwnerPage(QtWidgets.QWidget):
         # OwnerPage 클래스 내부 메서드로 추가
 
     def calculate_salary(self):
-        # 1. 대상 선택 확인
+        try:
+            # 1. 대상 선택 확인
+            row = self.member_table.selected_first_row_index()
+            if row < 0:
+                Message.warn(self, "알림", "급여를 정산할 직원을 목록에서 선택하세요.")
+                return
+
+            rr = dict(self._member_rows[row])
+            user_id = rr['id']
+            username = rr['username']
+            hourly_wage = rr['hourly_wage'] or 0
+
+            # 2. 기간 선택 (달력 팝업)
+            dlg = DateRangeDialog(self)
+            if dlg.exec_() != QtWidgets.QDialog.Accepted:
+                return  # 취소 시 중단
+
+            d1, d2 = dlg.get_range()
+
+            # 3. DB에서 확정된(APPROVED) 근무 기록만 가져오기
+            logs = self.db.list_all_work_logs(user_id, d1, d2, status_filter='APPROVED')
+
+            if not logs:
+                Message.info(self, "결과", "해당 기간에 승인된 근무 기록이 없습니다.")
+                return
+
+            # 4. 계산기 가동
+            calc = SalaryCalculator(wage_per_hour=hourly_wage)
+            res = calc.calculate_period([dict(r) for r in logs])
+
+            if not res:
+                Message.info(self, "결과", "계산할 데이터가 없습니다.")
+                return
+
+            # 5. 결과 문자열 만들기 (새로운 salary.py 로직 반영)
+            final_pay = res['grand_total']
+
+            # 주휴수당 상세 내역
+            details = res.get('ju_hyu_details', [])
+            if details:
+                detail_str = " + ".join([f"{x:,}" for x in details])
+                ju_hyu_msg = f"주휴수당: {detail_str} = {res['ju_hyu_pay']:,}원"
+            else:
+                ju_hyu_msg = f"주휴수당: {res['ju_hyu_pay']:,}원"
+
+            # 메시지 구성 (연장/야간 분리 표시)
+            msg = (
+                f"[{d1} ~ {d2} 급여 정산 결과]\n\n"
+                f"• 총 근무시간: {res['total_hours']}시간\n"
+                f"• 실제 근무(공제후): {res['actual_hours']}시간\n\n"
+                f"-------------- 상세 내역 --------------\n"
+                f"1. 기본급: {res['base_pay']:,}원\n"
+                f"2. 연장수당: {res['overtime_pay']:,}원 (8h 초과)\n"
+                f"3. 야간수당: {res['night_pay']:,}원 (22시~06시)\n"
+                f"4. {ju_hyu_msg}\n"
+                f"---------------------------------------\n"
+                f"💰 예상 지급 총액: {final_pay:,}원"
+            )
+
+            QtWidgets.QMessageBox.information(self, "예상 급여 내역", msg)
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            Message.err(self, "오류", f"계산 중 오류가 발생했습니다.\n{e}")
+
+    #
+    def export_payslip(self):
+        # 1. 직원 선택 확인
         row = self.member_table.selected_first_row_index()
         if row < 0:
-            Message.warn(self, "알림", "급여를 정산할 직원을 목록에서 선택하세요.")
+            Message.warn(self, "알림", "명세서를 발급할 직원을 선택하세요.")
             return
 
         rr = dict(self._member_rows[row])
         user_id = rr['id']
         username = rr['username']
+        real_name = rr.get('name') or username  # 실명 없으면 아이디 사용
         hourly_wage = rr['hourly_wage'] or 0
 
+        # 2. 기간 선택
         dlg = DateRangeDialog(self)
-        if dlg.exec_() != QtWidgets.QDialog.Accepted:
-            return  # 취소 누르면 종료
-
+        if dlg.exec_() != QtWidgets.QDialog.Accepted: return
         d1, d2 = dlg.get_range()
 
-        # 2. 기간 입력 받기 (Dialog 띄우기엔 복잡하니 단순 inputDialog 2번 혹은 고정)
-        #    편의상 현재 달 1일 ~ 오늘까지로 자동 설정하거나, 사용자에게 물어볼 수 있습니다.
-        #    여기서는 심플하게 'DateRangeBar'가 없으므로 텍스트로 받거나,
-        #    기존에 만들어둔 get_range() 로직을 재사용하기 어렵다면 날짜 입력 팝업을 띄웁니다.
-
-        # (간단 구현을 위해, 최근 30일로 자동 계산하거나 별도 Dialog가 필요하지만,
-        #  가장 쉬운 방법은 'YYYY-MM-DD' 문자열을 입력받는 것입니다.)
-
-        today_str = datetime.now().strftime("%Y-%m-%d")
-        first_day = datetime.now().replace(day=1).strftime("%Y-%m-%d")
-
-        text, ok = QtWidgets.QInputDialog.getText(
-            self, "급여 정산",
-            f"'{username}' 님의 정산 기간을 입력하세요 (YYYY-MM-DD ~ YYYY-MM-DD):",
-            text=f"{first_day} ~ {today_str}"
-        )
-
-        if not ok: return
-
-        try:
-            d1_str, d2_str = text.split("~")
-            d1 = d1_str.strip()
-            d2 = d2_str.strip()
-
-            # 날짜 형식 검증
-            datetime.strptime(d1, "%Y-%m-%d")
-            datetime.strptime(d2, "%Y-%m-%d")
-
-        except:
-            Message.err(self, "오류", "날짜 형식이 올바르지 않습니다. (예: 2025-01-01 ~ 2025-01-31)")
-            return
-
-        # 3. DB에서 확정된(APPROVED) 근무 기록만 가져오기
-        #    (list_all_work_logs 함수 재사용)
+        # 3. 데이터 조회
         logs = self.db.list_all_work_logs(user_id, d1, d2, status_filter='APPROVED')
-
         if not logs:
-            Message.info(self, "결과", "해당 기간에 승인된 근무 기록이 없습니다.")
+            Message.warn(self, "알림", "해당 기간에 승인된 근무 기록이 없습니다.")
             return
 
-        # 4. 계산기 가동
-        #    DB에서 가져온 row는 tuple/sqlite3.Row 이므로 dict로 변환
-        log_dicts = [dict(r) for r in logs]
+        # 4. 급여 계산
+        calc = SalaryCalculator(hourly_wage)
+        res = calc.calculate_period([dict(r) for r in logs])
+        total_pay = res['grand_total']
 
-        calc = SalaryCalculator(wage_per_hour=hourly_wage)
-        res = calc.calculate_period(log_dicts)
+        # 5. 공제 계산 (고용보험 0.9%)
+        ei_tax = int(total_pay * 0.009 / 10) * 10
+        pension = 0
+        health = 0
+        care = 0
+        income_tax = 0
+        local_tax = 0
 
-        if not res:
-            Message.info(self, "결과", "계산할 데이터가 없습니다.")
-            return
+        total_deduction = ei_tax + pension + health + care + income_tax + local_tax
+        net_pay = total_pay - total_deduction
 
-        # 5. 결과 문자열 만들기 (요청하신 포맷)
-        # "{시작날짜}~{끝날짜} 까지 총 {총근무시간}시간을 일했으며,
-        # 휴게시간 {휴게시간}시간을 제외한 {실제근무시간}시간을 근무하였습니다.
-        # 주휴수당은 총 {주휴수당의 합}원이 지급되며,
-        # 합산 {실제근무시간 x 정해진 시급 + 주휴수당의 합}원이 지급됩니다."
+        # 6. 비고(방어 문구) 생성
+        note_text = ""
+        if res['ju_hyu_pay'] > 0:
+            note_text = (
+                "비고:\n"
+                "본 근로계약은 주 15시간 미만을 원칙으로 하나,\n"
+                "본 주는 성수기 물량 대응으로 일시적으로 주 15시간을 초과하여\n"
+                "근로기준법 제55조에 따라 해당 주에 한해 주휴수당을 지급함.\n"
+                "본 초과 근무는 상시적 근로시간 변경에 해당하지 않음."
+            )
 
-        # 합산 금액 (기본급+주휴+가산수당 모두 포함)
-        final_pay = res['grand_total']
+        # 7. 엑셀 데이터 매핑
+        data_ctx = {
+            "title": f"{d1[:4]}년 {d1[5:7]}월 급여명세서",
+            "name": real_name,
+            "period": f"{d1} ~ {d2}",
+            "pay_date": datetime.now().strftime("%Y-%m-%d"),
+            "company": "Hobby Store",
 
-        # ★ [추가/수정] 주휴수당 상세 내역 문자열 만들기
-        details = res.get('ju_hyu_details', [])
-        if details:
-            # 예: "30,000 + 30,000" 형태로 변환
-            detail_str = " + ".join([f"{x:,}" for x in details])
-            ju_hyu_msg = f"주휴수당: {detail_str} = 총 {res['ju_hyu_pay']:,}원"
-        else:
-            ju_hyu_msg = f"주휴수당: {res['ju_hyu_pay']:,}원"
+            "base_pay": res['base_pay'],
+            "ju_hyu_pay": res['ju_hyu_pay'],
+            "overtime_pay": res['overtime_pay'],
+            "night_pay": res['night_pay'],
+            "holiday_pay": res['holiday_pay'],
+            "other_pay": 0,
+            "total_pay": total_pay,
 
-        # 최종 메시지 구성
-        msg = (
-            f"[{d1} ~ {d2} 급여 정산 결과]\n\n"
-            f"총 {res['total_hours']}시간을 일했으며, "
-            f"휴게시간 {res['break_hours']}시간을 제외한 "
-            f"실제 {res['actual_hours']}시간을 근무하였습니다.\n\n"
-            f"• 기본급(시급 {hourly_wage:,}원): {res['base_pay']:,}원\n"
-            f"• 가산수당(연장/야간): {res['overtime_pay']:,}원\n"
-            f"• {ju_hyu_msg}\n\n"  # ★ 수정된 변수 사용
-            f"💰 총 지급액: {final_pay:,}원"
-        )
+            "ei_ins": ei_tax,
+            "pension": pension,
+            "health_ins": health,
+            "care_ins": care,
+            "income_tax": income_tax,
+            "local_tax": local_tax,
+            "total_deduction": total_deduction,
+            "net_pay": net_pay,
 
-        QtWidgets.QMessageBox.information(self, "예상 급여 내역", msg)
+            "base_detail": f"{res['actual_hours']}h x {hourly_wage:,}",
+            "ju_hyu_detail": "주 15시간 초과분" if res['ju_hyu_pay'] > 0 else "-",
+            "over_detail": "8h/40h 초과분(1.5배)" if res['overtime_pay'] > 0 else "-",
+            "calc_detail": f"총 {res['total_hours']}h 근무 (실 {res['actual_hours']}h)",
+            "tax_detail": "고용보험 0.9%",
+            "note": note_text
+        }
+
+        # 8. 파일 생성 및 저장
+        try:
+            template_path = DATA_DIR / "template.xlsx"
+            if not template_path.exists():
+                Message.err(self, "오류", f"템플릿 파일이 없습니다.\n{template_path}")
+                return
+
+            save_dir = Path(r"C:\my_games\timeclock\pay_result")
+            save_dir.mkdir(parents=True, exist_ok=True)
+
+            # 파일명 안전하게 생성
+            safe_d1 = d1.replace("-", "")
+            safe_d2 = d2.replace("-", "")
+            filename = f"급여명세서_{real_name}_{safe_d1}_{safe_d2}.xlsx"
+            target_path = save_dir / filename
+
+            save_path, _ = QtWidgets.QFileDialog.getSaveFileName(
+                self,
+                "명세서 저장",
+                str(target_path),
+                "Excel Files (*.xlsx)"
+            )
+
+            if save_path:
+                generate_payslip(template_path, save_path, data_ctx)
+                Message.info(self, "완료", f"급여명세서가 생성되었습니다.\n{save_path}")
+                try:
+                    os.startfile(os.path.dirname(save_path))
+                except:
+                    pass
+
+        except Exception as e:
+            Message.err(self, "오류", f"생성 실패: {e}")
 
 
 

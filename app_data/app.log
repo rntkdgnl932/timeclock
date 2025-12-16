@@ -1847,3 +1847,52 @@ sqlite3.IntegrityError: NOT NULL constraint failed: dispute_messages.thread_id
 2025-12-16 13:55:19,422 [INFO] Logged in: worker (worker)
 2025-12-16 15:01:38,725 [INFO] Login success: worker (worker)
 2025-12-16 15:01:38,726 [INFO] Logged in: worker (worker)
+2025-12-16 15:11:57,030 [INFO] Login success: owner (owner)
+2025-12-16 15:11:57,030 [INFO] Logged in: owner (owner)
+2025-12-16 15:12:08,612 [INFO] Logout: owner
+2025-12-16 15:12:10,553 [INFO] Login success: worker (worker)
+2025-12-16 15:12:10,553 [INFO] Logged in: worker (worker)
+2025-12-16 23:42:50,194 [INFO] Login success: owner (owner)
+2025-12-16 23:42:50,195 [INFO] Logged in: owner (owner)
+2025-12-16 23:43:01,713 [INFO] Logout: owner
+2025-12-16 23:43:04,635 [INFO] Login success: worker (worker)
+2025-12-16 23:43:04,635 [INFO] Logged in: worker (worker)
+2025-12-17 00:27:56,808 [INFO] Logout: worker
+2025-12-17 00:28:00,001 [INFO] Login success: owner (owner)
+2025-12-17 00:28:00,001 [INFO] Logged in: owner (owner)
+2025-12-17 01:56:14,971 [INFO] Login success: owner (owner)
+2025-12-17 01:56:14,972 [INFO] Logged in: owner (owner)
+2025-12-17 01:56:14,992 [ERROR] Failed to create page after login
+Traceback (most recent call last):
+  File "C:\my_games\timeclock\ui\main_window.py", line 198, in on_logged_in
+    self._owner_page = OwnerPage(self.db, session)
+  File "C:\my_games\timeclock\ui\owner_page.py", line 48, in __init__
+    self.tabs.addTab(self._build_member_tab(), "회원(급여) 관리")
+  File "C:\my_games\timeclock\ui\owner_page.py", line 225, in _build_member_tab
+    top_filter.addWidget(self.btn_export_payslip)
+AttributeError: 'OwnerPage' object has no attribute 'btn_export_payslip'
+2025-12-17 02:00:39,344 [INFO] Login success: owner (owner)
+2025-12-17 02:00:39,344 [INFO] Logged in: owner (owner)
+2025-12-17 02:00:39,364 [ERROR] Failed to create page after login
+Traceback (most recent call last):
+  File "C:\my_games\timeclock\ui\main_window.py", line 198, in on_logged_in
+    self._owner_page = OwnerPage(self.db, session)
+  File "C:\my_games\timeclock\ui\owner_page.py", line 48, in __init__
+    self.tabs.addTab(self._build_member_tab(), "회원(급여) 관리")
+  File "C:\my_games\timeclock\ui\owner_page.py", line 225, in _build_member_tab
+    top_filter.addWidget(self.btn_export_payslip)
+AttributeError: 'OwnerPage' object has no attribute 'btn_export_payslip'
+2025-12-17 02:03:21,924 [INFO] Login success: owner (owner)
+2025-12-17 02:03:21,924 [INFO] Logged in: owner (owner)
+2025-12-17 02:11:23,370 [INFO] Login success: owner (owner)
+2025-12-17 02:11:23,371 [INFO] Logged in: owner (owner)
+2025-12-17 02:13:45,890 [INFO] Login success: owner (owner)
+2025-12-17 02:13:45,891 [INFO] Logged in: owner (owner)
+2025-12-17 02:20:09,154 [INFO] Login success: owner (owner)
+2025-12-17 02:20:09,155 [INFO] Logged in: owner (owner)
+2025-12-17 02:32:46,838 [INFO] Login success: owner (owner)
+2025-12-17 02:32:46,838 [INFO] Logged in: owner (owner)
+2025-12-17 02:36:03,089 [INFO] Login success: owner (owner)
+2025-12-17 02:36:03,089 [INFO] Logged in: owner (owner)
+2025-12-17 02:42:49,916 [INFO] Login success: owner (owner)
+2025-12-17 02:42:49,916 [INFO] Logged in: owner (owner)
