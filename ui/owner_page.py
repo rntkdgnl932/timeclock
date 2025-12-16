@@ -2,12 +2,15 @@
 # -*- coding: utf-8 -*-
 import logging
 from PyQt5 import QtWidgets, QtCore
+from datetime import datetime
 
 from timeclock.utils import Message, now_str
 from timeclock.settings import WORK_STATUS  # ★ [수정] 설정 파일에서 상태값 가져옴
 from ui.widgets import DateRangeBar, Table
 from ui.dialogs import ChangePasswordDialog, DisputeTimelineDialog
 from timeclock.settings import WORK_STATUS, SIGNUP_STATUS
+# 파일 상단
+from timeclock.salary import SalaryCalculator  # [NEW]
 
 
 class OwnerPage(QtWidgets.QWidget):
@@ -194,6 +197,11 @@ class OwnerPage(QtWidgets.QWidget):
         self.btn_edit_wage.setStyleSheet("background-color: #E3F2FD; color: #0D47A1;")
         self.btn_edit_wage.clicked.connect(self.edit_wage)
 
+        self.btn_calc_salary = QtWidgets.QPushButton("급여 정산(예상)")
+        self.btn_calc_salary.setStyleSheet("background-color: #fff3e0; color: #e65100; font-weight: bold;")
+        self.btn_calc_salary.clicked.connect(self.calculate_salary)
+
+
         self.btn_resign = QtWidgets.QPushButton("퇴사 처리")
         self.btn_resign.setStyleSheet("background-color: #ffebee; color: #b71c1c;")
         self.btn_resign.clicked.connect(self.resign_worker)
@@ -212,6 +220,7 @@ class OwnerPage(QtWidgets.QWidget):
         top_filter.addWidget(self.btn_member_search)
         top_filter.addStretch(1)
         top_filter.addWidget(self.btn_edit_wage)
+        top_filter.addWidget(self.btn_calc_salary)
         top_filter.addWidget(self.btn_resign)
 
         l = QtWidgets.QVBoxLayout()
@@ -487,6 +496,104 @@ class OwnerPage(QtWidgets.QWidget):
             if pw:
                 self.db.change_password(self.session.user_id, pw)
                 Message.info(self, "성공", "비밀번호가 변경되었습니다.")
+
+        # OwnerPage 클래스 내부 메서드로 추가
+
+    def calculate_salary(self):
+        # 1. 대상 선택 확인
+        row = self.member_table.selected_first_row_index()
+        if row < 0:
+            Message.warn(self, "알림", "급여를 정산할 직원을 목록에서 선택하세요.")
+            return
+
+        rr = dict(self._member_rows[row])
+        user_id = rr['id']
+        username = rr['username']
+        hourly_wage = rr['hourly_wage'] or 0
+
+        # 2. 기간 입력 받기 (Dialog 띄우기엔 복잡하니 단순 inputDialog 2번 혹은 고정)
+        #    편의상 현재 달 1일 ~ 오늘까지로 자동 설정하거나, 사용자에게 물어볼 수 있습니다.
+        #    여기서는 심플하게 'DateRangeBar'가 없으므로 텍스트로 받거나,
+        #    기존에 만들어둔 get_range() 로직을 재사용하기 어렵다면 날짜 입력 팝업을 띄웁니다.
+
+        # (간단 구현을 위해, 최근 30일로 자동 계산하거나 별도 Dialog가 필요하지만,
+        #  가장 쉬운 방법은 'YYYY-MM-DD' 문자열을 입력받는 것입니다.)
+
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        first_day = datetime.now().replace(day=1).strftime("%Y-%m-%d")
+
+        text, ok = QtWidgets.QInputDialog.getText(
+            self, "급여 정산",
+            f"'{username}' 님의 정산 기간을 입력하세요 (YYYY-MM-DD ~ YYYY-MM-DD):",
+            text=f"{first_day} ~ {today_str}"
+        )
+
+        if not ok: return
+
+        try:
+            d1_str, d2_str = text.split("~")
+            d1 = d1_str.strip()
+            d2 = d2_str.strip()
+
+            # 날짜 형식 검증
+            datetime.strptime(d1, "%Y-%m-%d")
+            datetime.strptime(d2, "%Y-%m-%d")
+
+        except:
+            Message.err(self, "오류", "날짜 형식이 올바르지 않습니다. (예: 2025-01-01 ~ 2025-01-31)")
+            return
+
+        # 3. DB에서 확정된(APPROVED) 근무 기록만 가져오기
+        #    (list_all_work_logs 함수 재사용)
+        logs = self.db.list_all_work_logs(user_id, d1, d2, status_filter='APPROVED')
+
+        if not logs:
+            Message.info(self, "결과", "해당 기간에 승인된 근무 기록이 없습니다.")
+            return
+
+        # 4. 계산기 가동
+        #    DB에서 가져온 row는 tuple/sqlite3.Row 이므로 dict로 변환
+        log_dicts = [dict(r) for r in logs]
+
+        calc = SalaryCalculator(wage_per_hour=hourly_wage)
+        res = calc.calculate_period(log_dicts)
+
+        if not res:
+            Message.info(self, "결과", "계산할 데이터가 없습니다.")
+            return
+
+        # 5. 결과 문자열 만들기 (요청하신 포맷)
+        # "{시작날짜}~{끝날짜} 까지 총 {총근무시간}시간을 일했으며,
+        # 휴게시간 {휴게시간}시간을 제외한 {실제근무시간}시간을 근무하였습니다.
+        # 주휴수당은 총 {주휴수당의 합}원이 지급되며,
+        # 합산 {실제근무시간 x 정해진 시급 + 주휴수당의 합}원이 지급됩니다."
+
+        # 합산 금액 (기본급+주휴+가산수당 모두 포함)
+        final_pay = res['grand_total']
+
+        # ★ [추가/수정] 주휴수당 상세 내역 문자열 만들기
+        details = res.get('ju_hyu_details', [])
+        if details:
+            # 예: "30,000 + 30,000" 형태로 변환
+            detail_str = " + ".join([f"{x:,}" for x in details])
+            ju_hyu_msg = f"주휴수당: {detail_str} = 총 {res['ju_hyu_pay']:,}원"
+        else:
+            ju_hyu_msg = f"주휴수당: {res['ju_hyu_pay']:,}원"
+
+        # 최종 메시지 구성
+        msg = (
+            f"[{d1} ~ {d2} 급여 정산 결과]\n\n"
+            f"총 {res['total_hours']}시간을 일했으며, "
+            f"휴게시간 {res['break_hours']}시간을 제외한 "
+            f"실제 {res['actual_hours']}시간을 근무하였습니다.\n\n"
+            f"• 기본급(시급 {hourly_wage:,}원): {res['base_pay']:,}원\n"
+            f"• 가산수당(연장/야간): {res['overtime_pay']:,}원\n"
+            f"• {ju_hyu_msg}\n\n"  # ★ 수정된 변수 사용
+            f"💰 총 지급액: {final_pay:,}원"
+        )
+
+        QtWidgets.QMessageBox.information(self, "예상 급여 내역", msg)
+
 
 
 class WorkLogApproveDialog(QtWidgets.QDialog):
