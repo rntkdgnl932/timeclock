@@ -4,16 +4,9 @@ import logging
 from PyQt5 import QtWidgets, QtCore
 
 from timeclock.utils import Message, now_str
+from timeclock.settings import WORK_STATUS  # ★ [수정] 설정 파일에서 상태값 가져옴
 from ui.widgets import DateRangeBar, Table
 from ui.dialogs import ChangePasswordDialog, DisputeTimelineDialog
-
-# 근무 상태 한글 매핑
-STATUS_MAP = {
-    "WORKING": "근무중",
-    "PENDING": "승인대기(퇴근완료)",
-    "APPROVED": "확정(승인)",
-    "REJECTED": "반려"
-}
 
 
 class OwnerPage(QtWidgets.QWidget):
@@ -26,15 +19,14 @@ class OwnerPage(QtWidgets.QWidget):
 
         self._dispute_rows = []
         self._work_rows = []
+        self._member_rows = []
 
-        # 헤더
         header = QtWidgets.QLabel(f"사업주 화면 - {session.username}")
         f = header.font()
         f.setPointSize(14)
         f.setBold(True)
         header.setFont(f)
 
-        # 상단 버튼 (비번변경, 로그아웃)
         self.btn_change_pw = QtWidgets.QPushButton("비밀번호 변경")
         self.btn_logout = QtWidgets.QPushButton("로그아웃")
         self.btn_change_pw.clicked.connect(self.change_password)
@@ -45,15 +37,13 @@ class OwnerPage(QtWidgets.QWidget):
         top_btns.addWidget(self.btn_change_pw)
         top_btns.addWidget(self.btn_logout)
 
-        # ----------------------------------------------------
         # 탭 구성
-        # ----------------------------------------------------
         self.tabs = QtWidgets.QTabWidget()
         self.tabs.addTab(self._build_work_log_tab(), "근무 기록 관리 (승인)")
+        self.tabs.addTab(self._build_member_tab(), "회원(급여) 관리")
         self.tabs.addTab(self._build_dispute_tab(), "이의 제기 관리")
         self.tabs.addTab(self._build_signup_tab(), "가입 신청 관리")
 
-        # 메인 레이아웃
         layout = QtWidgets.QVBoxLayout()
         layout.addWidget(header)
         layout.addLayout(top_btns)
@@ -61,8 +51,8 @@ class OwnerPage(QtWidgets.QWidget):
 
         self.setLayout(layout)
 
-        # 초기 로드
         self.refresh_work_logs()
+        self.refresh_members()
         self.refresh_disputes()
         self.refresh_signup_requests()
 
@@ -76,7 +66,6 @@ class OwnerPage(QtWidgets.QWidget):
         self.btn_work_refresh = QtWidgets.QPushButton("새로고침")
         self.btn_work_refresh.clicked.connect(self.refresh_work_logs)
 
-        # 버튼 분리: 출근용 / 퇴근용
         self.btn_edit_start = QtWidgets.QPushButton("출근 승인/수정")
         self.btn_edit_start.setStyleSheet("font-weight: bold; color: #004d40; background-color: #e0f2f1;")
         self.btn_edit_start.clicked.connect(lambda: self.approve_selected_log(mode="START"))
@@ -89,7 +78,7 @@ class OwnerPage(QtWidgets.QWidget):
             "ID", "일자", "근로자", "출근(요청)", "퇴근(요청)", "상태",
             "확정 출근", "확정 퇴근", "비고(코멘트)"
         ])
-        self.work_table.setColumnWidth(0, 0)  # ID 숨김
+        self.work_table.setColumnWidth(0, 0)
 
         btn_layout = QtWidgets.QHBoxLayout()
         btn_layout.addWidget(self.btn_work_refresh)
@@ -118,7 +107,8 @@ class OwnerPage(QtWidgets.QWidget):
             for r in rows:
                 rr = dict(r)
                 st = rr["status"]
-                st_str = STATUS_MAP.get(st, st)
+                # ★ [수정] settings.py 의 WORK_STATUS 사용 (중복 코드 제거됨)
+                st_str = WORK_STATUS.get(st, st)
 
                 out.append([
                     str(rr["id"]),
@@ -161,7 +151,82 @@ class OwnerPage(QtWidgets.QWidget):
                 Message.err(self, "오류", f"처리 중 오류: {e}")
 
     # ==========================================================
-    # 2. 이의 제기 탭
+    # 2. 회원(급여) 관리 탭
+    # ==========================================================
+    def _build_member_tab(self):
+        self.btn_member_refresh = QtWidgets.QPushButton("새로고침")
+        self.btn_member_refresh.clicked.connect(self.refresh_members)
+
+        self.btn_edit_wage = QtWidgets.QPushButton("선택 회원 시급 변경")
+        self.btn_edit_wage.setStyleSheet("background-color: #E3F2FD; font-weight: bold; color: #0D47A1;")
+        self.btn_edit_wage.clicked.connect(self.edit_wage)
+
+        self.member_table = Table([
+            "ID", "이름", "현재 시급(원)", "가입일", "계정 상태"
+        ])
+        self.member_table.setColumnWidth(0, 0)
+        self.member_table.itemDoubleClicked.connect(self.edit_wage)
+
+        top = QtWidgets.QHBoxLayout()
+        top.addWidget(self.btn_member_refresh)
+        top.addStretch(1)
+        top.addWidget(self.btn_edit_wage)
+
+        l = QtWidgets.QVBoxLayout()
+        l.addLayout(top)
+        l.addWidget(self.member_table)
+
+        w = QtWidgets.QWidget()
+        w.setLayout(l)
+        return w
+
+    def refresh_members(self):
+        try:
+            rows = self.db.list_workers()
+            self._member_rows = rows
+            out = []
+            for r in rows:
+                rr = dict(r)
+                wage_str = f"{rr['hourly_wage']:,}" if rr['hourly_wage'] else "0"
+                status = "활성" if rr['is_active'] else "비활성"
+
+                out.append([
+                    str(rr['id']),
+                    rr['username'],
+                    wage_str,
+                    rr['created_at'],
+                    status
+                ])
+            self.member_table.set_rows(out)
+        except Exception as e:
+            Message.err(self, "오류", f"회원 목록 로드 실패: {e}")
+
+    def edit_wage(self):
+        row = self.member_table.selected_first_row_index()
+        if row < 0:
+            Message.warn(self, "알림", "시급을 변경할 회원을 선택하세요.")
+            return
+
+        rr = dict(self._member_rows[row])
+        user_id = rr['id']
+        username = rr['username']
+        current_wage = rr['hourly_wage'] or 9860
+
+        val, ok = QtWidgets.QInputDialog.getInt(
+            self, "시급 변경",
+            f"'{username}' 님의 새로운 시급을 입력하세요:",
+            current_wage, 0, 1000000, 10
+        )
+        if ok:
+            try:
+                self.db.update_user_wage(user_id, val)
+                Message.info(self, "완료", f"{username}님의 시급이 {val:,}원으로 변경되었습니다.")
+                self.refresh_members()
+            except Exception as e:
+                Message.err(self, "오류", str(e))
+
+    # ==========================================================
+    # 3. 이의 제기 탭
     # ==========================================================
     def _build_dispute_tab(self):
         self.filter_disputes = DateRangeBar(label="이의제기 조회기간")
@@ -182,7 +247,6 @@ class OwnerPage(QtWidgets.QWidget):
             "ID", "근로자", "근무일자", "이의유형", "상태", "최근대화", "등록일"
         ])
         self.dispute_table.setColumnWidth(0, 0)
-
         QtCore.QTimer.singleShot(0, self._wire_dispute_doubleclick)
 
         top = QtWidgets.QHBoxLayout()
@@ -258,7 +322,7 @@ class OwnerPage(QtWidgets.QWidget):
         self.refresh_disputes()
 
     # ==========================================================
-    # 3. 가입 신청 관리
+    # 4. 가입 신청 관리
     # ==========================================================
     def _build_signup_tab(self):
         self.btn_approve_signup = QtWidgets.QPushButton("선택 가입 승인")
@@ -311,6 +375,7 @@ class OwnerPage(QtWidgets.QWidget):
                 self.db.approve_signup_request(sid, self.session.user_id, "Approved")
                 Message.info(self, "완료", "계정이 생성되었습니다.")
                 self.refresh_signup_requests()
+                self.refresh_members()
             except Exception as e:
                 Message.err(self, "오류", str(e))
 
@@ -337,21 +402,12 @@ class OwnerPage(QtWidgets.QWidget):
                 Message.info(self, "성공", "비밀번호가 변경되었습니다.")
 
 
-# ==========================================================
-# ★ [NEW] 근무 승인 다이얼로그 + 휴게시간 자동 연장 로직 포함
-# ==========================================================
 class WorkLogApproveDialog(QtWidgets.QDialog):
-    """
-    mode='START': 출근 시간만 수정 (퇴근 잠금)
-    mode='END': 퇴근 시간만 수정 (출근 잠금) + 휴게시간 자동 체크
-    """
-
     def __init__(self, parent=None, row_data=None, mode="START"):
         super().__init__(parent)
         self.data = row_data or {}
         self.mode = mode
 
-        # 제목 설정
         if self.mode == "START":
             self.setWindowTitle("출근 시간 승인/수정")
         else:
@@ -361,7 +417,6 @@ class WorkLogApproveDialog(QtWidgets.QDialog):
 
         layout = QtWidgets.QVBoxLayout()
 
-        # 정보 표시
         info_text = (
             f"일자: {self.data.get('work_date')}\n"
             f"근로자: {self.data.get('worker_username')}\n"
@@ -372,7 +427,6 @@ class WorkLogApproveDialog(QtWidgets.QDialog):
 
         form = QtWidgets.QFormLayout()
 
-        # 시간 위젯
         self.dte_start = QtWidgets.QDateTimeEdit(QtCore.QDateTime.currentDateTime())
         self.dte_start.setDisplayFormat("yyyy-MM-dd HH:mm:ss")
         self.dte_start.setCalendarPopup(True)
@@ -381,7 +435,6 @@ class WorkLogApproveDialog(QtWidgets.QDialog):
         self.dte_end.setDisplayFormat("yyyy-MM-dd HH:mm:ss")
         self.dte_end.setCalendarPopup(True)
 
-        # 초기값 세팅
         s_time_str = self.data.get("approved_start") or self.data.get("start_time")
         e_time_str = self.data.get("approved_end") or self.data.get("end_time")
 
@@ -393,7 +446,6 @@ class WorkLogApproveDialog(QtWidgets.QDialog):
         else:
             self.dte_end.setDateTime(QtCore.QDateTime.currentDateTime())
 
-        # 잠금 처리
         if self.mode == "START":
             self.dte_end.setEnabled(False)
             self.dte_end.setStyleSheet("color: #aaa; background-color: #eee;")
@@ -401,13 +453,13 @@ class WorkLogApproveDialog(QtWidgets.QDialog):
             self.dte_start.setEnabled(False)
             self.dte_start.setStyleSheet("color: #aaa; background-color: #eee;")
 
-        # 코멘트
         self.cb_comment = QtWidgets.QComboBox()
         self.cb_comment.setEditable(True)
         standard_reasons = [
             "정상 승인 (특이사항 없음)",
             "지각 (실제 출근 시각 반영)",
             "조퇴 (실제 퇴근 시각 반영)",
+            "연장 근무 승인",
             "근로자 요청에 의한 시간 정정",
             "기타 (직접 입력)"
         ]
@@ -423,13 +475,12 @@ class WorkLogApproveDialog(QtWidgets.QDialog):
 
         layout.addLayout(form)
 
-        # 버튼
         btns = QtWidgets.QHBoxLayout()
         btn_label = "출근 확정" if self.mode == "START" else "퇴근 확정"
 
         self.btn_ok = QtWidgets.QPushButton(btn_label)
         self.btn_ok.setStyleSheet("font-weight: bold; color: #003366; padding: 6px;")
-        self.btn_ok.clicked.connect(self.on_ok_clicked)  # 커스텀 슬롯 연결
+        self.btn_ok.clicked.connect(self.on_ok_clicked)
 
         self.btn_cancel = QtWidgets.QPushButton("취소")
         self.btn_cancel.clicked.connect(self.reject)
@@ -442,40 +493,31 @@ class WorkLogApproveDialog(QtWidgets.QDialog):
         self.setLayout(layout)
 
     def on_ok_clicked(self):
-        """확인 버튼 클릭 시 로직: 휴게시간 체크"""
-        # 퇴근 모드일 때만 체크
         if self.mode == "END" and self.dte_end.isEnabled():
             s_dt = self.dte_start.dateTime()
             e_dt = self.dte_end.dateTime()
-
-            # 근무시간(초) 계산
             secs = s_dt.secsTo(e_dt)
             hours = secs / 3600.0
 
             added_min = 0
             if hours >= 8:
-                added_min = 60  # 1시간
+                added_min = 60
             elif hours >= 4:
-                added_min = 30  # 30분
+                added_min = 30
 
             if added_min > 0:
                 msg = f"근무시간이 {int(hours)}시간 이상입니다.\n법정 휴게시간({added_min}분)을 부여하고 퇴근시간을 연장하시겠습니까?"
                 ans = QtWidgets.QMessageBox.question(self, "휴게시간 확인", msg,
                                                      QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
                 if ans == QtWidgets.QMessageBox.Yes:
-                    # 1. 퇴근 시간 자동 연장
                     new_e_dt = e_dt.addSecs(added_min * 60)
                     self.dte_end.setDateTime(new_e_dt)
 
-                    # 2. 휴게 시간대 선택 팝업
-                    # 30분 단위로 리스트 생성
                     slots = []
                     curr = s_dt
                     while curr < new_e_dt:
-                        # 다음 30분
                         nxt = curr.addSecs(30 * 60)
                         if nxt > new_e_dt: break
-
                         slot_str = f"{curr.toString('HH:mm')} ~ {nxt.toString('HH:mm')}"
                         slots.append(slot_str)
                         curr = nxt
@@ -487,11 +529,9 @@ class WorkLogApproveDialog(QtWidgets.QDialog):
                     )
 
                     if ok and item:
-                        # 3. 코멘트에 자동 추가
                         current_txt = self.cb_comment.currentText()
                         new_txt = f"{current_txt} | 휴게시간: {item}"
                         self.cb_comment.setCurrentText(new_txt)
-
                         QtWidgets.QMessageBox.information(self, "완료", f"퇴근시간이 {added_min}분 연장되고 휴게시간이 기록되었습니다.")
 
         self.accept()

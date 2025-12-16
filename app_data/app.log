@@ -1801,3 +1801,5 @@ sqlite3.IntegrityError: NOT NULL constraint failed: dispute_messages.thread_id
 2025-12-16 12:11:06,086 [INFO] Logged in: owner (owner)
 2025-12-16 12:13:21,972 [INFO] Login success: owner (owner)
 2025-12-16 12:13:21,972 [INFO] Logged in: owner (owner)
+2025-12-16 12:14:14,950 [INFO] Login success: owner (owner)
+2025-12-16 12:14:14,951 [INFO] Logged in: owner (owner)

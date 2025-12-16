@@ -24,7 +24,7 @@ REQ_TYPES = {
     "OUT": "퇴근",
 }
 
-# 요청 상태
+# 요청 상태 (레거시 호환용)
 REQ_STATUS = {
     "PENDING": "미승인",
     "APPROVED": "승인 완료",
@@ -32,7 +32,7 @@ REQ_STATUS = {
 
 # 승인(정정) 사유
 REASON_CODES = {
-    "AS_REQUESTED": "요청대로 승인(정정 없음)",   # ✅ 추가
+    "AS_REQUESTED": "요청대로 승인(정정 없음)",
     "PREP_DELAY": "준비 지연으로 실제 시작 시각 반영",
     "EARLY_OUT": "조기 퇴근으로 실제 종료 시각 반영",
     "LATE_IN": "지각",
@@ -41,27 +41,20 @@ REASON_CODES = {
 
 # 이의 상태
 DISPUTE_STATUS = {
-    "PENDING": "처리 대기",     # ✅ 추가 (지금 DB 값 대응)
+    "PENDING": "처리 대기",
     "OPEN": "접수됨",
     "IN_PROGRESS": "검토 중",
     "RESOLVED": "처리 완료",
     "REJECTED": "기각",
 }
 
-
-
-# 이의 처리 상태 선택용 (UI 표시 한글 / 저장은 코드)
 DISPUTE_STATUS_ITEMS = [
     ("IN_PROGRESS", "검토 중"),
     ("RESOLVED", "처리 완료"),
     ("REJECTED", "기각"),
 ]
 
-
-# timeclock/settings.py
-# (기존 REQ_STATUS 아래에 추가)
-
-# 가입신청 상태 (STEP 3)
+# 가입신청 상태
 SIGNUP_STATUS = {
     "PENDING": "승인 대기",
     "APPROVED": "승인 완료",
@@ -69,7 +62,7 @@ SIGNUP_STATUS = {
 }
 SIGNUP_STATUS_ITEMS = list(SIGNUP_STATUS.items())
 
-# 감사 로그 유형 (STEP 3)
+# 감사 로그 유형
 AUDIT_ACTIONS = {
     "USER_CREATED": "사용자 계정 생성",
     "USER_DEACTIVATED": "사용자 비활성화",
@@ -80,3 +73,10 @@ AUDIT_ACTIONS = {
     "DISPUTE_RESOLVED": "이의 제기 처리",
 }
 
+# ★ [NEW] 근무 상태 (통합 테이블용) - settings.py 로 이동 완료
+WORK_STATUS = {
+    "WORKING": "근무중",
+    "PENDING": "승인대기(퇴근완료)",
+    "APPROVED": "확정(승인)",
+    "REJECTED": "반려"
+}
