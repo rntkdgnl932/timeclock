@@ -1735,3 +1735,43 @@ sqlite3.IntegrityError: NOT NULL constraint failed: dispute_messages.thread_id
 2025-12-16 09:49:20,008 [INFO] Refreshing disputes
 2025-12-16 09:49:24,052 [INFO] Refreshing disputes
 2025-12-16 09:49:33,997 [INFO] Refreshing disputes
+2025-12-16 09:50:37,717 [INFO] Logout: owner
+2025-12-16 09:50:39,473 [INFO] Login success: worker (worker)
+2025-12-16 09:50:39,473 [INFO] Logged in: worker (worker)
+2025-12-16 09:50:39,520 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-16 09:50:39,520 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-16 09:50:39,520 [INFO] --- _wire_my_dispute_doubleclick 호출됨 (수정 시도 1) ---
+2025-12-16 09:50:39,520 [INFO] my_dispute_table: Table 객체에 cellDoubleClicked 연결 완료 (경로 A)
+2025-12-16 10:16:23,913 [INFO] Login success: owner (owner)
+2025-12-16 10:16:23,913 [INFO] Logged in: owner (owner)
+2025-12-16 10:16:32,024 [INFO] Logout: owner
+2025-12-16 10:21:31,997 [INFO] Login success: worker (worker)
+2025-12-16 10:21:31,997 [INFO] Logged in: worker (worker)
+2025-12-16 10:21:44,726 [INFO] Logout: worker
+2025-12-16 10:21:47,566 [INFO] Login success: owner (owner)
+2025-12-16 10:21:47,566 [INFO] Logged in: owner (owner)
+2025-12-16 10:31:16,200 [INFO] Login success: owner (owner)
+2025-12-16 10:31:16,200 [INFO] Logged in: owner (owner)
+2025-12-16 10:40:37,292 [INFO] Login success: owner (owner)
+2025-12-16 10:40:37,292 [INFO] Logged in: owner (owner)
+2025-12-16 10:43:23,276 [INFO] Logout: owner
+2025-12-16 10:43:25,230 [INFO] Login success: worker (worker)
+2025-12-16 10:43:25,230 [INFO] Logged in: worker (worker)
+2025-12-16 10:47:22,030 [INFO] Login success: worker (worker)
+2025-12-16 10:47:22,030 [INFO] Logged in: worker (worker)
+2025-12-16 10:47:40,553 [INFO] Logout: worker
+2025-12-16 10:47:41,715 [INFO] Login success: owner (owner)
+2025-12-16 10:47:41,715 [INFO] Logged in: owner (owner)
+2025-12-16 10:49:40,953 [INFO] Login success: owner (owner)
+2025-12-16 10:49:40,953 [INFO] Logged in: owner (owner)
+2025-12-16 10:49:51,431 [INFO] Logout: owner
+2025-12-16 10:49:52,514 [INFO] Signup requested from LoginPage
+2025-12-16 10:50:20,257 [INFO] Login success: owner (owner)
+2025-12-16 10:50:20,257 [INFO] Logged in: owner (owner)
+2025-12-16 11:13:29,564 [INFO] Login success: owner (owner)
+2025-12-16 11:13:29,565 [INFO] Logged in: owner (owner)
+2025-12-16 11:14:57,356 [INFO] Login success: owner (owner)
+2025-12-16 11:14:57,357 [INFO] Logged in: owner (owner)
+2025-12-16 11:16:22,503 [INFO] Logout: owner
+2025-12-16 11:16:23,904 [INFO] Login success: worker (worker)
+2025-12-16 11:16:23,904 [INFO] Logged in: worker (worker)
