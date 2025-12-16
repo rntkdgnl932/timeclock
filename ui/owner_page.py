@@ -67,17 +67,16 @@ class OwnerPage(QtWidgets.QWidget):
         self.refresh_signup_requests()
 
     # ==========================================================
-    # 1. 근무 기록 관리 탭 (버튼 분리 적용)
+    # 1. 근무 기록 관리 탭
     # ==========================================================
     def _build_work_log_tab(self):
-        """출퇴근 기록을 조회하고 승인하는 탭"""
         self.filter_work = DateRangeBar(label="조회기간")
         self.filter_work.applied.connect(lambda *_: self.refresh_work_logs())
 
         self.btn_work_refresh = QtWidgets.QPushButton("새로고침")
         self.btn_work_refresh.clicked.connect(self.refresh_work_logs)
 
-        # ★ 버튼 분리: 출근용 / 퇴근용
+        # 버튼 분리: 출근용 / 퇴근용
         self.btn_edit_start = QtWidgets.QPushButton("출근 승인/수정")
         self.btn_edit_start.setStyleSheet("font-weight: bold; color: #004d40; background-color: #e0f2f1;")
         self.btn_edit_start.clicked.connect(lambda: self.approve_selected_log(mode="START"))
@@ -86,19 +85,17 @@ class OwnerPage(QtWidgets.QWidget):
         self.btn_edit_end.setStyleSheet("font-weight: bold; color: #b71c1c; background-color: #ffebee;")
         self.btn_edit_end.clicked.connect(lambda: self.approve_selected_log(mode="END"))
 
-        # 테이블 컬럼
         self.work_table = Table([
             "ID", "일자", "근로자", "출근(요청)", "퇴근(요청)", "상태",
             "확정 출근", "확정 퇴근", "비고(코멘트)"
         ])
         self.work_table.setColumnWidth(0, 0)  # ID 숨김
 
-        # 레이아웃
         btn_layout = QtWidgets.QHBoxLayout()
         btn_layout.addWidget(self.btn_work_refresh)
         btn_layout.addSpacing(20)
-        btn_layout.addWidget(self.btn_edit_start)  # 출근 버튼
-        btn_layout.addWidget(self.btn_edit_end)  # 퇴근 버튼
+        btn_layout.addWidget(self.btn_edit_start)
+        btn_layout.addWidget(self.btn_edit_end)
         btn_layout.addStretch(1)
 
         l = QtWidgets.QVBoxLayout()
@@ -140,10 +137,6 @@ class OwnerPage(QtWidgets.QWidget):
             Message.err(self, "오류", f"근무 기록 조회 실패: {e}")
 
     def approve_selected_log(self, mode="START"):
-        """
-        mode="START": 출근 시간만 수정 (퇴근 잠금)
-        mode="END": 퇴근 시간만 수정 (출근 잠금)
-        """
         row_idx = self.work_table.selected_first_row_index()
         if row_idx < 0:
             Message.warn(self, "알림", "목록에서 근무 기록을 먼저 선택하세요.")
@@ -152,7 +145,6 @@ class OwnerPage(QtWidgets.QWidget):
         if row_idx >= len(self._work_rows): return
         target_row = dict(self._work_rows[row_idx])
 
-        # 다이얼로그 호출 (mode 전달)
         dlg = WorkLogApproveDialog(self, target_row, mode=mode)
         if dlg.exec_() == QtWidgets.QDialog.Accepted:
             app_start, app_end, comment = dlg.get_data()
@@ -162,7 +154,6 @@ class OwnerPage(QtWidgets.QWidget):
                     self.session.user_id,
                     app_start, app_end, comment
                 )
-                # 메시지 차별화
                 msg = "출근 시간이 수정되었습니다." if mode == "START" else "퇴근 승인(수정)이 완료되었습니다."
                 Message.info(self, "성공", msg)
                 self.refresh_work_logs()
@@ -347,12 +338,12 @@ class OwnerPage(QtWidgets.QWidget):
 
 
 # ==========================================================
-# ★ [NEW] 근무 승인 다이얼로그 (버튼 분리 로직 적용)
+# ★ [NEW] 근무 승인 다이얼로그 + 휴게시간 자동 연장 로직 포함
 # ==========================================================
 class WorkLogApproveDialog(QtWidgets.QDialog):
     """
     mode='START': 출근 시간만 수정 (퇴근 잠금)
-    mode='END': 퇴근 시간만 수정 (출근 잠금)
+    mode='END': 퇴근 시간만 수정 (출근 잠금) + 휴게시간 자동 체크
     """
 
     def __init__(self, parent=None, row_data=None, mode="START"):
@@ -390,7 +381,7 @@ class WorkLogApproveDialog(QtWidgets.QDialog):
         self.dte_end.setDisplayFormat("yyyy-MM-dd HH:mm:ss")
         self.dte_end.setCalendarPopup(True)
 
-        # 초기값 세팅 (승인된 값이 없으면 요청값 사용)
+        # 초기값 세팅
         s_time_str = self.data.get("approved_start") or self.data.get("start_time")
         e_time_str = self.data.get("approved_end") or self.data.get("end_time")
 
@@ -400,24 +391,19 @@ class WorkLogApproveDialog(QtWidgets.QDialog):
         if e_time_str:
             self.dte_end.setDateTime(QtCore.QDateTime.fromString(e_time_str, "yyyy-MM-dd HH:mm:ss"))
         else:
-            # 퇴근 기록이 아예 없는 경우 현재시간 디폴트
             self.dte_end.setDateTime(QtCore.QDateTime.currentDateTime())
 
-        # ★ 핵심: 모드에 따른 잠금 처리 ★
+        # 잠금 처리
         if self.mode == "START":
-            # 출근 수정 모드 -> 퇴근 칸 잠금
             self.dte_end.setEnabled(False)
             self.dte_end.setStyleSheet("color: #aaa; background-color: #eee;")
         else:
-            # 퇴근 수정 모드 -> 출근 칸 잠금
             self.dte_start.setEnabled(False)
             self.dte_start.setStyleSheet("color: #aaa; background-color: #eee;")
 
-        # 코멘트 (표준화 - 순화된 버전)
+        # 코멘트
         self.cb_comment = QtWidgets.QComboBox()
         self.cb_comment.setEditable(True)
-
-        # "업무 준비 소홀" 제거됨
         standard_reasons = [
             "정상 승인 (특이사항 없음)",
             "지각 (실제 출근 시각 반영)",
@@ -444,7 +430,7 @@ class WorkLogApproveDialog(QtWidgets.QDialog):
 
         self.btn_ok = QtWidgets.QPushButton(btn_label)
         self.btn_ok.setStyleSheet("font-weight: bold; color: #003366; padding: 6px;")
-        self.btn_ok.clicked.connect(self.accept)
+        self.btn_ok.clicked.connect(self.on_ok_clicked)  # 커스텀 슬롯 연결
 
         self.btn_cancel = QtWidgets.QPushButton("취소")
         self.btn_cancel.clicked.connect(self.reject)
@@ -456,18 +442,64 @@ class WorkLogApproveDialog(QtWidgets.QDialog):
         layout.addLayout(btns)
         self.setLayout(layout)
 
+    def on_ok_clicked(self):
+        """확인 버튼 클릭 시 로직: 휴게시간 체크"""
+        # 퇴근 모드일 때만 체크
+        if self.mode == "END" and self.dte_end.isEnabled():
+            s_dt = self.dte_start.dateTime()
+            e_dt = self.dte_end.dateTime()
+
+            # 근무시간(초) 계산
+            secs = s_dt.secsTo(e_dt)
+            hours = secs / 3600.0
+
+            added_min = 0
+            if hours >= 8:
+                added_min = 60  # 1시간
+            elif hours >= 4:
+                added_min = 30  # 30분
+
+            if added_min > 0:
+                msg = f"근무시간이 {int(hours)}시간 이상입니다.\n법정 휴게시간({added_min}분)을 부여하고 퇴근시간을 연장하시겠습니까?"
+                ans = QtWidgets.QMessageBox.question(self, "휴게시간 확인", msg,
+                                                     QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
+                if ans == QtWidgets.QMessageBox.Yes:
+                    # 1. 퇴근 시간 자동 연장
+                    new_e_dt = e_dt.addSecs(added_min * 60)
+                    self.dte_end.setDateTime(new_e_dt)
+
+                    # 2. 휴게 시간대 선택 팝업
+                    # 30분 단위로 리스트 생성
+                    slots = []
+                    curr = s_dt
+                    while curr < new_e_dt:
+                        # 다음 30분
+                        nxt = curr.addSecs(30 * 60)
+                        if nxt > new_e_dt: break
+
+                        slot_str = f"{curr.toString('HH:mm')} ~ {nxt.toString('HH:mm')}"
+                        slots.append(slot_str)
+                        curr = nxt
+
+                    item, ok = QtWidgets.QInputDialog.getItem(
+                        self, "휴게시간 선택",
+                        f"부여한 휴게시간({added_min}분)을 선택하거나 입력하세요:",
+                        slots, 0, True
+                    )
+
+                    if ok and item:
+                        # 3. 코멘트에 자동 추가
+                        current_txt = self.cb_comment.currentText()
+                        new_txt = f"{current_txt} | 휴게시간: {item}"
+                        self.cb_comment.setCurrentText(new_txt)
+
+                        QtWidgets.QMessageBox.information(self, "완료", f"퇴근시간이 {added_min}분 연장되고 휴게시간이 기록되었습니다.")
+
+        self.accept()
+
     def get_data(self):
-        # 잠겨있는 쪽은 원본 데이터를 그대로 보내거나,
-        # DateTimeEdit 값을 그대로 읽어도 됨 (화면엔 보여지고 있으니까)
         s = self.dte_start.dateTime().toString("yyyy-MM-dd HH:mm:ss")
-
-        # 퇴근 모드가 아니고, 원본 퇴근 데이터도 없었다면 None을 보내야 함
-        # 하지만 여기서는 '수정' 관점이므로 화면에 있는 시간을 그대로 저장하는 게 안전함
-        # 단, '퇴근 기록 없음' 상태에서 START만 수정할 땐 END를 건드리면 안됨.
-
         if self.mode == "START" and not self.dte_end.isEnabled():
-            # 출근 모드인데 퇴근칸이 잠겨있음.
-            # 만약 원본 데이터에도 퇴근이 없었다면 None을 유지해야 상태가 WORKING으로 유지됨.
             if not self.data.get("end_time") and not self.data.get("approved_end"):
                 e = None
             else:
