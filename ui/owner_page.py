@@ -605,13 +605,16 @@ class WorkLogApproveDialog(QtWidgets.QDialog):
 
     def get_data(self):
         s = self.dte_start.dateTime().toString("yyyy-MM-dd HH:mm:ss")
-        if self.mode == "START" and not self.dte_end.isEnabled():
-            if not self.data.get("end_time") and not self.data.get("approved_end"):
-                e = None
-            else:
-                e = self.dte_end.dateTime().toString("yyyy-MM-dd HH:mm:ss")
+
+        # [수정] START 모드이면 퇴근 시간은 건드리지 않음 (None으로 처리)
+        if self.mode == "START":
+            e = None
         else:
-            e = self.dte_end.dateTime().toString("yyyy-MM-dd HH:mm:ss")
+            # END 모드일 때만 퇴근 시간 값을 가져감
+            if self.dte_end.isEnabled():
+                e = self.dte_end.dateTime().toString("yyyy-MM-dd HH:mm:ss")
+            else:
+                e = None
 
         c = self.cb_comment.currentText().strip()
         return s, e, c

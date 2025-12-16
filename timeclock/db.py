@@ -317,13 +317,26 @@ class DB:
         return self.conn.execute(sql, tuple(params)).fetchall()
 
     def approve_work_log(self, work_log_id, owner_id, app_start, app_end, comment):
-        # 퇴근 시간이 없으면 WORKING 유지, 있으면 APPROVED
-        if not app_end:
-            new_status = 'WORKING'
-        else:
-            new_status = 'APPROVED'
-
         with self.conn:
+            # 1. 상태 결정 로직 개선
+            if app_end:
+                # 확정 퇴근 시간이 있으면 -> 승인 완료
+                new_status = 'APPROVED'
+            else:
+                # 확정 퇴근 시간이 없으면(출근만 수정 시) -> 기존 퇴근 기록 확인
+                row = self.conn.execute(
+                    "SELECT end_time FROM work_logs WHERE id=?",
+                    (work_log_id,)
+                ).fetchone()
+
+                if row and row["end_time"]:
+                    # 이미 근로자가 퇴근을 찍었었다면 -> 승인 대기(PENDING) 상태로
+                    new_status = 'PENDING'
+                else:
+                    # 퇴근 기록도 없다면 -> 근무중(WORKING)
+                    new_status = 'WORKING'
+
+            # 2. 업데이트 수행
             self.conn.execute(
                 """
                 UPDATE work_logs
