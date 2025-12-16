@@ -64,9 +64,19 @@ class OwnerPage(QtWidgets.QWidget):
         self.filter_work = DateRangeBar(label="조회기간")
         self.filter_work.applied.connect(lambda *_: self.refresh_work_logs())
 
+        # [추가] 상태 필터 콤보박스
+        self.cb_work_status = QtWidgets.QComboBox()
+
+        self.cb_work_status.addItem("승인 대기 (처리 필요)", "PENDING")
+        self.cb_work_status.addItem("승인 완료 (확정됨)", "APPROVED")
+        self.cb_work_status.addItem("근무 중", "WORKING")
+        self.cb_work_status.addItem("전체 보기", "ALL")
+        self.cb_work_status.currentIndexChanged.connect(lambda *_: self.refresh_work_logs())
+
         self.btn_work_refresh = QtWidgets.QPushButton("새로고침")
         self.btn_work_refresh.clicked.connect(self.refresh_work_logs)
 
+        # ... (기존 버튼들: edit_start, edit_end 등) ...
         self.btn_edit_start = QtWidgets.QPushButton("출근 승인/수정")
         self.btn_edit_start.setStyleSheet("font-weight: bold; color: #004d40; background-color: #e0f2f1;")
         self.btn_edit_start.clicked.connect(lambda: self.approve_selected_log(mode="START"))
@@ -81,15 +91,21 @@ class OwnerPage(QtWidgets.QWidget):
         ])
         self.work_table.setColumnWidth(0, 0)
 
+        # [수정] 상단 레이아웃에 콤보박스 추가
+        top_layout = QtWidgets.QHBoxLayout()
+        top_layout.addWidget(self.filter_work)
+        top_layout.addWidget(self.cb_work_status)  # 콤보박스 배치
+        top_layout.addWidget(self.btn_work_refresh)
+        top_layout.addStretch(1)
+
+        # 버튼 레이아웃
         btn_layout = QtWidgets.QHBoxLayout()
-        btn_layout.addWidget(self.btn_work_refresh)
-        btn_layout.addSpacing(20)
         btn_layout.addWidget(self.btn_edit_start)
         btn_layout.addWidget(self.btn_edit_end)
         btn_layout.addStretch(1)
 
         l = QtWidgets.QVBoxLayout()
-        l.addWidget(self.filter_work)
+        l.addLayout(top_layout)
         l.addLayout(btn_layout)
         l.addWidget(QtWidgets.QLabel("※ 출근 시간만 고치려면 '출근 승인', 퇴근까지 확정하려면 '퇴근 승인'을 누르세요."))
         l.addWidget(self.work_table)
@@ -100,15 +116,19 @@ class OwnerPage(QtWidgets.QWidget):
 
     def refresh_work_logs(self):
         d1, d2 = self.filter_work.get_range()
+
+        # [추가] 현재 선택된 상태값 가져오기
+        status_filter = self.cb_work_status.currentData()
+
         try:
-            rows = self.db.list_all_work_logs(None, d1, d2)
+            # [수정] status_filter 인자 전달
+            rows = self.db.list_all_work_logs(None, d1, d2, status_filter=status_filter)
             self._work_rows = rows
 
             out = []
             for r in rows:
                 rr = dict(r)
                 st = rr["status"]
-                # ★ [수정] settings.py 의 WORK_STATUS 사용 (중복 코드 제거됨)
                 st_str = WORK_STATUS.get(st, st)
 
                 out.append([

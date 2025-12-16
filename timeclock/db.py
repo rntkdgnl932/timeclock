@@ -299,8 +299,9 @@ class DB:
             (user_id, date_from, date_to, limit)
         ).fetchall()
 
-    def list_all_work_logs(self, worker_id, date_from, date_to, limit=2000):
+    def list_all_work_logs(self, worker_id, date_from, date_to, limit=2000, status_filter=None):
         date_from, date_to = normalize_date_range(date_from, date_to)
+
         sql = """
             SELECT w.*, u.username as worker_username
             FROM work_logs w
@@ -308,12 +309,20 @@ class DB:
             WHERE w.work_date >= ? AND w.work_date <= ?
         """
         params = [date_from, date_to]
+
+        # 특정 근로자만 조회 시
         if worker_id and isinstance(worker_id, int) and worker_id > 0:
             sql += " AND w.user_id = ?"
             params.append(str(worker_id))
 
+        # [추가] 상태 필터 적용 (ALL이 아닐 경우에만 조건 추가)
+        if status_filter and status_filter != "ALL":
+            sql += " AND w.status = ?"
+            params.append(status_filter)
+
         sql += " ORDER BY w.work_date DESC, w.id DESC LIMIT ?"
         params.append(str(limit))
+
         return self.conn.execute(sql, tuple(params)).fetchall()
 
     def approve_work_log(self, work_log_id, owner_id, app_start, app_end, comment):
