@@ -1,6 +1,5 @@
 # timeclock/db.py
 # -*- coding: utf-8 -*-
-import logging
 import sqlite3
 import shutil
 import json

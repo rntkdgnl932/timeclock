@@ -305,3 +305,62 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
         # 스크롤 아래로
         slider = self.browser.verticalScrollBar()
         slider.setValue(slider.maximum())
+
+
+# timeclock/ui/dialogs.py 파일 맨 아래에 추가하세요.
+
+class DateRangeDialog(QtWidgets.QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("기간 선택")
+        self.resize(300, 150)
+
+        layout = QtWidgets.QVBoxLayout()
+
+        # 설명 라벨
+        lbl_guide = QtWidgets.QLabel("급여를 정산할 기간을 선택하세요.")
+        lbl_guide.setAlignment(QtCore.Qt.AlignCenter)
+        lbl_guide.setStyleSheet("font-weight: bold; margin-bottom: 10px;")
+        layout.addWidget(lbl_guide)
+
+        # 폼 레이아웃 (시작일, 종료일)
+        form = QtWidgets.QFormLayout()
+
+        # 오늘 날짜 기준
+        now = QtCore.QDate.currentDate()
+        first_day = QtCore.QDate(now.year(), now.month(), 1)
+
+        # 시작일 위젯 (달력 팝업 활성화)
+        self.de_start = QtWidgets.QDateEdit()
+        self.de_start.setCalendarPopup(True)  # ★ 핵심: 달력 팝업 켜기
+        self.de_start.setDisplayFormat("yyyy-MM-dd")
+        self.de_start.setDate(first_day)  # 이번달 1일 기본값
+
+        # 종료일 위젯
+        self.de_end = QtWidgets.QDateEdit()
+        self.de_end.setCalendarPopup(True)  # ★ 핵심
+        self.de_end.setDisplayFormat("yyyy-MM-dd")
+        self.de_end.setDate(now)  # 오늘 날짜 기본값
+
+        form.addRow("시작일:", self.de_start)
+        form.addRow("종료일:", self.de_end)
+
+        layout.addLayout(form)
+
+        # 버튼 (확인/취소)
+        btns = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel
+        )
+        btns.accepted.connect(self.accept)
+        btns.rejected.connect(self.reject)
+        layout.addWidget(btns)
+
+        self.setLayout(layout)
+
+    def get_range(self):
+        # 문자열(YYYY-MM-DD) 형태로 반환
+        s = self.de_start.date().toString("yyyy-MM-dd")
+        e = self.de_end.date().toString("yyyy-MM-dd")
+        return s, e
+
+

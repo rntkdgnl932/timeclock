@@ -1,5 +1,4 @@
 import sqlite3
-import datetime
 from pathlib import Path
 
 # ★ DB 파일 경로 (/app_data 폴더 안의 timeclock.db)

@@ -1,12 +1,15 @@
 # timeclock/ui/worker_page.py
 # -*- coding: utf-8 -*-
-import logging
-from PyQt5 import QtWidgets, QtCore, QtGui
+from PyQt5 import QtWidgets, QtCore
+# timeclock/ui/worker_page.py 상단
 
-from timeclock.utils import Message, now_str
+from datetime import datetime  # [추가]
+from timeclock.salary import SalaryCalculator  # [추가]
+
+from timeclock.utils import Message
 from timeclock.settings import WORK_STATUS  # ★ [수정] 설정 파일에서 상태값 가져옴
 from ui.widgets import DateRangeBar, Table
-from ui.dialogs import DisputeTimelineDialog
+from ui.dialogs import DisputeTimelineDialog, DateRangeDialog
 
 
 class WorkerPage(QtWidgets.QWidget):
@@ -35,6 +38,10 @@ class WorkerPage(QtWidgets.QWidget):
         self.btn_action.setStyleSheet("font-weight: bold; font-size: 14px;")
         self.btn_action.clicked.connect(self.on_work_action)
 
+        self.btn_calc = QtWidgets.QPushButton("내 급여 조회")
+        self.btn_calc.setStyleSheet("background-color: #fff3e0; color: #e65100; font-weight: bold;")
+        self.btn_calc.clicked.connect(self.calculate_my_salary)
+
         self.btn_refresh = QtWidgets.QPushButton("새로고침")
         self.btn_refresh.clicked.connect(self.refresh)
 
@@ -43,7 +50,9 @@ class WorkerPage(QtWidgets.QWidget):
 
         top_layout = QtWidgets.QHBoxLayout()
         top_layout.addWidget(self.btn_action)
-        top_layout.addSpacing(20)
+        top_layout.addSpacing(10)
+        top_layout.addWidget(self.btn_calc)  # [추가] 레이아웃에 버튼 넣기
+        top_layout.addSpacing(10)
         top_layout.addWidget(self.btn_refresh)
         top_layout.addStretch(1)
         top_layout.addWidget(self.btn_logout)
@@ -254,3 +263,85 @@ class WorkerPage(QtWidgets.QWidget):
             return
 
         Message.warn(self, "알림", "이의 제기 내역 또는 근무 기록을 먼저 선택해주세요.")
+
+    def calculate_my_salary(self):
+        # 1. 내 시급 정보 가져오기 (DB에서 최신 정보 조회)
+        user_info = self.db.get_user_by_username(self.session.username)
+        if not user_info:
+            Message.err(self, "오류", "사용자 정보를 찾을 수 없습니다.")
+            return
+
+        hourly_wage = user_info.get('hourly_wage', 0)
+
+        dlg = DateRangeDialog(self)
+        if dlg.exec_() != QtWidgets.QDialog.Accepted:
+            return
+
+        d1, d2 = dlg.get_range()
+
+        # 2. 기간 입력 받기
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        first_day = datetime.now().replace(day=1).strftime("%Y-%m-%d")
+
+        text, ok = QtWidgets.QInputDialog.getText(
+            self, "급여 조회",
+            "조회할 기간을 입력하세요 (YYYY-MM-DD ~ YYYY-MM-DD):",
+            text=f"{first_day} ~ {today_str}"
+        )
+
+        if not ok: return
+
+        try:
+            d1_str, d2_str = text.split("~")
+            d1 = d1_str.strip()
+            d2 = d2_str.strip()
+            datetime.strptime(d1, "%Y-%m-%d")
+            datetime.strptime(d2, "%Y-%m-%d")
+        except:
+            Message.err(self, "오류", "날짜 형식이 올바르지 않습니다.")
+            return
+
+        # 3. '내' 근무 기록 중 '확정(APPROVED)'된 것만 조회
+        #    (list_all_work_logs 함수를 재사용하되 user_id 필터 적용)
+        logs = self.db.list_all_work_logs(self.session.user_id, d1, d2, status_filter='APPROVED')
+
+        if not logs:
+            Message.info(self, "조회 결과", "해당 기간에 확정(승인)된 근무 기록이 없습니다.\n(아직 승인 대기 중인 기록은 계산에 포함되지 않습니다.)")
+            return
+
+        # 4. 계산기 가동
+        log_dicts = [dict(r) for r in logs]
+        calc = SalaryCalculator(wage_per_hour=hourly_wage)
+        res = calc.calculate_period(log_dicts)
+
+        if not res:
+            Message.info(self, "결과", "계산할 데이터가 없습니다.")
+            return
+
+        # 5. 결과 보여주기 (주휴수당 상세 내역 포함)
+        final_pay = res['grand_total']
+
+        details = res.get('ju_hyu_details', [])
+        if details:
+            detail_str = " + ".join([f"{x:,}" for x in details])
+            ju_hyu_msg = f"주휴수당: {detail_str} = 총 {res['ju_hyu_pay']:,}원"
+        else:
+            ju_hyu_msg = f"주휴수당: {res['ju_hyu_pay']:,}원"
+
+        msg = (
+            f"[{d1} ~ {d2} 나의 급여 조회]\n\n"
+            f"총 {res['total_hours']}시간을 일했으며, "
+            f"휴게시간 {res['break_hours']}시간을 제외한 "
+            f"실제 {res['actual_hours']}시간을 근무하였습니다.\n\n"
+            f"• 기본급(시급 {hourly_wage:,}원): {res['base_pay']:,}원\n"
+            f"• 가산수당(연장/야간): {res['overtime_pay']:,}원\n"
+            f"• {ju_hyu_msg}\n\n"
+            f"💰 총 지급액: {final_pay:,}원"
+        )
+
+        QtWidgets.QMessageBox.information(self, "예상 급여 내역", msg)
+
+
+
+
+

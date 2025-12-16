@@ -4,12 +4,10 @@ import logging
 from PyQt5 import QtWidgets, QtCore
 from datetime import datetime
 
-from timeclock.utils import Message, now_str
-from timeclock.settings import WORK_STATUS  # ★ [수정] 설정 파일에서 상태값 가져옴
+from timeclock.utils import Message
 from ui.widgets import DateRangeBar, Table
-from ui.dialogs import ChangePasswordDialog, DisputeTimelineDialog
 from timeclock.settings import WORK_STATUS, SIGNUP_STATUS
-# 파일 상단
+from ui.dialogs import ChangePasswordDialog, DisputeTimelineDialog, DateRangeDialog # ◀ 추가
 from timeclock.salary import SalaryCalculator  # [NEW]
 
 
@@ -510,6 +508,12 @@ class OwnerPage(QtWidgets.QWidget):
         user_id = rr['id']
         username = rr['username']
         hourly_wage = rr['hourly_wage'] or 0
+
+        dlg = DateRangeDialog(self)
+        if dlg.exec_() != QtWidgets.QDialog.Accepted:
+            return  # 취소 누르면 종료
+
+        d1, d2 = dlg.get_range()
 
         # 2. 기간 입력 받기 (Dialog 띄우기엔 복잡하니 단순 inputDialog 2번 혹은 고정)
         #    편의상 현재 달 1일 ~ 오늘까지로 자동 설정하거나, 사용자에게 물어볼 수 있습니다.
