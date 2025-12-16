@@ -116,18 +116,24 @@ class OwnerPage(QtWidgets.QWidget):
         return widget
 
     def _build_dispute_tab(self):
-        """이의 제기 탭을 구축합니다."""
+        """이의 제기 탭을 구축합니다. (상태 필터 콤보박스 추가됨)"""
 
         self.filter_disputes = DateRangeBar(label="이의제기 조회기간")
         self.filter_disputes.applied.connect(lambda *_: self.refresh_disputes())
 
-        self.btn_disputes = QtWidgets.QPushButton("이의 제기 새로고침")
-        self.btn_resolve_dispute = QtWidgets.QPushButton("선택 이의 처리")
-        self.btn_view_dispute = QtWidgets.QPushButton("선택 이의내용 전체보기")
+        # ★ [추가] 상태 필터 콤보박스 ★
+        self.cb_dispute_filter = QtWidgets.QComboBox()
+        self.cb_dispute_filter.addItem("진행 중 (검토/미처리)", "ACTIVE")  # 기본값
+        self.cb_dispute_filter.addItem("종료 (완료/기각)", "CLOSED")
+        self.cb_dispute_filter.setMinimumWidth(160)
+        self.cb_dispute_filter.currentIndexChanged.connect(lambda *_: self.refresh_disputes())
 
+        self.btn_disputes = QtWidgets.QPushButton("조회/새로고침")
+        self.btn_resolve_dispute = QtWidgets.QPushButton("선택 이의 처리(채팅)")
+
+        # 버튼 연결
         self.btn_disputes.clicked.connect(self.refresh_disputes)
         self.btn_resolve_dispute.clicked.connect(self.resolve_selected_dispute)
-        self.btn_view_dispute.clicked.connect(self.open_selected_dispute_timeline)
 
         self.dispute_table = Table([
             "이의ID", "근로자", "요청ID", "유형", "요청시각", "승인시각",
@@ -135,16 +141,22 @@ class OwnerPage(QtWidgets.QWidget):
             "처리상태", "처리코멘트", "처리시각"
         ])
 
-        top = QtWidgets.QHBoxLayout()
-        top.addWidget(self.btn_disputes)
-        top.addWidget(self.btn_resolve_dispute)
-        top.addWidget(self.btn_view_dispute)
-        top.addStretch(1)
+        # 상단 레이아웃 구성
+        top_layout = QtWidgets.QHBoxLayout()
+        top_layout.addWidget(self.filter_disputes)  # 날짜 선택
+        top_layout.addWidget(self.cb_dispute_filter)  # 상태 선택 (옆에 붙임)
+        top_layout.addWidget(self.btn_disputes)
+        top_layout.addStretch(1)
+
+        # 버튼 줄
+        btn_layout = QtWidgets.QHBoxLayout()
+        btn_layout.addStretch(1)
+        btn_layout.addWidget(self.btn_resolve_dispute)
 
         l = QtWidgets.QVBoxLayout()
-        l.addWidget(self.filter_disputes)
-        l.addLayout(top)
-        l.addWidget(QtWidgets.QLabel("이의 제기(Disputes)"))
+        l.addLayout(top_layout)
+        l.addLayout(btn_layout)
+        l.addWidget(QtWidgets.QLabel("이의 제기 목록 (Disputes)"))
         l.addWidget(self.dispute_table)
 
         widget = QtWidgets.QWidget()
@@ -243,16 +255,19 @@ class OwnerPage(QtWidgets.QWidget):
             Message.err(self, "오류", f"미처리 요청 목록 로드 중 오류: {e}")
 
     def refresh_disputes(self):
-        """이의 제기 목록을 새로고침합니다."""
+        """이의 제기 목록을 새로고침합니다. (필터 적용)"""
         logging.info("Refreshing disputes")
         date_from = self.filter_disputes.get_date_from()
         date_to = self.filter_disputes.get_date_to()
 
-        try:
-            # 🚨🚨🚨 수정된 DB 함수 사용: request_id별 최신 이의만 조회 🚨🚨🚨
-            rows = self.db.list_disputes(date_from, date_to)
+        # ★ 콤보박스 값 읽기
+        filter_type = self.cb_dispute_filter.currentData()
 
-            # ✅ 상세 팝업에서 원문/전체 필드 쓰기 위해 보관
+        try:
+            # DB에 filter_type 전달
+            rows = self.db.list_disputes(date_from, date_to, filter_type)
+
+            # 상세 팝업용 데이터 보관
             self._dispute_rows = rows
 
             out = []
@@ -277,7 +292,7 @@ class OwnerPage(QtWidgets.QWidget):
 
             self.dispute_table.set_rows(out)
 
-            # ✅ 더블클릭 연결(중복 연결 방지 포함)
+            # 더블클릭 연결 (채팅창 열기)
             QtCore.QTimer.singleShot(0, self._wire_dispute_doubleclick)
 
         except Exception as e:

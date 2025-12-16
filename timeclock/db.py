@@ -412,16 +412,25 @@ class DB:
 
 
     # 🚨 수정: request_id 별 최신 이의만 조회하도록 쿼리 변경
-    def list_disputes(self, date_from: str, date_to: str, limit: int = 1000):
+    def list_disputes(self, date_from: str, date_to: str, filter_type: str = "ACTIVE", limit: int = 1000):
         """
-        (사업주용) 기간 내에 등록된 이의 중, request_id별 최신 이의만 반환합니다.
+        [수정됨] 사업주용 이의제기 목록 조회 (상태 필터 추가)
+        - filter_type="ACTIVE": 진행 중 (PENDING, IN_REVIEW)
+        - filter_type="CLOSED": 종료됨 (RESOLVED, REJECTED)
         """
         date_from, date_to = normalize_date_range(date_from, date_to)
 
-        # request_id별로 가장 큰 id(즉, 가장 최근에 생성된 이의)를 찾기 위한 서브쿼리
-        # SQLite는 쿼리 변수를 순서대로 바인딩하므로, 쿼리 내 ? 순서와 튜플의 순서를 일치시켜야 함.
+        # 필터 타입에 따른 WHERE 절 조건 설정
+        if filter_type == "CLOSED":
+            # 완료 또는 기각
+            status_condition = "d.status IN ('RESOLVED', 'REJECTED')"
+        else:
+            # 기본값: 진행 중 (검토 중, 미처리)
+            status_condition = "d.status IN ('PENDING', 'IN_REVIEW')"
+
+        # request_id별 최신 이의만 가져오되, 상태 필터를 적용
         return self.conn.execute(
-            """
+            f"""
             SELECT d.*,
                    u.username as worker_username,
                    r.req_type, r.requested_at, r.status,
@@ -433,14 +442,15 @@ class DB:
             JOIN (
                 SELECT request_id, MAX(id) as max_dispute_id
                 FROM disputes
-                WHERE date(created_at) >= date(?)  -- 1. date_from
-                  AND date(created_at) <= date(?)  -- 2. date_to
+                WHERE date(created_at) >= date(?)
+                  AND date(created_at) <= date(?)
                 GROUP BY request_id
             ) AS latest_d ON d.id = latest_d.max_dispute_id
+            WHERE {status_condition} -- 동적 상태 필터 적용
             ORDER BY d.id DESC
-            LIMIT ?  -- 3. limit
+            LIMIT ?
             """,
-            (date_from, date_to, limit),  # 바인딩 매개변수 3개로 수정
+            (date_from, date_to, limit),
         ).fetchall()
 
     # 🚨 수정: user_id와 request_id 별 최신 이의만 조회하도록 쿼리 변경
