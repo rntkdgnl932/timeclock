@@ -1920,3 +1920,13 @@ AttributeError: 'OwnerPage' object has no attribute 'btn_export_payslip'
 2025-12-17 05:06:37,186 [INFO] Logged in: owner (owner)
 2025-12-17 05:08:40,106 [INFO] Login success: owner (owner)
 2025-12-17 05:08:40,106 [INFO] Logged in: owner (owner)
+2025-12-17 06:48:37,949 [INFO] Login success: test01 (worker)
+2025-12-17 06:48:37,949 [INFO] Logged in: test01 (worker)
+2025-12-17 06:48:52,033 [INFO] Login success: test01 (worker)
+2025-12-17 06:48:52,034 [INFO] Logged in: test01 (worker)
+2025-12-17 06:49:33,695 [INFO] Logout: test01
+2025-12-17 06:49:37,575 [INFO] Login success: owner (owner)
+2025-12-17 06:49:37,576 [INFO] Logged in: owner (owner)
+2025-12-17 06:56:53,052 [INFO] Logout: owner
+2025-12-17 06:57:07,707 [INFO] Login success: test01 (worker)
+2025-12-17 06:57:07,707 [INFO] Logged in: test01 (worker)

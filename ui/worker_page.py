@@ -5,6 +5,7 @@ from PyQt5 import QtWidgets, QtCore
 
 from datetime import datetime  # [추가]
 from timeclock.salary import SalaryCalculator  # [추가]
+from timeclock import backup_manager
 
 from timeclock.utils import Message
 from timeclock.settings import WORK_STATUS  # ★ [수정] 설정 파일에서 상태값 가져옴
@@ -145,10 +146,18 @@ class WorkerPage(QtWidgets.QWidget):
             if mode == "IN":
                 if Message.confirm(self, "출근", "지금 출근하시겠습니까?"):
                     self.db.start_work(self.session.user_id)
+
+                    # ▼ [추가됨] 출근 성공 시 자동 백업
+                    backup_manager.run_backup("request_in")
+
                     Message.info(self, "완료", "출근 처리되었습니다.")
             elif mode == "OUT":
                 if Message.confirm(self, "퇴근", "지금 퇴근하시겠습니까?"):
                     self.db.end_work(self.session.user_id)
+
+                    # ▼ [추가됨] 퇴근 성공 시 자동 백업
+                    backup_manager.run_backup("request_out")
+
                     Message.info(self, "완료", "퇴근 처리되었습니다.")
 
             self.refresh()

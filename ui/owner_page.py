@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 import logging
 from PyQt5 import QtWidgets, QtCore
+from timeclock import backup_manager
 from datetime import datetime
 import os
 from pathlib import Path
@@ -50,6 +51,8 @@ class OwnerPage(QtWidgets.QWidget):
         self.tabs.addTab(self._build_member_tab(), "회원(급여) 관리")
         self.tabs.addTab(self._build_dispute_tab(), "이의 제기 관리")
         self.tabs.addTab(self._build_signup_tab(), "가입 신청 관리")
+
+        self.tabs.addTab(self._build_restore_tab(), "데이터 복구 (백업)")
 
         layout = QtWidgets.QVBoxLayout()
         layout.addWidget(header)
@@ -171,6 +174,10 @@ class OwnerPage(QtWidgets.QWidget):
                     self.session.user_id,
                     app_start, app_end, comment
                 )
+
+                # ▼ [추가됨] 승인 성공 시 자동 백업 (구글드라이브 + PC)
+                backup_manager.run_backup("approve")
+
                 msg = "출근 시간이 수정되었습니다." if mode == "START" else "퇴근 승인(수정)이 완료되었습니다."
                 Message.info(self, "성공", msg)
                 self.refresh_work_logs()
@@ -743,7 +750,108 @@ class OwnerPage(QtWidgets.QWidget):
             print("=" * 50)
             Message.err(self, "오류", f"처리 중 오류 발생: {e}")
 
+    #
+    # ==========================================================
+    # 5. 데이터 복구 탭 (새로 추가된 기능)
+    # ==========================================================
+    def _build_restore_tab(self):
+        layout = QtWidgets.QVBoxLayout()
 
+        # 안내 문구
+        lbl_info = QtWidgets.QLabel("⚠️ 원하는 시점을 선택하고 [복구]를 누르면, 데이터가 그 시절로 돌아갑니다.")
+        lbl_info.setStyleSheet("color: #d32f2f; font-weight: bold; margin: 10px;")
+        layout.addWidget(lbl_info)
+
+        # 버튼들
+        btn_layout = QtWidgets.QHBoxLayout()
+        btn_refresh = QtWidgets.QPushButton("🔄 목록 새로고침")
+        btn_refresh.clicked.connect(self.refresh_backup_list)
+        btn_manual = QtWidgets.QPushButton("💾 현재 상태 수동 저장")
+        btn_manual.clicked.connect(self.manual_backup)
+
+        btn_layout.addWidget(btn_refresh)
+        btn_layout.addWidget(btn_manual)
+        layout.addLayout(btn_layout)
+
+        # 테이블 (리스트)
+        self.table_backup = QtWidgets.QTableWidget()
+        self.table_backup.setColumnCount(4)
+        self.table_backup.setHorizontalHeaderLabels(["저장 시각", "저장 이유", "크기", "파일명(숨김)"])
+        self.table_backup.horizontalHeader().setSectionResizeMode(0, QtWidgets.QHeaderView.Stretch)
+        self.table_backup.horizontalHeader().setSectionResizeMode(1, QtWidgets.QHeaderView.Stretch)
+        self.table_backup.setColumnHidden(3, True)  # 파일명은 숨김
+        self.table_backup.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+        self.table_backup.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+        layout.addWidget(self.table_backup)
+
+        # 복구 버튼
+        self.btn_restore = QtWidgets.QPushButton("⏳ 선택한 시점으로 되돌리기 (복구)")
+        self.btn_restore.setStyleSheet("background-color: #d32f2f; color: white; font-weight: bold; padding: 12px;")
+        self.btn_restore.clicked.connect(self.run_restore)
+        layout.addWidget(self.btn_restore)
+
+        # 탭 만들어질 때 리스트 로딩
+        self.refresh_backup_list()
+
+        w = QtWidgets.QWidget()
+        w.setLayout(layout)
+        return w
+
+    def refresh_backup_list(self):
+        """백업 매니저에서 목록을 가져와 테이블 갱신"""
+        data = backup_manager.get_backup_list()
+        self.table_backup.setRowCount(0)
+
+        for item in data:
+            row = self.table_backup.rowCount()
+            self.table_backup.insertRow(row)
+
+            self.table_backup.setItem(row, 0, QtWidgets.QTableWidgetItem(item['time']))
+            self.table_backup.setItem(row, 1, QtWidgets.QTableWidgetItem(item['reason']))
+            self.table_backup.setItem(row, 2, QtWidgets.QTableWidgetItem(item['size']))
+            self.table_backup.setItem(row, 3, QtWidgets.QTableWidgetItem(item['filename']))
+
+    def manual_backup(self):
+        """수동 저장 버튼 클릭 시"""
+        res = QtWidgets.QMessageBox.question(self, "저장", "현재 데이터를 백업하시겠습니까?",
+                                             QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
+        if res == QtWidgets.QMessageBox.Yes:
+            ok, msg = backup_manager.run_backup("manual")
+            if ok:
+                Message.info(self, "성공", f"백업 완료!\n({msg})")
+            else:
+                Message.err(self, "실패", msg)
+            self.refresh_backup_list()
+
+    def run_restore(self):
+        """복구 버튼 클릭 시"""
+        row = self.table_backup.currentRow()
+        if row < 0:
+            Message.warn(self, "선택", "복구할 시점을 목록에서 선택해주세요.")
+            return
+
+        time_str = self.table_backup.item(row, 0).text()
+        reason_str = self.table_backup.item(row, 1).text()
+        filename = self.table_backup.item(row, 3).text()
+
+        msg = (f"정말 데이터를 되돌리시겠습니까?\n\n"
+               f"선택한 시점: {time_str}\n"
+               f"내용: {reason_str}\n\n"
+               f"⚠️ 주의: 복구 시, 현재 데이터는 덮어씌워집니다.\n"
+               f"(안전을 위해, 복구 직전 상태가 한 번 더 자동 저장됩니다.)")
+
+        res = QtWidgets.QMessageBox.warning(self, "데이터 복구", msg,
+                                            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
+
+        if res == QtWidgets.QMessageBox.Yes:
+            ok, result_msg = backup_manager.restore_backup(filename)
+            if ok:
+                QtWidgets.QMessageBox.information(self, "복구 완료",
+                                                  "데이터가 성공적으로 복구되었습니다.\n안전한 적용을 위해 프로그램이 종료됩니다.\n다시 실행해주세요.")
+                QtWidgets.QApplication.quit()  # 프로그램 종료 (재시작 유도)
+            else:
+                Message.err(self, "오류", result_msg)
+            self.refresh_backup_list()
 
 class WorkLogApproveDialog(QtWidgets.QDialog):
     def __init__(self, parent=None, row_data=None, mode="START"):
