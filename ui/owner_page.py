@@ -4,9 +4,10 @@ import logging
 from PyQt5 import QtWidgets, QtCore
 from datetime import datetime
 import os
-from pathlib import Path  # <--- 이 줄을 꼭 추가해주세요!
-from timeclock.excel_maker import generate_payslip
+from pathlib import Path
 from timeclock.settings import DATA_DIR
+
+from timeclock.excel_maker import generate_payslip, create_default_template
 
 from timeclock.utils import Message
 from ui.widgets import DateRangeBar, Table
@@ -597,7 +598,7 @@ class OwnerPage(QtWidgets.QWidget):
         rr = dict(self._member_rows[row])
         user_id = rr['id']
         username = rr['username']
-        real_name = rr.get('name') or username  # 실명 없으면 아이디 사용
+        real_name = rr.get('name') or username
         hourly_wage = rr['hourly_wage'] or 0
 
         # 2. 기간 선택
@@ -616,27 +617,54 @@ class OwnerPage(QtWidgets.QWidget):
         res = calc.calculate_period([dict(r) for r in logs])
         total_pay = res['grand_total']
 
-        # 5. 공제 계산 (고용보험 0.9%)
+        # 5. 공제 계산
         ei_tax = int(total_pay * 0.009 / 10) * 10
         pension = 0
         health = 0
         care = 0
         income_tax = 0
         local_tax = 0
-
         total_deduction = ei_tax + pension + health + care + income_tax + local_tax
         net_pay = total_pay - total_deduction
 
-        # 6. 비고(방어 문구) 생성
+        # 6. 상세 문구 작성
+        # (1) 시간 역산
+        over_hours = 0
+        night_hours = 0
+        ju_hyu_hours = 0
+        if hourly_wage > 0:
+            over_hours = round(res['overtime_pay'] / (hourly_wage * 0.5), 1)
+            night_hours = round(res['night_pay'] / (hourly_wage * 0.5), 1)
+            ju_hyu_hours = round(res['ju_hyu_pay'] / hourly_wage, 1)
+
+        # (2) 텍스트 생성
+        break_time = round(res['total_hours'] - res['actual_hours'], 1)
+        calc_str = f"• 근태: 총 {res['total_hours']}h - 휴게 {break_time}h = 실 근무 {res['actual_hours']}h"
+        base_str = f"• 기본급: {res['actual_hours']}시간 × {hourly_wage:,}원 = {res['base_pay']:,}원"
+
+        if res['overtime_pay'] > 0 or res['night_pay'] > 0:
+            over_msg = []
+            if res['overtime_pay'] > 0: over_msg.append(f"연장 {over_hours}h")
+            if res['night_pay'] > 0: over_msg.append(f"야간 {night_hours}h")
+            sum_add_pay = res['overtime_pay'] + res['night_pay']
+            over_str = f"• 가산(0.5배): {' + '.join(over_msg)} = {sum_add_pay:,}원"
+        else:
+            over_str = "• 가산수당: 해당 없음"
+
+        if res['ju_hyu_pay'] > 0:
+            ju_hyu_str = f"• 주휴수당: {ju_hyu_hours}시간 (주 15시간↑ 개근) = {res['ju_hyu_pay']:,}원"
+        else:
+            ju_hyu_str = "• 주휴수당: 해당 없음 (조건 미충족)"
+
         note_text = ""
         if res['ju_hyu_pay'] > 0:
             note_text = (
-                "비고:\n"
-                "본 근로계약은 주 15시간 미만을 원칙으로 하나,\n"
-                "본 주는 성수기 물량 대응으로 일시적으로 주 15시간을 초과하여\n"
-                "근로기준법 제55조에 따라 해당 주에 한해 주휴수당을 지급함.\n"
-                "본 초과 근무는 상시적 근로시간 변경에 해당하지 않음."
+                "※ 주휴수당 지급 안내:\n"
+                "본 주는 일시적 업무 증가로 주 15시간 이상 근무하여\n"
+                "근로기준법에 의거 주휴수당을 지급하였습니다."
             )
+        else:
+            note_text = "※ 본 명세서는 근로기준법 제48조에 따라 교부합니다."
 
         # 7. 엑셀 데이터 매핑
         data_ctx = {
@@ -663,10 +691,10 @@ class OwnerPage(QtWidgets.QWidget):
             "total_deduction": total_deduction,
             "net_pay": net_pay,
 
-            "base_detail": f"{res['actual_hours']}h x {hourly_wage:,}",
-            "ju_hyu_detail": "주 15시간 초과분" if res['ju_hyu_pay'] > 0 else "-",
-            "over_detail": "8h/40h 초과분(1.5배)" if res['overtime_pay'] > 0 else "-",
-            "calc_detail": f"총 {res['total_hours']}h 근무 (실 {res['actual_hours']}h)",
+            "calc_detail": calc_str,
+            "base_detail": base_str,
+            "over_detail": over_str,
+            "ju_hyu_detail": ju_hyu_str,
             "tax_detail": "고용보험 0.9%",
             "note": note_text
         }
@@ -674,14 +702,15 @@ class OwnerPage(QtWidgets.QWidget):
         # 8. 파일 생성 및 저장
         try:
             template_path = DATA_DIR / "template.xlsx"
+
+            # ★ [핵심 수정] 파일이 없으면 에러 내지 말고, 즉시 생성!
             if not template_path.exists():
-                Message.err(self, "오류", f"템플릿 파일이 없습니다.\n{template_path}")
-                return
+                print(f"템플릿이 없어서 새로 만듭니다: {template_path}")
+                create_default_template(str(template_path))
 
             save_dir = Path(r"C:\my_games\timeclock\pay_result")
             save_dir.mkdir(parents=True, exist_ok=True)
 
-            # 파일명 안전하게 생성
             safe_d1 = d1.replace("-", "")
             safe_d2 = d2.replace("-", "")
             filename = f"급여명세서_{real_name}_{safe_d1}_{safe_d2}.xlsx"
@@ -695,15 +724,24 @@ class OwnerPage(QtWidgets.QWidget):
             )
 
             if save_path:
-                generate_payslip(template_path, save_path, data_ctx)
-                Message.info(self, "완료", f"급여명세서가 생성되었습니다.\n{save_path}")
-                try:
-                    os.startfile(os.path.dirname(save_path))
-                except:
-                    pass
+                # 파일 생성
+                result = generate_payslip(str(template_path), save_path, data_ctx)
+
+                if result:
+                    Message.info(self, "완료", f"급여명세서가 생성되었습니다.\n{save_path}")
+                    try:
+                        os.startfile(os.path.dirname(save_path))
+                    except:
+                        pass
+                else:
+                    Message.err(self, "실패", "엑셀 파일 생성 중 오류가 발생했습니다.")
 
         except Exception as e:
-            Message.err(self, "오류", f"생성 실패: {e}")
+            print("=" * 50)
+            import traceback
+            traceback.print_exc()
+            print("=" * 50)
+            Message.err(self, "오류", f"처리 중 오류 발생: {e}")
 
 
 
