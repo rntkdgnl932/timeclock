@@ -75,6 +75,13 @@ class WorkerPage(QtWidgets.QWidget):
         self.filter_my_disputes = DateRangeBar(label="내 이의제기 조회기간")
         self.filter_my_disputes.applied.connect(lambda *_: self.refresh_my_disputes())
 
+        self.cb_dispute_filter = QtWidgets.QComboBox()
+        self.cb_dispute_filter.addItem("진행 중 (검토/미처리)", "ACTIVE")  # 기본값
+        self.cb_dispute_filter.addItem("종료 (완료/기각)", "CLOSED")
+        self.cb_dispute_filter.setMinimumWidth(150)
+        # 콤보박스 바꾸면 자동 새로고침
+        self.cb_dispute_filter.currentIndexChanged.connect(lambda *_: self.refresh_my_disputes())
+
         self.btn_my_disputes_refresh = QtWidgets.QPushButton("내 이의제기 새로고침")
         self.btn_my_disputes_refresh.clicked.connect(self.refresh_my_disputes)
 
@@ -92,10 +99,16 @@ class WorkerPage(QtWidgets.QWidget):
 
         # 더블클릭으로 이의내용 전체 보기(이의내용 컬럼)
 
-
         layout.addWidget(QtWidgets.QLabel("내 이의 제기 목록"))
-        layout.addWidget(self.filter_my_disputes)
-        layout.addWidget(self.btn_my_disputes_refresh)
+
+        # 필터들을 한 줄에 예쁘게 배치 (기간 선택 | 상태 선택 | 조회 버튼)
+        filter_row = QtWidgets.QHBoxLayout()
+        filter_row.addWidget(self.filter_my_disputes)
+        filter_row.addWidget(self.cb_dispute_filter)  # <-- 여기 추가됨
+        filter_row.addWidget(self.btn_my_disputes_refresh)
+        filter_row.addStretch(1)  # 왼쪽 정렬
+
+        layout.addLayout(filter_row)  # 기존 위젯들 대신 이 레이아웃 추가
         layout.addWidget(self.my_dispute_table)
         layout.addWidget(self.btn_my_dispute_view)
 
@@ -193,29 +206,27 @@ class WorkerPage(QtWidgets.QWidget):
 
     def refresh_my_disputes(self):
         d1, d2 = self.filter_my_disputes.get_range()
-        try:
-            # 🚨🚨🚨 수정된 DB 함수 사용: request_id별 최신 이의만 조회 🚨🚨🚨
-            rows = self.db.list_my_disputes(self.session.user_id, d1, d2)
 
-            # 더블클릭 팝업에서 "원문"을 보여주기 위해 보관
+        # ★ 콤보박스에서 현재 선택된 필터값 가져오기 ("ACTIVE" or "CLOSED")
+        filter_type = self.cb_dispute_filter.currentData()
+
+        try:
+            # DB 함수에 filter_type 전달
+            rows = self.db.list_my_disputes(self.session.user_id, d1, d2, filter_type)
+
+            # 더블클릭 팝업용 데이터 갱신
             self._my_dispute_rows = rows
 
             out = []
             for r in rows:
-                # sqlite Row / dict 모두 대응
                 rr = dict(r)
 
                 req_type_label = dict(REQ_TYPES).get(rr.get("req_type"), rr.get("req_type", ""))
-                # ✅ 요청 상태 한글화 (APPROVED/PENDING)
                 req_status_label = dict(REQ_STATUS).get(rr.get("status"), rr.get("status", ""))
 
-                # 테이블에는 한 줄로 보이게(줄바꿈 제거), 팝업은 원문 사용
                 comment_one_line = (rr.get("comment", "") or "").replace("\n", " ")
 
-                # ✅ 이의 처리 상태/코멘트/시각 (사장 처리 결과)
-                # DB 쿼리에 따라 dispute_status 라는 별칭을 쓰거나 status를 그대로 쓸 수 있으니 둘 다 대응
-                dispute_status_code = rr.get("dispute_status") or rr.get("d_status") or rr.get(
-                    "status_dispute") or rr.get("status")
+                dispute_status_code = rr.get("dispute_status")
                 dispute_status_label = DISPUTE_STATUS.get(dispute_status_code, dispute_status_code or "")
 
                 resolution_comment_one_line = (rr.get("resolution_comment", "") or "").replace("\n", " ")
@@ -231,8 +242,6 @@ class WorkerPage(QtWidgets.QWidget):
                     rr.get("dispute_type", "") or "",
                     comment_one_line,
                     rr.get("created_at", "") or "",
-
-                    # ✅ 추가 3컬럼
                     dispute_status_label,
                     resolution_comment_one_line,
                     resolved_at,
@@ -349,7 +358,6 @@ class WorkerPage(QtWidgets.QWidget):
 
         # ★ 수정된 호출 방식 ★
         # Timeline 뷰어+채팅창 호출
-        from ui.dialogs import DisputeTimelineDialog
 
         # session.user_id 와 db 객체를 넘깁니다.
         dlg = DisputeTimelineDialog(

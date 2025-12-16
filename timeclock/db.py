@@ -444,15 +444,24 @@ class DB:
         ).fetchall()
 
     # 🚨 수정: user_id와 request_id 별 최신 이의만 조회하도록 쿼리 변경
-    def list_my_disputes(self, user_id: int, date_from: str, date_to: str, limit: int = 2000):
+    def list_my_disputes(self, user_id: int, date_from: str, date_to: str, filter_type: str = "ACTIVE", limit: int = 2000):
         """
-        (근로자용) 특정 근로자(user_id)가 제기한 이의 중, request_id별 최신 이의만 반환합니다.
+        [수정됨] 근로자의 이의제기 목록을 '상태'에 따라 필터링하여 조회
+        - filter_type="ACTIVE": 진행 중 (PENDING, IN_REVIEW)
+        - filter_type="CLOSED": 종료됨 (RESOLVED, REJECTED)
         """
         date_from, date_to = normalize_date_range(date_from, date_to)
 
-        # SQLite는 쿼리 변수를 순서대로 바인딩하므로, 쿼리 내 ? 순서와 튜플의 순서를 일치시켜야 함.
+        # 필터 타입에 따른 WHERE 절 조건 설정
+        if filter_type == "CLOSED":
+            # 완료 또는 기각
+            status_condition = "d.status IN ('RESOLVED', 'REJECTED')"
+        else:
+            # 기본값: 진행 중 (검토 중, 미처리)
+            status_condition = "d.status IN ('PENDING', 'IN_REVIEW')"
+
         return self.conn.execute(
-            """
+            f"""
             SELECT d.id,
                    d.request_id,
                    r.req_type,
@@ -471,17 +480,17 @@ class DB:
             JOIN (
                 SELECT request_id, MAX(id) as max_dispute_id
                 FROM disputes
-                WHERE user_id = ?  -- 1. user_id
-                  AND date(created_at) >= date(?)  -- 2. date_from
-                  AND date(created_at) <= date(?)  -- 3. date_to
+                WHERE user_id = ?
                 GROUP BY request_id
             ) AS latest_d ON d.id = latest_d.max_dispute_id
-            WHERE d.user_id = ?  -- 4. user_id
+            WHERE d.user_id = ?
+              AND date(d.created_at) >= date(?)
+              AND date(d.created_at) <= date(?)
+              AND {status_condition}  -- 동적 상태 필터 적용
             ORDER BY d.id DESC
-            LIMIT ?  -- 5. limit
+            LIMIT ?
             """,
-            # 바인딩 매개변수 5개로 수정: 서브쿼리용 (user_id, date_from, date_to) + 메인쿼리용 (user_id, limit)
-            (user_id, date_from, date_to, user_id, limit),
+            (user_id, user_id, date_from, date_to, limit),
         ).fetchall()
 
     # ==========================================================
