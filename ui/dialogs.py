@@ -1,8 +1,7 @@
 # timeclock/ui/dialogs.py
 # -*- coding: utf-8 -*-
 from timeclock.settings import REASON_CODES, REQ_TYPES
-from PyQt5 import QtWidgets, QtCore, QtGui
-from timeclock.settings import DISPUTE_STATUS_ITEMS
+from PyQt5 import QtWidgets, QtCore
 
 class ChangePasswordDialog(QtWidgets.QDialog):
     def __init__(self, parent=None):
@@ -206,9 +205,11 @@ class RejectSignupDialog(QtWidgets.QDialog):
         return self.te_comment.toPlainText().strip()
 
 
+
+
 class DisputeTimelineDialog(QtWidgets.QDialog):
     """
-    [수정됨] 카카오톡 스타일 채팅창 + 입력 기능 + 사업주 상태 변경 기능 추가
+    [수정됨] 상단 정보창 고정(Fixed Header) + 채팅방 + 하단 입력창
     """
 
     def __init__(self, parent=None, db=None, user_id=None, dispute_id=None, my_role="worker"):
@@ -218,9 +219,10 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
         self.dispute_id = dispute_id
         self.my_role = my_role
 
-        # DB에서 현재 상태 조회 (사업주 초기값 세팅용)
+        # DB에서 현재 상태 및 헤더 정보 조회
         self.current_status = "PENDING"
-        self._load_current_status()
+        self.header_info = {}
+        self._load_data()
 
         self.setWindowTitle("이의 제기 대화방")
         self.resize(550, 800)
@@ -230,14 +232,18 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # 1. 채팅 내용 표시 영역 (브라우저)
+        # 1. ★ 상단 고정 헤더 (정보창) ★
+        # 스크롤 영역 밖에 배치하여 항상 보임
+        self.header_widget = self._create_fixed_header()
+        layout.addWidget(self.header_widget)
+
+        # 2. 채팅 내용 표시 영역 (브라우저) - 여기가 스크롤됨
         self.browser = QtWidgets.QTextBrowser()
         self.browser.setFrameShape(QtWidgets.QFrame.NoFrame)
-        # 배경색 (카카오톡 하늘색)
-        self.browser.setStyleSheet("background-color: #b2c7d9;")
+        self.browser.setStyleSheet("background-color: #b2c7d9;")  # 카톡 배경색
         layout.addWidget(self.browser, 1)  # stretch=1 (남는 공간 다 차지)
 
-        # 2. 하단 입력 영역 (흰색 배경)
+        # 3. 하단 입력 영역 (흰색 배경)
         input_container = QtWidgets.QWidget()
         input_container.setStyleSheet("background-color: white; border-top: 1px solid #ddd;")
         input_layout = QtWidgets.QHBoxLayout(input_container)
@@ -247,9 +253,6 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
         self.cb_status = None
         if self.my_role == "owner":
             self.cb_status = QtWidgets.QComboBox()
-            # 콤보박스 아이템: 검토중(IN_REVIEW), 처리완료(RESOLVED), 기각(REJECTED) 등
-            # settings.py의 DISPUTE_STATUS_ITEMS 활용하거나 직접 정의
-            # 여기서는 사장님 기획대로 직관적인 것만 넣겠습니다.
             self.cb_status.addItem("검토 중", "IN_REVIEW")
             self.cb_status.addItem("처리 완료", "RESOLVED")
             self.cb_status.addItem("기각", "REJECTED")
@@ -264,11 +267,12 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
         self.le_input = QtWidgets.QLineEdit()
         self.le_input.setPlaceholderText("메시지를 입력하세요...")
         self.le_input.setMinimumHeight(35)
-        self.le_input.returnPressed.connect(self.send_message)  # 엔터 치면 전송
+        self.le_input.returnPressed.connect(self.send_message)
         input_layout.addWidget(self.le_input, 1)
 
         # 전송 버튼
         self.btn_send = QtWidgets.QPushButton("전송")
+        # noinspection PyUnresolvedReferences
         self.btn_send.setCursor(QtCore.Qt.PointingHandCursor)
         self.btn_send.setStyleSheet("""
             QPushButton {
@@ -288,54 +292,82 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
         layout.addWidget(input_container)
         self.setLayout(layout)
 
-        # 초기 데이터 로드
+        # 채팅 데이터 로드
         self.refresh_timeline()
 
-    def _load_current_status(self):
-        """DB에서 현재 이의 제기 상태를 가져옴"""
+    def _load_data(self):
+        """DB에서 상태와 헤더용 정보를 조회"""
         if not self.db or not self.dispute_id: return
-        row = self.db.conn.execute("SELECT status FROM disputes WHERE id=?", (self.dispute_id,)).fetchone()
+
+        # 상태 조회
+        row = self.db.conn.execute("SELECT request_id, dispute_type, status FROM disputes WHERE id=?",
+                                   (self.dispute_id,)).fetchone()
         if row:
             self.current_status = row["status"]
 
+            # 헤더용 요청 정보 조회
+            req_id = row["request_id"]
+            req_row = self.db.conn.execute("SELECT req_type, requested_at FROM requests WHERE id=?",
+                                           (req_id,)).fetchone()
+
+            self.header_info = {
+                "request_id": req_id,
+                "dispute_type": row["dispute_type"],
+                "req_type": req_row["req_type"] if req_row else "-",
+                "requested_at": req_row["requested_at"] if req_row else "-"
+            }
+
+    def _create_fixed_header(self):
+        """상단에 고정될 정보창 위젯 생성"""
+        widget = QtWidgets.QWidget()
+        widget.setStyleSheet("background-color: #e2e2e2; border-bottom: 1px solid #c0c0c0;")
+
+        vbox = QtWidgets.QVBoxLayout(widget)
+        vbox.setContentsMargins(15, 10, 15, 10)
+        vbox.setSpacing(4)
+
+        # 데이터 가져오기
+        r_id = self.header_info.get("request_id", "-")
+        r_type_code = self.header_info.get("req_type", "-")
+        r_type_label = dict(REQ_TYPES).get(r_type_code, r_type_code)
+        r_time = self.header_info.get("requested_at", "-")
+        d_type = self.header_info.get("dispute_type", "-")
+
+        # 라벨 1: 대상 요청 정보
+        lbl_req = QtWidgets.QLabel(f"<b>대상 요청:</b> {r_type_label} (ID: {r_id}) | <b>요청시각:</b> {r_time}")
+        lbl_req.setStyleSheet("font-size: 13px; color: #333;")
+        # noinspection PyUnresolvedReferences
+        lbl_req.setAlignment(QtCore.Qt.AlignCenter)
+
+        # 라벨 2: 최초 이의 유형
+        lbl_type = QtWidgets.QLabel(f"<b>최초 이의 유형:</b> {d_type}")
+        lbl_type.setStyleSheet("font-size: 13px; color: #d9534f;")  # 약간 붉은색 포인트
+        # noinspection PyUnresolvedReferences
+        lbl_type.setAlignment(QtCore.Qt.AlignCenter)
+
+        vbox.addWidget(lbl_req)
+        vbox.addWidget(lbl_type)
+
+        return widget
+
     def _set_combo_index_by_data(self, status_code):
-        """콤보박스 초기값 세팅"""
         if not self.cb_status: return
         idx = self.cb_status.findData(status_code)
         if idx >= 0:
             self.cb_status.setCurrentIndex(idx)
         else:
-            # 매칭되는 게 없으면 기본 '검토 중'
             self.cb_status.setCurrentIndex(0)
 
     def send_message(self):
-        """메시지 전송 로직"""
         msg = self.le_input.text().strip()
-
-        # 빈 메시지 방지
-        if not msg:
-            return
+        if not msg: return
 
         try:
             if self.my_role == "owner":
-                # 사업주: resolve_dispute 호출 (상태 변경 + 메시지 저장)
                 new_status = self.cb_status.currentData()
-                self.db.resolve_dispute(
-                    self.dispute_id,
-                    self.user_id,
-                    new_status,
-                    msg
-                )
-                self.current_status = new_status  # 상태 업데이트
+                self.db.resolve_dispute(self.dispute_id, self.user_id, new_status, msg)
+                self.current_status = new_status
             else:
-                # 근로자: create_dispute 호출 (메시지 추가 + 상태 PENDING 갱신 등)
-                # (기존 create_dispute 함수가 '기존 건 있으면 추가'로 수정되었으므로 그대로 사용)
-                # request_id를 알아야 하는데, dispute_id만 알고 있음.
-                # 편의상 add_dispute_message를 직접 쓰거나, DB 쿼리로 request_id를 구해와야 함.
-
-                # 안전하게 add_dispute_message 직접 사용 (단순 대화 추가)
-                # 근로자가 말하면 보통 상태를 '검토 중'이나 '미처리'로 돌려야 할 수도 있지만,
-                # 사장님 기획상 "그냥 추가"이므로 메시지만 넣습니다.
                 self.db.add_dispute_message(
                     self.dispute_id,
                     sender_user_id=self.user_id,
@@ -343,15 +375,13 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
                     message=msg
                 )
 
-            # 성공 후 처리
             self.le_input.clear()
-            self.refresh_timeline()  # 화면 새로고침
+            self.refresh_timeline()
 
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, "오류", f"전송 실패: {e}")
 
     def refresh_timeline(self):
-        """타임라인 HTML 새로 그리기"""
         try:
             timeline_events = self.db.get_dispute_timeline(self.dispute_id)
         except Exception:
@@ -359,7 +389,6 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
 
         html_content = []
 
-        # 스타일 (카카오톡 테마 + 4:2:4 레이아웃)
         KAKAO_BG = "#b2c7d9"
         MY_BUBBLE = "#fef01b"
         OTHER_BUBBLE = "#ffffff"
@@ -377,10 +406,7 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
             table {{ width: 100%; border-spacing: 0; table-layout: fixed; }}
             td {{ padding-bottom: 8px; vertical-align: top; }}
 
-            /* 시스템 메시지 (종료 알림 등) */
-            .system-msg {{
-                text-align: center; margin-top: 20px; margin-bottom: 20px;
-            }}
+            .system-msg {{ text-align: center; margin-top: 20px; margin-bottom: 20px; }}
             .system-box {{
                 display: inline-block; background-color: rgba(0,0,0,0.1); 
                 color: #fff; font-size: 12px; padding: 6px 15px; border-radius: 20px;
@@ -391,7 +417,6 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
             <tr><td width="40%"></td><td width="20%"></td><td width="40%"></td></tr>
         """)
 
-        # 메시지 루프
         for event in timeline_events:
             who = event.get("who", "unknown")
             username = event.get("username", "")
@@ -404,7 +429,6 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
             is_me = (who == self.my_role)
 
             if is_me:
-                # 나 (오른쪽)
                 html_content.append(f"""
                 <tr>
                     <td></td><td></td>
@@ -417,7 +441,6 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
                 </tr>
                 """)
             else:
-                # 상대방 (왼쪽)
                 html_content.append(f"""
                 <tr>
                     <td align="left">
@@ -433,24 +456,13 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
 
         html_content.append("</table>")
 
-        # ★ 대화 종료 시스템 메시지 표시 ★
-        # 현재 상태가 RESOLVED(완료) 또는 REJECTED(기각)이면 맨 아래에 표시
         if self.current_status == "RESOLVED":
-            html_content.append("""
-            <div class="system-msg">
-                <span class="system-box">처리 완료된 이의제기입니다.</span>
-            </div>
-            """)
+            html_content.append("""<div class="system-msg"><span class="system-box">처리 완료된 이의제기입니다.</span></div>""")
         elif self.current_status == "REJECTED":
-            html_content.append("""
-            <div class="system-msg">
-                <span class="system-box">기각 처리된 이의제기입니다.</span>
-            </div>
-            """)
+            html_content.append("""<div class="system-msg"><span class="system-box">기각 처리된 이의제기입니다.</span></div>""")
 
         html_content.append("<br></body></html>")
 
-        # 스크롤 유지 로직 (새 메시지 오면 아래로)
         slider = self.browser.verticalScrollBar()
         old_val = slider.value()
         is_bottom = (old_val >= slider.maximum() - 10)
