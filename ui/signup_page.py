@@ -53,6 +53,11 @@ class SignupPage(QtWidgets.QWidget):
         self.ed_pw2.setEchoMode(QtWidgets.QLineEdit.Password)
         form.addRow("비밀번호 확인 *", self.ed_pw2)
 
+        # ---------- 성함(실명) ----------
+        self.ed_name = QtWidgets.QLineEdit()
+        self.ed_name.setPlaceholderText("실명을 입력하세요")
+        form.addRow("성함 *", self.ed_name)
+
         # ---------- 전화번호 3칸 ----------
         self.ed_phone1 = QtWidgets.QLineEdit()
         self.ed_phone2 = QtWidgets.QLineEdit()
@@ -147,22 +152,24 @@ class SignupPage(QtWidgets.QWidget):
             Message.err(self, "ID 확인", "ID는 영문/숫자/_ 4~20자만 가능합니다.")
             return
 
-        # db.py에 check_username_available 메서드가 STEP 3에 정의되었다고 가정합니다.
-        # STEP 3의 db.py 코드를 확인했을 때 해당 메서드가 존재했습니다.
-        ok, reason = self.db.check_username_available(username)
-        if ok:
+        # [수정] db.py에는 is_username_available 함수가 있고, True/False만 반환합니다.
+        is_available = self.db.is_username_available(username)
+
+        if is_available:
             self._id_checked_ok = True
             self._last_checked_username = username
             Message.info(self, "ID 확인", "사용 가능한 ID입니다.")
         else:
             self._id_checked_ok = False
-            Message.err(self, "ID 확인", reason)
+            Message.err(self, "ID 확인", "이미 사용 중이거나 신청 중인 아이디입니다.")
 
     def submit(self):
         # ---------- 필수값 ----------
         username = self.ed_id.text().strip()
         pw = self.ed_pw.text()
         pw2 = self.ed_pw2.text()
+
+        name = self.ed_name.text().strip()
 
         p1 = self.ed_phone1.text()
         p2 = self.ed_phone2.text()
@@ -184,6 +191,10 @@ class SignupPage(QtWidgets.QWidget):
         # ---------- PW ----------
         if not pw or pw != pw2 or len(pw) < 6:
             Message.err(self, "가입신청", "비밀번호를 확인하세요.(6자 이상)")
+            return
+        # ---------- 성함 ----------
+        if not name:
+            Message.err(self, "가입신청", "성함을 입력해주세요.")
             return
 
         # ---------- 전화 ----------
@@ -215,6 +226,7 @@ class SignupPage(QtWidgets.QWidget):
             self.db.create_signup_request(
                 username=username,
                 pw_hash=pw_hash,  # ⬅️ 해시된 비밀번호를 전달해야 합니다.
+                name=name,
                 phone=phone,
                 birth=birthdate,  # db.py의 인자가 birth이므로 birthdate 대신 birth를 사용합니다.
                 email=email,

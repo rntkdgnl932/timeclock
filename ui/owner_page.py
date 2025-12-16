@@ -7,6 +7,7 @@ from timeclock.utils import Message, now_str
 from timeclock.settings import WORK_STATUS  # ★ [수정] 설정 파일에서 상태값 가져옴
 from ui.widgets import DateRangeBar, Table
 from ui.dialogs import ChangePasswordDialog, DisputeTimelineDialog
+from timeclock.settings import WORK_STATUS, SIGNUP_STATUS
 
 
 class OwnerPage(QtWidgets.QWidget):
@@ -154,45 +155,74 @@ class OwnerPage(QtWidgets.QWidget):
     # 2. 회원(급여) 관리 탭
     # ==========================================================
     def _build_member_tab(self):
-        self.btn_member_refresh = QtWidgets.QPushButton("새로고침")
-        self.btn_member_refresh.clicked.connect(self.refresh_members)
+        # 상단 필터 영역
+        self.le_member_search = QtWidgets.QLineEdit()
+        self.le_member_search.setPlaceholderText("이름 검색...")
+        self.le_member_search.returnPressed.connect(self.refresh_members) # 엔터 치면 검색
 
-        self.btn_edit_wage = QtWidgets.QPushButton("선택 회원 시급 변경")
-        self.btn_edit_wage.setStyleSheet("background-color: #E3F2FD; font-weight: bold; color: #0D47A1;")
+        self.cb_member_filter = QtWidgets.QComboBox()
+        self.cb_member_filter.addItem("재직자 보기", "ACTIVE")
+        self.cb_member_filter.addItem("퇴사자 보기", "INACTIVE")
+        self.cb_member_filter.addItem("전체 보기", "ALL")
+        self.cb_member_filter.currentIndexChanged.connect(self.refresh_members)
+
+        self.btn_member_search = QtWidgets.QPushButton("검색")
+        self.btn_member_search.clicked.connect(self.refresh_members)
+
+        # 기능 버튼 영역
+        self.btn_edit_wage = QtWidgets.QPushButton("시급 변경")
+        self.btn_edit_wage.setStyleSheet("background-color: #E3F2FD; color: #0D47A1;")
         self.btn_edit_wage.clicked.connect(self.edit_wage)
 
+        self.btn_resign = QtWidgets.QPushButton("퇴사 처리")
+        self.btn_resign.setStyleSheet("background-color: #ffebee; color: #b71c1c;")
+        self.btn_resign.clicked.connect(self.resign_worker)
+
+        # 테이블
         self.member_table = Table([
-            "ID", "이름", "현재 시급(원)", "가입일", "계정 상태"
+            "ID", "아이디", "성함", "전화번호", "생년월일", "시급", "가입일", "상태"
         ])
         self.member_table.setColumnWidth(0, 0)
         self.member_table.itemDoubleClicked.connect(self.edit_wage)
 
-        top = QtWidgets.QHBoxLayout()
-        top.addWidget(self.btn_member_refresh)
-        top.addStretch(1)
-        top.addWidget(self.btn_edit_wage)
+        # 레이아웃 배치
+        top_filter = QtWidgets.QHBoxLayout()
+        top_filter.addWidget(self.le_member_search)
+        top_filter.addWidget(self.cb_member_filter)
+        top_filter.addWidget(self.btn_member_search)
+        top_filter.addStretch(1)
+        top_filter.addWidget(self.btn_edit_wage)
+        top_filter.addWidget(self.btn_resign)
 
         l = QtWidgets.QVBoxLayout()
-        l.addLayout(top)
+        l.addLayout(top_filter)
         l.addWidget(self.member_table)
 
         w = QtWidgets.QWidget()
         w.setLayout(l)
         return w
 
+
     def refresh_members(self):
+        keyword = self.le_member_search.text().strip()
+        status_filter = self.cb_member_filter.currentData()
+
         try:
-            rows = self.db.list_workers()
+            rows = self.db.list_workers(keyword=keyword, status_filter=status_filter)
             self._member_rows = rows
             out = []
             for r in rows:
                 rr = dict(r)
                 wage_str = f"{rr['hourly_wage']:,}" if rr['hourly_wage'] else "0"
-                status = "활성" if rr['is_active'] else "비활성"
+                status = "재직중" if rr['is_active'] else "퇴사"
 
+                # [수정] 데이터 매핑 (없는 경우 빈칸 처리)
                 out.append([
                     str(rr['id']),
                     rr['username'],
+                    rr.get('name') or "",  # 성함
+                    rr.get('phone') or "",  # 전화번호
+                    rr.get('birthdate') or "",  # 생년월일
                     wage_str,
                     rr['created_at'],
                     status
@@ -200,6 +230,30 @@ class OwnerPage(QtWidgets.QWidget):
             self.member_table.set_rows(out)
         except Exception as e:
             Message.err(self, "오류", f"회원 목록 로드 실패: {e}")
+
+    def resign_worker(self):
+        """퇴사 처리 버튼 핸들러"""
+        row = self.member_table.selected_first_row_index()
+        if row < 0:
+            Message.warn(self, "알림", "퇴사 처리할 직원을 선택하세요.")
+            return
+
+        rr = dict(self._member_rows[row])
+        user_id = rr['id']
+        username = rr['username']
+        is_active = rr['is_active']
+
+        if is_active == 0:
+            Message.warn(self, "알림", "이미 퇴사 처리된 직원입니다.")
+            return
+
+        if Message.confirm(self, "퇴사 확인", f"정말 '{username}' 님을 퇴사 처리하시겠습니까?\n(계정은 삭제되지 않고 비활성화됩니다)"):
+            try:
+                self.db.resign_user(user_id)
+                Message.info(self, "완료", "퇴사 처리가 완료되었습니다.")
+                self.refresh_members()
+            except Exception as e:
+                Message.err(self, "오류", str(e))
 
     def edit_wage(self):
         row = self.member_table.selected_first_row_index()
@@ -354,11 +408,24 @@ class OwnerPage(QtWidgets.QWidget):
         try:
             rows = self.db.list_pending_signup_requests()
             data = []
+
             for r in rows:
                 rr = dict(r)
                 phone = rr.get("phone", "")
+
+                # DB의 영어 상태값
+                raw_status = rr["status"]
+
+                # [수정] settings.py에서 가져온 표를 사용 (없으면 영어 그대로 표시)
+                status_str = SIGNUP_STATUS.get(raw_status, raw_status)
+
                 data.append([
-                    rr["id"], rr["username"], phone, rr["birthdate"], rr["created_at"], rr["status"]
+                    rr["id"],
+                    rr["username"],
+                    phone,
+                    rr["birthdate"],
+                    rr["created_at"],
+                    status_str  # 한글로 변환된 값
                 ])
             self.signup_table.set_rows(data)
         except Exception as e:

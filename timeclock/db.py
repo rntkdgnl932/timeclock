@@ -38,27 +38,37 @@ class DB:
     def _migrate(self):
         cur = self.conn.cursor()
 
-        # 1. users 테이블 (★ 시급 컬럼 추가됨)
+        # 1. users 테이블
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY,
-                username TEXT NOT NULL UNIQUE,
+                username TEXT NOT NULL UNIQUE,  -- 이건 로그인 아이디
+                name TEXT,                      -- ★ [추가] 실제 성함
                 pw_hash TEXT NOT NULL,
                 role TEXT NOT NULL DEFAULT 'worker', 
                 created_at TEXT NOT NULL,
                 is_active INTEGER NOT NULL DEFAULT 1,
                 must_change_pw INTEGER NOT NULL DEFAULT 0,
-                hourly_wage INTEGER DEFAULT 9860 -- 2024년 최저시급 기본값
+                hourly_wage INTEGER DEFAULT 9860
             )
             """
         )
-
-        # 기존 DB 호환용: 컬럼이 없으면 추가 (ALTER TABLE)
+        # 기존 DB 호환용 (이미 파일이 있다면 이 구문이 실행되어 컬럼이 추가됨)
         try:
-            cur.execute("ALTER TABLE users ADD COLUMN hourly_wage INTEGER DEFAULT 9860")
+            cur.execute("ALTER TABLE users ADD COLUMN name TEXT")
         except Exception:
-            pass  # 이미 있으면 패스
+            pass
+
+        try:
+            cur.execute("ALTER TABLE users ADD COLUMN phone TEXT")
+        except Exception:
+            pass
+
+        try:
+            cur.execute("ALTER TABLE users ADD COLUMN birthdate TEXT")
+        except Exception:
+            pass
 
         # 2. work_logs (출퇴근 통합 테이블)
         cur.execute(
@@ -123,6 +133,7 @@ class DB:
             CREATE TABLE IF NOT EXISTS signup_requests (
                 id INTEGER PRIMARY KEY,
                 username TEXT NOT NULL UNIQUE,
+                name TEXT,                      -- ★ [추가] 실제 성함
                 phone TEXT NOT NULL,
                 birthdate TEXT NOT NULL,
                 pw_hash TEXT NOT NULL,
@@ -134,6 +145,10 @@ class DB:
             )
             """
         )
+        try:
+            cur.execute("ALTER TABLE signup_requests ADD COLUMN name TEXT")
+        except Exception:
+            pass
 
         # 6. audit_logs (감사 로그)
         cur.execute(
@@ -185,11 +200,36 @@ class DB:
         self.conn.execute("UPDATE users SET pw_hash=?, must_change_pw=0 WHERE id=?", (pw_hash, user_id))
         self.conn.commit()
 
-    def list_workers(self):
-        """근로자 목록 조회 (시급 포함)"""
-        return self.conn.execute(
-            "SELECT id, username, hourly_wage, created_at, is_active FROM users WHERE role='worker' ORDER BY username ASC"
-        ).fetchall()
+
+
+    def list_workers(self, keyword=None, status_filter="ACTIVE"):
+        # [수정] name, phone, birthdate 추가 조회
+        sql = "SELECT id, username, name, phone, birthdate, hourly_wage, created_at, is_active FROM users WHERE role='worker'"
+        params = []
+
+        if status_filter == "ACTIVE":
+            sql += " AND is_active = 1"
+        elif status_filter == "INACTIVE":
+            sql += " AND is_active = 0"
+
+        if keyword:
+            # 이름(name)이나 아이디(username)로 검색되게 개선
+            sql += " AND (username LIKE ? OR name LIKE ?)"
+            params.append(f"%{keyword}%")
+            params.append(f"%{keyword}%")
+
+        sql += " ORDER BY username ASC"
+
+        return self.conn.execute(sql, tuple(params)).fetchall()
+
+    def resign_user(self, user_id):
+        """직원 퇴사 처리 (삭제가 아닌 비활성화)"""
+        # is_active를 0으로 변경
+        self.conn.execute(
+            "UPDATE users SET is_active=0 WHERE id=?",
+            (user_id,)
+        )
+        self.conn.commit()
 
     def update_user_wage(self, user_id, new_wage):
         """★ 시급 업데이트 함수"""
@@ -460,11 +500,13 @@ class DB:
     # ----------------------------------------------------------------
     # Signup / Audit / Export
     # ----------------------------------------------------------------
-    def create_signup_request(self, username, pw_hash, phone, birth, email=None, account=None, address=None):
+    # name 인자 추가
+    def create_signup_request(self, username, pw_hash, name, phone, birth, email=None, account=None, address=None):
         with self.conn:
             self.conn.execute(
-                "INSERT INTO signup_requests (username, pw_hash, phone, birthdate, email, account, address, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'PENDING', ?)",
-                (username, pw_hash, phone, birth, email, account, address,
+                # name 컬럼 추가
+                "INSERT INTO signup_requests (username, pw_hash, name, phone, birthdate, email, account, address, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?)",
+                (username, pw_hash, name, phone, birth, email, account, address,
                  datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
             )
 
@@ -480,30 +522,29 @@ class DB:
         return self.conn.execute("SELECT * FROM signup_requests WHERE status='PENDING' ORDER BY id ASC LIMIT ?",
                                  (limit,)).fetchall()
 
+
     def approve_signup_request(self, request_id, owner_id, comment):
         sr = self.conn.execute("SELECT * FROM signup_requests WHERE id=?", (request_id,)).fetchone()
         if not sr or sr["status"] != "PENDING": raise ValueError("처리할 수 없는 요청입니다.")
 
-        # 가입 승인 시 기본 시급 9860원 부여
         with self.conn:
             self.conn.execute(
-                "INSERT INTO users (username, role, pw_hash, created_at, is_active, must_change_pw, hourly_wage) VALUES (?, 'worker', ?, ?, 1, 1, 9860)",
-                (sr["username"], sr["pw_hash"], now_str())
+                # [수정] phone, birthdate 컬럼 추가
+                """
+                INSERT INTO users (username, role, pw_hash, name, phone, birthdate, created_at, is_active, must_change_pw, hourly_wage) 
+                VALUES (?, 'worker', ?, ?, ?, ?, ?, 1, 1, 9860)
+                """,
+                (sr["username"], sr["pw_hash"], sr["name"], sr["phone"], sr["birthdate"], now_str())
             )
             self.conn.execute(
                 "UPDATE signup_requests SET status='APPROVED', decided_at=?, decided_by=?, decision_comment=? WHERE id=?",
                 (now_str(), owner_id, comment, request_id))
-
     def reject_signup_request(self, request_id, owner_id, comment=""):
         self.conn.execute(
             "UPDATE signup_requests SET status='REJECTED', decided_at=?, decided_by=?, decision_comment=? WHERE id=?",
             (now_str(), owner_id, comment, request_id))
         self.conn.commit()
 
-    def change_password(self, user_id, new_password):
-        pw_hash = pbkdf2_hash_password(new_password)
-        self.conn.execute("UPDATE users SET pw_hash=?, must_change_pw=0 WHERE id=?", (pw_hash, user_id))
-        self.conn.commit()
 
     def log_audit(self, action, actor_user_id=None, target_type=None, target_id=None, detail=None):
         dj = json.dumps(detail, ensure_ascii=False) if detail else None
