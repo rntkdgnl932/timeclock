@@ -29,6 +29,8 @@ class OwnerPage(QtWidgets.QWidget):
         self._work_rows = []
         self._member_rows = []
 
+        self._btn_min_h = 34
+
         # ----------------------------------------------------------
         # Theme / base style (Owner mode)
         # ----------------------------------------------------------
@@ -178,6 +180,16 @@ class OwnerPage(QtWidgets.QWidget):
                 min-width: 120px;
             }
             
+            QFrame#OwnerToolbarCard {
+                background: #fafafa;
+                border: 1px solid #eeeeee;
+                border-radius: 14px;
+            }
+            QLabel#OwnerHint {
+                color: #8a8a8a;
+                font-weight: 700;
+            }
+            
             QTabBar::tab:selected {
                 background: #FFF3E0;
                 color: #5D4037;
@@ -257,41 +269,59 @@ class OwnerPage(QtWidgets.QWidget):
             QScrollBar::handle:vertical { background: #dcdcdc; border-radius: 5px; min-height: 30px; }
             QScrollBar::handle:vertical:hover { background: #cfcfcf; }
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
+            
+            
+            
+
         """)
 
-    def _set_btn_variant(self, btn: QtWidgets.QPushButton, variant: str) -> None:
+    def _set_btn_variant(self, btn: "QtWidgets.QPushButton", variant: str) -> None:
         btn.setProperty("variant", variant)
-        btn.setCursor(QtCore.Qt.PointingHandCursor)
+
+        # 예: OwnerPage에서 버튼 공통 최소 높이를 관리하고 싶을 때
+        btn.setMinimumHeight(getattr(self, "_btn_min_h", 34))
+
         btn.style().unpolish(btn)
         btn.style().polish(btn)
         btn.update()
 
-    def _mk_stat_card(self, title: str, value: str, hint: str):
-        frame = QtWidgets.QFrame()
-        frame.setObjectName("OwnerStatCard")
-        frame.setStyleSheet("""
-            QFrame#OwnerStatCard {
-                background: #ffffff;
-                border: 1px solid #ececec;
-                border-radius: 16px;
-            }
-        """)
-        lay = QtWidgets.QVBoxLayout(frame)
-        lay.setContentsMargins(16, 14, 16, 14)
-        lay.setSpacing(2)
+    @staticmethod
+    def _mk_stat_card(title: str, value: str, hint: str = "") -> dict:
+        """
+        KPI 카드 생성.
+        기존 코드가 self.kpi_work["frame"], self.kpi_work["value"] 형태를 쓰므로
+        dict 형태로 반환해야 함.
+        """
+        card = QtWidgets.QFrame()
+        card.setObjectName("OwnerStatCard")
 
-        lbl_t = QtWidgets.QLabel(title)
-        lbl_t.setStyleSheet("color:#6f6f6f; font-weight:800;")
-        lbl_v = QtWidgets.QLabel(value)
-        lbl_v.setStyleSheet("font-size:24px; font-weight:900; color:#5D4037;")
-        lbl_h = QtWidgets.QLabel(hint)
-        lbl_h.setStyleSheet("color:#8a8a8a;")
+        lay = QtWidgets.QVBoxLayout(card)
+        lay.setContentsMargins(14, 12, 14, 12)
+        lay.setSpacing(6)
 
-        lay.addWidget(lbl_t)
-        lay.addWidget(lbl_v)
-        lay.addWidget(lbl_h)
+        lb_title = QtWidgets.QLabel(title)
+        lb_title.setObjectName("OwnerStatTitle")
 
-        return {"frame": frame, "title": lbl_t, "value": lbl_v, "hint": lbl_h}
+        lb_value = QtWidgets.QLabel(str(value))
+        lb_value.setObjectName("OwnerStatValue")
+
+        lay.addWidget(lb_title)
+        lay.addWidget(lb_value)
+
+        lb_hint = None
+        if hint:
+            lb_hint = QtWidgets.QLabel(hint)
+            lb_hint.setObjectName("OwnerStatSub")
+            lay.addWidget(lb_hint)
+
+        lay.addStretch(1)
+
+        return {
+            "frame": card,
+            "title": lb_title,
+            "value": lb_value,
+            "hint": lb_hint,
+        }
 
     def _refresh_kpis(self) -> None:
         try:
@@ -323,6 +353,7 @@ class OwnerPage(QtWidgets.QWidget):
         tabs.setUsesScrollButtons(True)
 
         # …(엘리드)로 잘라먹지 않게
+        # noinspection PyUnresolvedReferences
         bar.setElideMode(QtCore.Qt.ElideNone)
 
         # 문서모드: 탭 상단 UI가 더 깔끔해지는 경향
@@ -331,6 +362,24 @@ class OwnerPage(QtWidgets.QWidget):
         # 탭 클릭 영역/레이아웃 안정화
         bar.setMovable(False)
         bar.setDrawBase(False)
+
+    @staticmethod
+    def _mk_toolbar_card() -> QtWidgets.QFrame:
+        frame = QtWidgets.QFrame()
+        frame.setObjectName("OwnerToolbarCard")
+
+        lay = QtWidgets.QHBoxLayout(frame)
+        lay.setContentsMargins(12, 10, 12, 10)
+        lay.setSpacing(10)
+
+        return frame
+
+    def _apply_tab_action_variants(self) -> None:
+        """
+        기존 탭별 개별 setStyleSheet()를 걷어내고, Owner 테마(variant)로 통일.
+        호출은 각 탭 빌드 함수 내부에서 필요한 버튼에 대해 직접 _set_btn_variant로 처리해도 됨.
+        """
+        pass
 
     # ==========================================================
     # 1. 근무 기록 관리 탭
@@ -346,23 +395,22 @@ class OwnerPage(QtWidgets.QWidget):
         self.cb_work_status.addItem("전체 보기", "ALL")
         self.cb_work_status.currentIndexChanged.connect(lambda *_: self.refresh_work_logs())
 
-        self.btn_work_refresh = QtWidgets.QPushButton("새로고침")
+        self.btn_work_refresh = QtWidgets.QPushButton("🔄 새로고침")
         self.btn_work_refresh.clicked.connect(self.refresh_work_logs)
+        self._set_btn_variant(self.btn_work_refresh, "secondary")
 
-        # 작업시작 승인 버튼
-        self.btn_edit_start = QtWidgets.QPushButton("작업시작 승인 (시간정정)")
-        self.btn_edit_start.setStyleSheet("font-weight: bold; color: #004d40; background-color: #e0f2f1;")
+        # 작업시작 승인 / 반려 / 퇴근 승인
+        self.btn_edit_start = QtWidgets.QPushButton("✅ 작업시작 승인(시간정정)")
         self.btn_edit_start.clicked.connect(lambda: self.approve_selected_log(mode="START"))
+        self._set_btn_variant(self.btn_edit_start, "primary")
 
-        # 작업시작 반려 버튼 (요청 삭제)
-        self.btn_reject_start = QtWidgets.QPushButton("작업시작 반려")
-        self.btn_reject_start.setStyleSheet("font-weight: bold; color: #fff; background-color: #757575;")
+        self.btn_reject_start = QtWidgets.QPushButton("⛔ 작업시작 반려")
         self.btn_reject_start.clicked.connect(self.reject_start_request)
+        self._set_btn_variant(self.btn_reject_start, "secondary")
 
-        # 퇴근 승인 버튼
-        self.btn_edit_end = QtWidgets.QPushButton("퇴근 승인 (마감)")
-        self.btn_edit_end.setStyleSheet("font-weight: bold; color: #b71c1c; background-color: #ffebee;")
+        self.btn_edit_end = QtWidgets.QPushButton("🧾 퇴근 승인(마감)")
         self.btn_edit_end.clicked.connect(lambda: self.approve_selected_log(mode="END"))
+        self._set_btn_variant(self.btn_edit_end, "warn")
 
         self.work_table = Table([
             "ID", "일자", "근로자",
@@ -371,23 +419,25 @@ class OwnerPage(QtWidgets.QWidget):
         ])
         self.work_table.setColumnWidth(0, 0)
 
-        top_layout = QtWidgets.QHBoxLayout()
-        top_layout.addWidget(self.filter_work)
-        top_layout.addWidget(self.cb_work_status)
-        top_layout.addWidget(self.btn_work_refresh)
-        top_layout.addStretch(1)
+        # 상단 툴바(카드)
+        toolbar = self._mk_toolbar_card()
+        tlay = toolbar.layout()
+        tlay.addWidget(self.filter_work)
+        tlay.addWidget(self.cb_work_status)
+        tlay.addWidget(self.btn_work_refresh)
+        # noinspection PyUnresolvedReferences
+        tlay.addStretch(1)
+        tlay.addWidget(self.btn_edit_start)
+        tlay.addWidget(self.btn_reject_start)
+        tlay.addWidget(self.btn_edit_end)
 
-        btn_layout = QtWidgets.QHBoxLayout()
-        btn_layout.addWidget(self.btn_edit_start)
-        btn_layout.addWidget(self.btn_reject_start)  # 반려 버튼 배치
-        btn_layout.addSpacing(20)  # 간격 띄우기
-        btn_layout.addWidget(self.btn_edit_end)
-        btn_layout.addStretch(1)
+        hint = QtWidgets.QLabel("※ ‘반려’ 시 기록은 보존되며, 근로자는 다시 요청할 수 있습니다.")
+        hint.setObjectName("OwnerHint")
 
         l = QtWidgets.QVBoxLayout()
-        l.addLayout(top_layout)
-        l.addLayout(btn_layout)
-        l.addWidget(QtWidgets.QLabel("※ '반려' 시 해당 요청은 반려 처리되며(기록 보존), 근로자는 다시 요청할 수 있게 됩니다."))
+        l.setSpacing(10)
+        l.addWidget(toolbar)
+        l.addWidget(hint)
         l.addWidget(self.work_table)
 
         w = QtWidgets.QWidget()
@@ -438,30 +488,25 @@ class OwnerPage(QtWidgets.QWidget):
 
     def update_badges(self):
         """DB에서 대기 건수를 가져와 탭 제목과 색상을 변경"""
-        counts = self.db.get_pending_counts()
+        counts = self.db.get_pending_counts() or {}
 
-        # 헬퍼 함수
-        def set_tab_style(index, title, count):
-            # 안전장치: 탭 개수보다 큰 인덱스를 건드리면 꺼지므로 확인
+        def set_tab_style(index: int, title: str, count: int):
             if index >= self.tabs.count():
                 return
-
-            if count > 0:
-                self.tabs.setTabText(index, f"{title} ({count})")
-                self.tabs.tabBar().setTabTextColor(index, QtGui.QColor("#D32F2F"))  # 빨강
+            if count and int(count) > 0:
+                self.tabs.setTabText(index, f"{title} ({int(count)})")
+                self.tabs.tabBar().setTabTextColor(index, QtGui.QColor("#D32F2F"))  # red
             else:
                 self.tabs.setTabText(index, title)
-                self.tabs.tabBar().setTabTextColor(index, QtGui.QColor("black"))
+                self.tabs.tabBar().setTabTextColor(index, QtGui.QColor("#6a6a6a"))
 
-        # ★ [수정됨] 탭 인덱스 재설정 (사장님 화면 기준)
-        # 0번: 근무 기록 관리 (승인)
-        # 1번: 근로자 관리 (배지 없음)
-        # 2번: 이의 제기 관리
-        # 3번: 가입신청관리
+        # 탭 순서(현재 코드 기준):
+        # 0 근무 승인 / 1 이의 제기 / 2 직원 가입 승인 / 3 직원 관리 / 4 백업/복구
+        set_tab_style(0, "근무 승인", counts.get("work", 0))
+        set_tab_style(1, "이의 제기", counts.get("dispute", 0))
+        set_tab_style(2, "직원 가입 승인", counts.get("signup", 0))
+        # 직원 관리(3), 백업/복구(4)는 배지 없음 (원하면 추가 가능)
 
-        set_tab_style(0, "근무 승인", counts["work"])  # 1 -> 0으로 수정
-        set_tab_style(2, "직원 가입 승인", counts["dispute"])
-        set_tab_style(3, "직원 관리", counts["signup"])
         self._refresh_kpis()
 
     # ----------------------------------------------------------------
@@ -549,39 +594,29 @@ class OwnerPage(QtWidgets.QWidget):
         self.cb_member_filter.addItem("전체 보기", "ALL")
         self.cb_member_filter.currentIndexChanged.connect(self.refresh_members)
 
-        self.btn_member_search = QtWidgets.QPushButton("검색")
+        self.btn_member_search = QtWidgets.QPushButton("🔍 검색")
         self.btn_member_search.clicked.connect(self.refresh_members)
+        self._set_btn_variant(self.btn_member_search, "secondary")
 
-        self.btn_edit_wage = QtWidgets.QPushButton("시급 변경")
-        self.btn_edit_wage.setStyleSheet("background-color: #E3F2FD; color: #0D47A1;")
+        self.btn_edit_wage = QtWidgets.QPushButton("💳 시급 변경")
         self.btn_edit_wage.clicked.connect(self.edit_wage)
+        self._set_btn_variant(self.btn_edit_wage, "secondary")
 
-        self.btn_calc_salary = QtWidgets.QPushButton("급여 정산")
-        self.btn_calc_salary.setStyleSheet("background-color: #fff3e0; color: #e65100; font-weight: bold;")
+        self.btn_calc_salary = QtWidgets.QPushButton("🧮 급여 정산")
         self.btn_calc_salary.clicked.connect(self.calculate_salary)
+        self._set_btn_variant(self.btn_calc_salary, "warn")
 
-        self.btn_export_payslip = QtWidgets.QPushButton("명세서 발급 (Excel)")
+        self.btn_export_payslip = QtWidgets.QPushButton("📄 명세서 발급(Excel)")
         try:
             self.btn_export_payslip.clicked.disconnect()
         except:
             pass
-        self.btn_export_payslip.setStyleSheet("background-color: #e8f5e9; color: #1b5e20; font-weight: bold;")
         self.btn_export_payslip.clicked.connect(self.export_payslip)
+        self._set_btn_variant(self.btn_export_payslip, "primary")
 
-        self.btn_resign = QtWidgets.QPushButton("퇴사 처리")
-        self.btn_resign.setStyleSheet("background-color: #ffebee; color: #b71c1c;")
+        self.btn_resign = QtWidgets.QPushButton("🧯 퇴사 처리")
         self.btn_resign.clicked.connect(self.resign_worker)
-
-        top_layout = QtWidgets.QHBoxLayout()
-        top_layout.addWidget(self.le_member_search)
-        top_layout.addWidget(self.cb_member_filter)
-        top_layout.addWidget(self.btn_member_search)
-        top_layout.addStretch(1)
-
-        top_layout.addWidget(self.btn_edit_wage)
-        top_layout.addWidget(self.btn_calc_salary)
-        top_layout.addWidget(self.btn_export_payslip)
-        top_layout.addWidget(self.btn_resign)
+        self._set_btn_variant(self.btn_resign, "danger_outline")
 
         self.member_table = Table([
             "ID", "아이디", "성함", "전화번호", "생년월일", "시급", "가입일", "상태"
@@ -589,8 +624,21 @@ class OwnerPage(QtWidgets.QWidget):
         self.member_table.setColumnWidth(0, 0)
         self.member_table.itemDoubleClicked.connect(self.edit_wage)
 
+        toolbar = self._mk_toolbar_card()
+        tlay = toolbar.layout()
+        tlay.addWidget(self.le_member_search)
+        tlay.addWidget(self.cb_member_filter)
+        tlay.addWidget(self.btn_member_search)
+        # noinspection PyUnresolvedReferences
+        tlay.addStretch(1)
+        tlay.addWidget(self.btn_edit_wage)
+        tlay.addWidget(self.btn_calc_salary)
+        tlay.addWidget(self.btn_export_payslip)
+        tlay.addWidget(self.btn_resign)
+
         l = QtWidgets.QVBoxLayout()
-        l.addLayout(top_layout)
+        l.setSpacing(10)
+        l.addWidget(toolbar)
         l.addWidget(self.member_table)
 
         w = QtWidgets.QWidget()
@@ -683,11 +731,13 @@ class OwnerPage(QtWidgets.QWidget):
         self.cb_dispute_filter.addItem("종료 (완료/기각)", "CLOSED")
         self.cb_dispute_filter.currentIndexChanged.connect(lambda *_: self.refresh_disputes())
 
-        self.btn_disputes_refresh = QtWidgets.QPushButton("조회")
+        self.btn_disputes_refresh = QtWidgets.QPushButton("🔍 조회")
         self.btn_disputes_refresh.clicked.connect(self.refresh_disputes)
+        self._set_btn_variant(self.btn_disputes_refresh, "secondary")
 
-        self.btn_open_chat = QtWidgets.QPushButton("선택 건 채팅방 열기")
+        self.btn_open_chat = QtWidgets.QPushButton("💬 선택 건 채팅방 열기")
         self.btn_open_chat.clicked.connect(self.open_dispute_chat)
+        self._set_btn_variant(self.btn_open_chat, "primary")
 
         self.dispute_table = Table([
             "ID", "근로자", "근무일자", "이의유형", "상태", "최근대화", "등록일"
@@ -695,16 +745,19 @@ class OwnerPage(QtWidgets.QWidget):
         self.dispute_table.setColumnWidth(0, 0)
         QtCore.QTimer.singleShot(0, self._wire_dispute_doubleclick)
 
-        top = QtWidgets.QHBoxLayout()
-        top.addWidget(self.filter_disputes)
-        top.addWidget(self.cb_dispute_filter)
-        top.addWidget(self.btn_disputes_refresh)
-        top.addStretch(1)
+        toolbar = self._mk_toolbar_card()
+        tlay = toolbar.layout()
+        tlay.addWidget(self.filter_disputes)
+        tlay.addWidget(self.cb_dispute_filter)
+        tlay.addWidget(self.btn_disputes_refresh)
+        # noinspection PyUnresolvedReferences
+        tlay.addStretch(1)
+        tlay.addWidget(self.btn_open_chat)
 
         l = QtWidgets.QVBoxLayout()
-        l.addLayout(top)
+        l.setSpacing(10)
+        l.addWidget(toolbar)
         l.addWidget(self.dispute_table)
-        l.addWidget(self.btn_open_chat)
 
         w = QtWidgets.QWidget()
         w.setLayout(l)
@@ -774,25 +827,36 @@ class OwnerPage(QtWidgets.QWidget):
     # 4. 가입 신청 관리
     # ==========================================================
     def _build_signup_tab(self):
-        self.btn_approve_signup = QtWidgets.QPushButton("선택 가입 승인")
-        self.btn_reject_signup = QtWidgets.QPushButton("선택 가입 거절")
-        self.btn_refresh_signup = QtWidgets.QPushButton("새로고침")
+        self.btn_approve_signup = QtWidgets.QPushButton("✅ 선택 가입 승인")
+        self.btn_reject_signup = QtWidgets.QPushButton("⛔ 선택 가입 거절")
+        self.btn_refresh_signup = QtWidgets.QPushButton("🔄 새로고침")
 
         self.btn_approve_signup.clicked.connect(self.approve_signup)
         self.btn_reject_signup.clicked.connect(self.reject_signup)
         self.btn_refresh_signup.clicked.connect(self.refresh_signup_requests)
 
-        top = QtWidgets.QHBoxLayout()
-        top.addWidget(self.btn_approve_signup)
-        top.addWidget(self.btn_reject_signup)
-        top.addWidget(self.btn_refresh_signup)
-        top.addStretch(1)
+        self._set_btn_variant(self.btn_approve_signup, "primary")
+        self._set_btn_variant(self.btn_reject_signup, "danger_outline")
+        self._set_btn_variant(self.btn_refresh_signup, "secondary")
 
         self.signup_table = Table(["ID", "신청ID", "전화번호", "생년월일", "신청일", "상태"])
         self.signup_table.setColumnWidth(0, 0)
 
+        toolbar = self._mk_toolbar_card()
+        tlay = toolbar.layout()
+        tlay.addWidget(self.btn_approve_signup)
+        tlay.addWidget(self.btn_reject_signup)
+        tlay.addWidget(self.btn_refresh_signup)
+        # noinspection PyUnresolvedReferences
+        tlay.addStretch(1)
+
+        hint = QtWidgets.QLabel("※ 승인 시 계정이 생성됩니다. 거절 사유는 신청자에게 기록됩니다.")
+        hint.setObjectName("OwnerHint")
+
         l = QtWidgets.QVBoxLayout()
-        l.addLayout(top)
+        l.setSpacing(10)
+        l.addWidget(toolbar)
+        l.addWidget(hint)
         l.addWidget(self.signup_table)
 
         w = QtWidgets.QWidget()
@@ -1284,6 +1348,7 @@ class WorkLogApproveDialog(QtWidgets.QDialog):
         btn_label = "작업 시작 승인" if self.mode == "START" else "퇴근 및 시간 확정"
 
         self.btn_ok = QtWidgets.QPushButton(btn_label)
+        # noinspection PyUnresolvedReferences
         self.btn_ok.setCursor(QtCore.Qt.PointingHandCursor)
         self.btn_ok.setStyleSheet("""
             QPushButton {
@@ -1295,6 +1360,7 @@ class WorkLogApproveDialog(QtWidgets.QDialog):
         self.btn_ok.clicked.connect(self.on_ok_clicked)
 
         self.btn_cancel = QtWidgets.QPushButton("취소")
+        # noinspection PyUnresolvedReferences
         self.btn_cancel.setCursor(QtCore.Qt.PointingHandCursor)
         self.btn_cancel.clicked.connect(self.reject)
 

@@ -2129,3 +2129,15 @@ AttributeError: 'DB' object has no attribute 'get_pending_counts'
 2025-12-18 05:45:26,042 [INFO] Logged in: owner (owner)
 2025-12-18 05:56:52,769 [INFO] file_cache is only supported with oauth2client<4.0.0
 2025-12-18 05:57:01,039 [INFO] Logged in: owner (owner)
+2025-12-18 06:01:04,655 [INFO] file_cache is only supported with oauth2client<4.0.0
+2025-12-18 06:01:10,564 [INFO] Logged in: owner (owner)
+2025-12-18 06:03:54,057 [INFO] file_cache is only supported with oauth2client<4.0.0
+2025-12-18 06:17:11,881 [INFO] file_cache is only supported with oauth2client<4.0.0
+2025-12-18 06:17:18,558 [INFO] Logged in: owner (owner)
+2025-12-18 06:17:18,559 [ERROR] Failed to create page after login
+Traceback (most recent call last):
+  File "C:\my_games\timeclock\ui\main_window.py", line 198, in on_logged_in
+    self._owner_page = OwnerPage(self.db, session)
+  File "C:\my_games\timeclock\ui\owner_page.py", line 89, in __init__
+    kpi_row.addWidget(self.kpi_work["frame"])
+TypeError: 'QFrame' object is not subscriptable
