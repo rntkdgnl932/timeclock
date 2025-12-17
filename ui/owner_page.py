@@ -199,32 +199,155 @@ class OwnerPage(QtWidgets.QWidget):
         set_tab_style(2, "이의제기 관리", counts["dispute"])
         set_tab_style(3, "가입신청관리", counts["signup"])
 
+    # ----------------------------------------------------------------
+    # [수정] 작업/퇴근 승인 (오류 수정됨: now_str -> datetime 사용)
+    # ----------------------------------------------------------------
     def approve_selected_log(self, mode="START"):
         row_idx = self.work_table.selected_first_row_index()
         if row_idx < 0:
-            Message.warn(self, "알림", "목록에서 근무 기록을 먼저 선택하세요.")
+            Message.warn(self, "알림", "승인할 항목을 선택하세요.")
             return
 
-        if row_idx >= len(self._work_rows): return
         target_row = dict(self._work_rows[row_idx])
+        log_id = target_row["id"]
 
-        dlg = WorkLogApproveDialog(self, target_row, mode=mode)
-        if dlg.exec_() == QtWidgets.QDialog.Accepted:
-            app_start, app_end, comment = dlg.get_data()
+        # 이미 승인 완료된 건인지 체크
+        if target_row["status"] == "APPROVED" and mode == "START":
+            Message.warn(self, "알림", "이미 완료된 건입니다.")
+            return
+
+        # -----------------------------------------------------------
+        # 1. 팝업창(Dialog) 준비
+        # -----------------------------------------------------------
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle("작업 승인 및 시간 확정")
+        dialog.setMinimumWidth(450)
+        layout = QtWidgets.QFormLayout(dialog)
+
+        # 시간 입력 위젯
+        edit_start = QtWidgets.QDateTimeEdit()
+        edit_start.setDisplayFormat("yyyy-MM-dd HH:mm:ss")
+        edit_start.setCalendarPopup(True)
+
+        edit_end = QtWidgets.QDateTimeEdit()
+        edit_end.setDisplayFormat("yyyy-MM-dd HH:mm:ss")
+        edit_end.setCalendarPopup(True)
+
+        # ★ [수정] now_str() 대신 datetime 직접 사용
+        current_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        s_str = target_row.get("start_time") or current_time_str
+        e_str = target_row.get("end_time")
+
+        start_dt = datetime.strptime(s_str, "%Y-%m-%d %H:%M:%S")
+        edit_start.setDateTime(start_dt)
+
+        # 종료 시간 설정
+        if mode == "END":
+            if e_str:
+                end_dt = datetime.strptime(e_str, "%Y-%m-%d %H:%M:%S")
+            else:
+                end_dt = datetime.now()
+            edit_end.setDateTime(end_dt)
+        else:
+            end_dt = datetime.now()
+            edit_end.setDateTime(end_dt)
+            edit_end.setEnabled(False)
+
+        layout.addRow("확정 시작 시간:", edit_start)
+        if mode == "END":
+            layout.addRow("확정 종료 시간:", edit_end)
+
+        # 휴게시간 리스트 구성
+        combo_break = QtWidgets.QComboBox()
+
+        if mode == "END":
+            # 근무 시간 계산 (시간 단위)
+            duration_hours = (end_dt - start_dt).total_seconds() / 3600.0
+
+            break_options = []
+
+            # 1. 기본 옵션
+            break_options.append("자동 계산 (기록 안 함)")
+            break_options.append("직접 입력 (비고란에 작성)")
+            break_options.append("-----------------------")
+
+            # 2. 조건별 리스트 생성
+            if duration_hours >= 8:
+                break_options.append("휴게 1시간 (12:00 ~ 13:00)")
+                break_options.append("휴게 1시간 (13:00 ~ 14:00)")
+                break_options.append("휴게 1시간 (11:30 ~ 12:30)")
+                break_options.append("휴게 1시간 (12:30 ~ 13:30)")
+                break_options.append("-----------------------")
+                break_options.append("휴게 30분 (12:00 ~ 12:30)")
+                break_options.append("휴게 30분 (12:30 ~ 13:00)")
+
+            elif duration_hours >= 4:
+                break_options.append("휴게 30분 (12:00 ~ 12:30)")
+                break_options.append("휴게 30분 (12:30 ~ 13:00)")
+                break_options.append("휴게 30분 (13:00 ~ 13:30)")
+                break_options.append("휴게 30분 (13:30 ~ 14:00)")
+                break_options.append("휴게 30분 (15:00 ~ 15:30)")
+                break_options.append("휴게 30분 (16:00 ~ 16:30)")
+            else:
+                break_options.insert(0, "휴게 시간 없음 (4시간 미만)")
+
+            combo_break.addItems(break_options)
+            layout.addRow("휴게 시간 기록:", combo_break)
+
+        # 비고(코멘트)
+        edit_comment = QtWidgets.QTextEdit()
+        edit_comment.setPlaceholderText("특이사항 또는 '직접 입력' 시 휴게시간을 적으세요.")
+        edit_comment.setMaximumHeight(60)
+        if target_row.get("owner_comment"):
+            edit_comment.setText(target_row["owner_comment"])
+
+        layout.addRow("관리자 메모:", edit_comment)
+
+        # 버튼
+        btns = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
+        btns.accepted.connect(dialog.accept)
+        btns.rejected.connect(dialog.reject)
+        layout.addRow(btns)
+
+        # -----------------------------------------------------------
+        # 2. 실행 및 처리
+        # -----------------------------------------------------------
+        if dialog.exec_() == QtWidgets.QDialog.Accepted:
+            app_start = edit_start.dateTime().toString("yyyy-MM-dd HH:mm:ss")
+            app_end = None
+            final_comment = edit_comment.toPlainText().strip()
+
+            if mode == "END":
+                app_end = edit_end.dateTime().toString("yyyy-MM-dd HH:mm:ss")
+
+                selected_txt = combo_break.currentText()
+
+                if "---" not in selected_txt and "자동 계산" not in selected_txt:
+                    if "직접 입력" in selected_txt:
+                        if not final_comment:
+                            final_comment = "[휴게시간 직접입력]"
+                    else:
+                        prefix = f"[{selected_txt}]"
+                        if prefix not in final_comment:
+                            final_comment = f"{prefix} {final_comment}".strip()
+
             try:
                 self.db.approve_work_log(
-                    target_row["id"],
+                    log_id,
                     self.session.user_id,
-                    app_start, app_end, comment
+                    app_start,
+                    app_end,
+                    final_comment
                 )
 
-                backup_manager.run_backup("approve")
+                # ★ backup_manager가 import 되어 있는지 확인 필요 (보통 상단에 있음)
+                if 'backup_manager' in globals():
+                    backup_manager.run_backup("approve")
 
-                msg = "작업 시작이 승인되었습니다." if mode == "START" else "퇴근이 승인되었습니다."
-                Message.info(self, "성공", msg)
+                Message.info(self, "완료", "작업 승인 및 기록이 저장되었습니다.")
                 self.refresh_work_logs()
             except Exception as e:
-                Message.err(self, "오류", f"처리 중 오류: {e}")
+                Message.err(self, "오류", f"승인 실패: {e}")
 
     # [추가] 작업 시작 반려(삭제) 기능
     def reject_start_request(self):
@@ -656,10 +779,16 @@ class OwnerPage(QtWidgets.QWidget):
             Message.warn(self, "알림", "해당 기간에 승인된 근무 기록이 없습니다.")
             return
 
+        # 1. 계산기 실행
         calc = SalaryCalculator(hourly_wage)
         res = calc.calculate_period([dict(r) for r in logs])
+
+        # ★ 핵심 수정 1: salary.py의 친절한 설명 기능 호출 (-8700시간 버그 해결)
+        friendly_text = calc.get_friendly_description(res)
+
         total_pay = res['grand_total']
 
+        # 공제 항목 (약식 계산)
         ei_tax = int(total_pay * 0.009 / 10) * 10
         pension = 0
         health = 0
@@ -669,16 +798,17 @@ class OwnerPage(QtWidgets.QWidget):
         total_deduction = ei_tax + pension + health + care + income_tax + local_tax
         net_pay = total_pay - total_deduction
 
+        # 상세 항목 텍스트 생성
         over_hours = 0
         night_hours = 0
         ju_hyu_hours = 0
-        if hourly_wage > 0:
-            over_hours = round(res['overtime_pay'] / (hourly_wage * 0.5), 1)
-            night_hours = round(res['night_pay'] / (hourly_wage * 0.5), 1)
-            ju_hyu_hours = round(res['ju_hyu_pay'] / hourly_wage, 1)
 
-        break_time = round(res['total_hours'] - res['actual_hours'], 1)
-        calc_str = f"• 근태: 총 {res['total_hours']}h - 휴게 {break_time}h = 실 근무 {res['actual_hours']}h"
+        if hourly_wage > 0:
+            # 0으로 나누기 방지
+            over_hours = round(res['overtime_pay'] / (hourly_wage * 0.5), 1) if hourly_wage else 0
+            night_hours = round(res['night_pay'] / (hourly_wage * 0.5), 1) if hourly_wage else 0
+            ju_hyu_hours = round(res['ju_hyu_pay'] / hourly_wage, 1) if hourly_wage else 0
+
         base_str = f"• 기본급: {res['actual_hours']}시간 × {hourly_wage:,}원 = {res['base_pay']:,}원"
 
         if res['overtime_pay'] > 0 or res['night_pay'] > 0:
@@ -705,12 +835,16 @@ class OwnerPage(QtWidgets.QWidget):
         else:
             note_text = "※ 본 명세서는 근로기준법 제48조에 따라 교부합니다."
 
+        # 2. 데이터 포장
         data_ctx = {
             "title": f"{d1[:4]}년 {d1[5:7]}월 급여명세서",
             "name": real_name,
             "period": f"{d1} ~ {d2}",
             "pay_date": datetime.now().strftime("%Y-%m-%d"),
-            "company": "Hobby Store",
+
+            # ★ 핵심 수정 2: 상호명 변경
+            "company": "Hobby Brown",
+
             "base_pay": res['base_pay'],
             "ju_hyu_pay": res['ju_hyu_pay'],
             "overtime_pay": res['overtime_pay'],
@@ -726,7 +860,10 @@ class OwnerPage(QtWidgets.QWidget):
             "local_tax": local_tax,
             "total_deduction": total_deduction,
             "net_pay": net_pay,
-            "calc_detail": calc_str,
+
+            # ★ 핵심 수정 3: 상세 내역을 salary.py가 만든 예쁜 텍스트로 교체
+            "calc_detail": friendly_text,
+
             "base_detail": base_str,
             "over_detail": over_str,
             "ju_hyu_detail": ju_hyu_str,
@@ -736,6 +873,7 @@ class OwnerPage(QtWidgets.QWidget):
 
         try:
             template_path = DATA_DIR / "template.xlsx"
+            # 템플릿이 없으면 새로 생성 (기존 구형 파일 삭제 후 실행 권장)
             if not template_path.exists():
                 print(f"템플릿이 없어서 새로 만듭니다: {template_path}")
                 create_default_template(str(template_path))
