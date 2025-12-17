@@ -257,33 +257,38 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
             """
 
         def bubble_html(text: str, t: str, bg: str, align: str) -> str:
-            # 핵심:
-            # - "말풍선 = 내부 테이블"로 만들면 폭이 내용에 맞춰 자연스럽게 잡힘
-            # - 시간은 말풍선 내부의 마지막 줄(우측 정렬)
-            # - radius는 Qt에서 완벽하지 않을 수 있으므로 "있으면 좋고" 수준으로만 적용
             text = esc(text).strip()
             t = esc(t)
             if not text:
                 return ""
 
-            # 말풍선 내부(폭: 내용 기준)
-            inner = f"""
-            <table cellspacing="0" cellpadding="0" style="border-collapse:collapse;">
-              <tr>
-                <td bgcolor="{bg}" style="padding:10px 14px; border:1px solid rgba(0,0,0,0.06); border-radius:14px;">
-                  <div style="font-size:14px; color:#111;">{text}</div>
-                  <div style="margin-top:6px; font-size:10px; color:{TIME_COLOR};" align="right">{t}</div>
-                </td>
-              </tr>
-            </table>
-            """
+            # 말풍선(사각형 + padding 중심). Qt RichText 한계상 둥글림은 기대하지 않음.
+            bubble_div = (
+                f'<table cellspacing="0" cellpadding="0" style="border-collapse:collapse;">'
+                f'  <tr>'
+                f'    <td bgcolor="{bg}" style="padding:10px 14px; border:1px solid #E6E6E6;">'
+                f'      <div style="font-size:14px; color:#111; line-height:1.45;">{text}</div>'
+                f'    </td>'
+                f'  </tr>'
+                f'</table>'
+            )
 
+            # ✅ 시간 정렬: 상대(왼쪽)는 왼쪽 정렬, 내(오른쪽)는 오른쪽 정렬
+            time_align = "right" if align == "right" else "left"
+            time_td_style = f'font-size:10px; color:{TIME_COLOR}; padding-top:4px;'
+
+            # 메시지 + 시간(말풍선 아래)
             if align == "right":
                 return f"""
                 <table width="100%" cellspacing="0" cellpadding="0" style="margin:10px 0;">
                   <tr>
                     <td width="{SPACER_W}"></td>
-                    <td align="right" valign="top">{inner}</td>
+                    <td align="right" valign="top">
+                      {bubble_div}
+                      <table width="100%" cellspacing="0" cellpadding="0">
+                        <tr><td align="{time_align}" style="{time_td_style}">{t}</td></tr>
+                      </table>
+                    </td>
                   </tr>
                 </table>
                 """
@@ -291,7 +296,12 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
                 return f"""
                 <table width="100%" cellspacing="0" cellpadding="0" style="margin:10px 0;">
                   <tr>
-                    <td align="left" valign="top">{inner}</td>
+                    <td align="left" valign="top">
+                      {bubble_div}
+                      <table width="100%" cellspacing="0" cellpadding="0">
+                        <tr><td align="{time_align}" style="{time_td_style}">{t}</td></tr>
+                      </table>
+                    </td>
                     <td width="{SPACER_W}"></td>
                   </tr>
                 </table>
