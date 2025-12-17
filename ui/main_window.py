@@ -189,21 +189,24 @@ class MainWindow(QtWidgets.QMainWindow):
             return
 
         # 🔽 정상 로그인 흐름
+        is_owner_view = (session.role != "worker") or (getattr(session, "job_title", "") == "대표")
+
         try:
-            if session.role == "worker":
-                self._worker_page = WorkerPage(self.db, session)
-                self._worker_page.logout_requested.connect(self.on_logout)
-                self._set_page(self._worker_page)
-            else:
+            if is_owner_view:
                 self._owner_page = OwnerPage(self.db, session)
                 self._owner_page.logout_requested.connect(self.on_logout)
                 self._set_page(self._owner_page)
+            else:
+                self._worker_page = WorkerPage(self.db, session)
+                self._worker_page.logout_requested.connect(self.on_logout)
+                self._set_page(self._worker_page)
 
         except Exception as e:
             logging.exception("Failed to create page after login")
             Message.err(self, "오류", f"로그인 후 화면 생성 중 오류:\n{e}")
-            self.session = None
             self._back_to_login()
+
+
 
     def _set_page(self, widget):
         # login(0)은 유지, 1번 이후는 모두 제거 후 새로 붙임

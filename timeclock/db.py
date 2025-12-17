@@ -45,14 +45,16 @@ class DB:
                 username TEXT NOT NULL UNIQUE,
                 name TEXT,
                 pw_hash TEXT NOT NULL,
-                role TEXT NOT NULL DEFAULT 'worker', 
+                role TEXT NOT NULL DEFAULT 'worker',
                 created_at TEXT NOT NULL,
                 is_active INTEGER NOT NULL DEFAULT 1,
                 must_change_pw INTEGER NOT NULL DEFAULT 0,
-                hourly_wage INTEGER DEFAULT 9860
+                hourly_wage INTEGER DEFAULT 9860,
+                job_title TEXT NOT NULL DEFAULT '사원'
             )
             """
         )
+
         # 기존 DB 호환용 (컬럼 추가)
         try:
             cur.execute("ALTER TABLE users ADD COLUMN name TEXT")
@@ -62,6 +64,21 @@ class DB:
             cur.execute("ALTER TABLE users ADD COLUMN phone TEXT")
         except Exception:
             pass
+
+        try:
+            cur.execute("ALTER TABLE users ADD COLUMN job_title TEXT NOT NULL DEFAULT '사원'")
+        except Exception:
+            pass
+
+        # 기존 owner 계정은 대표로 보정(없거나 빈 값인 경우)
+        try:
+            cur.execute(
+                "UPDATE users SET job_title='대표' "
+                "WHERE role='owner' AND (job_title IS NULL OR TRIM(job_title)='')"
+            )
+        except Exception:
+            pass
+
         try:
             cur.execute("ALTER TABLE users ADD COLUMN birthdate TEXT")
         except Exception:
@@ -211,7 +228,8 @@ class DB:
         self.conn.commit()
 
     def list_workers(self, keyword=None, status_filter="ACTIVE"):
-        sql = "SELECT id, username, name, phone, birthdate, hourly_wage, created_at, is_active FROM users WHERE role='worker'"
+        sql = "SELECT id, username, name, phone, birthdate, job_title, hourly_wage, created_at, is_active FROM users WHERE role='worker'"
+
         params = []
 
         if status_filter == "ACTIVE":
@@ -238,6 +256,13 @@ class DB:
         self.conn.execute(
             "UPDATE users SET hourly_wage=? WHERE id=?",
             (new_wage, user_id)
+        )
+        self.conn.commit()
+
+    def update_user_job_title(self, user_id: int, job_title: str):
+        self.conn.execute(
+            "UPDATE users SET job_title=? WHERE id=?",
+            (job_title, user_id)
         )
         self.conn.commit()
 

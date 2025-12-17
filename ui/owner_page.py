@@ -602,6 +602,10 @@ class OwnerPage(QtWidgets.QWidget):
         self.btn_edit_wage.clicked.connect(self.edit_wage)
         self._set_btn_variant(self.btn_edit_wage, "secondary")
 
+        self.btn_edit_job_title = QtWidgets.QPushButton("🏷 직급 변경")
+        self.btn_edit_job_title.clicked.connect(self.edit_job_title)
+
+
         self.btn_calc_salary = QtWidgets.QPushButton("🧮 급여 정산")
         self.btn_calc_salary.clicked.connect(self.calculate_salary)
         self._set_btn_variant(self.btn_calc_salary, "warn")
@@ -619,7 +623,7 @@ class OwnerPage(QtWidgets.QWidget):
         self._set_btn_variant(self.btn_resign, "danger_outline")
 
         self.member_table = Table([
-            "ID", "아이디", "성함", "전화번호", "생년월일", "시급", "가입일", "상태"
+            "ID", "아이디", "성함", "직급", "전화번호", "생년월일", "시급", "가입일", "상태"
         ])
         self.member_table.setColumnWidth(0, 0)
         self.member_table.itemDoubleClicked.connect(self.edit_wage)
@@ -632,6 +636,7 @@ class OwnerPage(QtWidgets.QWidget):
         # noinspection PyUnresolvedReferences
         tlay.addStretch(1)
         tlay.addWidget(self.btn_edit_wage)
+        tlay.addWidget(self.btn_edit_job_title)
         tlay.addWidget(self.btn_calc_salary)
         tlay.addWidget(self.btn_export_payslip)
         tlay.addWidget(self.btn_resign)
@@ -662,12 +667,14 @@ class OwnerPage(QtWidgets.QWidget):
                     str(rr['id']),
                     rr['username'],
                     rr.get('name') or "",
+                    rr.get('job_title') or "사원",
                     rr.get('phone') or "",
                     rr.get('birthdate') or "",
                     wage_str,
                     rr['created_at'],
                     status
                 ])
+
             self.member_table.set_rows(out)
         except Exception as e:
             Message.err(self, "오류", f"회원 목록 로드 실패: {e}")
@@ -718,6 +725,44 @@ class OwnerPage(QtWidgets.QWidget):
                 self.refresh_members()
             except Exception as e:
                 Message.err(self, "오류", str(e))
+
+    def edit_job_title(self):
+        row = self.member_table.selected_first_row_index()
+        if row < 0:
+            Message.warn(self, "알림", "직급을 변경할 회원을 선택하세요.")
+            return
+
+        rr = dict(self._member_rows[row])
+        user_id = rr['id']
+        username = rr['username']
+        current = (rr.get("job_title") or "사원").strip()
+
+        from timeclock.settings import JOB_TITLES, DEFAULT_JOB_TITLE
+        items = JOB_TITLES[:] if JOB_TITLES else ["대표", "실장", "사원"]
+        if current not in items:
+            current = DEFAULT_JOB_TITLE if DEFAULT_JOB_TITLE in items else items[-1]
+
+        val, ok = QtWidgets.QInputDialog.getItem(
+            self,
+            "직급 변경",
+            f"'{username}' 님의 직급을 선택하세요:",
+            items,
+            items.index(current),
+            False
+        )
+        if not ok:
+            return
+
+        val = (val or "").strip()
+        if not val:
+            return
+
+        try:
+            self.db.update_user_job_title(user_id, val)
+            Message.info(self, "완료", f"{username}님의 직급이 '{val}'로 변경되었습니다.")
+            self.refresh_members()
+        except Exception as e:
+            Message.err(self, "오류", str(e))
 
     # ==========================================================
     # 3. 이의 제기 탭

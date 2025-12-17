@@ -19,6 +19,7 @@ class Session:
     username: str
     role: str  # 'worker' | 'owner'
     must_change_pw: bool
+    job_title: str = "사원"
 
 
 class LoginPage(QtWidgets.QWidget):
@@ -159,19 +160,19 @@ class LoginPage(QtWidgets.QWidget):
         line.setStyleSheet("background-color: #f0f0f0;")
         card_layout.addWidget(line)
 
-        # 테스트 계정 퀵 버튼
-        test_layout = QtWidgets.QHBoxLayout()
-        self.btn_test_owner = QtWidgets.QPushButton("사장님 체험")
-        self.btn_test_worker = QtWidgets.QPushButton("알바생 체험")
-
-        for b in [self.btn_test_owner, self.btn_test_worker]:
-            b.setCursor(QtCore.Qt.PointingHandCursor)
-            b.setStyleSheet("color: #bbb; border: 1px solid #eee; border-radius: 10px; padding: 5px; font-size: 11px;")
-            test_layout.addWidget(b)
-
-        self.btn_test_owner.clicked.connect(self.fill_owner)
-        self.btn_test_worker.clicked.connect(self.fill_worker)
-        card_layout.addLayout(test_layout)
+        # # 테스트 계정 퀵 버튼
+        # test_layout = QtWidgets.QHBoxLayout()
+        # self.btn_test_owner = QtWidgets.QPushButton("사장님 체험")
+        # self.btn_test_worker = QtWidgets.QPushButton("알바생 체험")
+        #
+        # for b in [self.btn_test_owner, self.btn_test_worker]:
+        #     b.setCursor(QtCore.Qt.PointingHandCursor)
+        #     b.setStyleSheet("color: #bbb; border: 1px solid #eee; border-radius: 10px; padding: 5px; font-size: 11px;")
+        #     test_layout.addWidget(b)
+        #
+        # self.btn_test_owner.clicked.connect(self.fill_owner)
+        # self.btn_test_worker.clicked.connect(self.fill_worker)
+        # card_layout.addLayout(test_layout)
 
         main_layout.addWidget(self.card)
 
@@ -215,6 +216,8 @@ class LoginPage(QtWidgets.QWidget):
             user_id=user['id'],
             username=user['username'],
             role=user['role'],
-            must_change_pw=(user.get('must_change_pw') == 1)
+            must_change_pw=(user.get('must_change_pw') == 1),
+            job_title=(user.get('job_title') or "사원")
         )
+
         self.logged_in.emit(session)
