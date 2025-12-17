@@ -61,7 +61,7 @@ def create_default_template(save_path):
         (4, 1, "지급일", "LABEL"), (4, 2, "{{pay_date}}", "DATA_C"),
         (4, 4, "성 명", "LABEL"), (4, 5, "{{name}}", "DATA_C"),
         (5, 1, "지급기간", "LABEL"), (5, 2, "{{period}}", "DATA_C"),
-        (5, 4, "직 급", "LABEL"), (5, 5, "사원", "DATA_C"),
+        (5, 4, "직 급", "LABEL"), (5, 5, "{{rank}}", "DATA_C"),  # ✅ 변경: "사원" → "{{rank}}"
 
         # 테이블 헤더
         (7, 1, "지급 항목", "TH"), (7, 3, "금액", "TH"),
@@ -125,20 +125,23 @@ def create_default_template(save_path):
             cell.font = font_text
             cell.alignment = align_c
             cell.border = border_inner
-            if c in [2, 5]: ws.merge_cells(start_row=r, start_column=c, end_row=r, end_column=c + 1)
+            if c in [2, 5]:
+                ws.merge_cells(start_row=r, start_column=c, end_row=r, end_column=c + 1)
         elif sty == "TH":
             cell.font = font_head
             cell.fill = fill_head
             cell.alignment = align_c
             cell.border = border_box
             ws.row_dimensions[r].height = 30
-            if c in [1, 4]: ws.merge_cells(start_row=r, start_column=c, end_row=r, end_column=c + 1)
+            if c in [1, 4]:
+                ws.merge_cells(start_row=r, start_column=c, end_row=r, end_column=c + 1)
         elif sty == "TD":
             cell.font = font_text
             cell.alignment = align_c
             cell.border = border_inner
             ws.row_dimensions[r].height = 24
-            if c in [1, 4]: ws.merge_cells(start_row=r, start_column=c, end_row=r, end_column=c + 1)
+            if c in [1, 4]:
+                ws.merge_cells(start_row=r, start_column=c, end_row=r, end_column=c + 1)
         elif sty == "TD_MONEY":
             cell.font = font_text
             cell.alignment = align_r
@@ -176,17 +179,14 @@ def create_default_template(save_path):
             cell.border = Border(bottom=line_bold)
             ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=6)
             ws.row_dimensions[r].height = 30
-
-        # [수정됨] 상세 산출 내역 박스 (높이 140으로 확장)
         elif sty == "BOX_DETAIL":
-            cell.font = font_small  # 글씨 작게하여 많이 담기
+            cell.font = font_small
             cell.alignment = align_l_top
             ws.merge_cells(start_row=r, start_column=1, end_row=r + 3, end_column=6)
             for rr in range(r, r + 4):
                 for cc in range(1, 7):
                     ws.cell(rr, cc).border = border_inner
-            ws.row_dimensions[r].height = 140  # 높이 대폭 수정
-
+            ws.row_dimensions[r].height = 140
         elif sty == "BOX_NOTE":
             cell.font = font_text
             cell.alignment = align_l_top
@@ -195,7 +195,6 @@ def create_default_template(save_path):
                 for cc in range(1, 7):
                     ws.cell(rr, cc).border = border_inner
             ws.row_dimensions[r].height = 60
-
         elif sty == "FOOT_MSG":
             cell.font = font_text
             cell.alignment = align_c
@@ -213,6 +212,7 @@ def create_default_template(save_path):
         ws.column_dimensions[col_char].width = width
 
     wb.save(save_path)
+
 
 
 # generate_payslip 함수는 기존과 동일하게 유지해도 됩니다.

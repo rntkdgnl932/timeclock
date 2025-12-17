@@ -1038,8 +1038,15 @@ class OwnerPage(QtWidgets.QWidget):
         real_name = rr.get('name') or username
         hourly_wage = rr['hourly_wage'] or 0
 
+        # ✅ 직급: DB 컬럼명이 job_title로 들어오는 구조를 전제로 하되,
+        # 혹시 다른 키로 들어오면 안전하게 보정
+        rank = (rr.get("job_title") or rr.get("rank") or "사원").strip() if rr else "사원"
+        if not rank:
+            rank = "사원"
+
         dlg = DateRangeDialog(self)
-        if dlg.exec_() != QtWidgets.QDialog.Accepted: return
+        if dlg.exec_() != QtWidgets.QDialog.Accepted:
+            return
         d1, d2 = dlg.get_range()
 
         logs = self.db.list_all_work_logs(user_id, d1, d2, status_filter='APPROVED')
@@ -1051,7 +1058,7 @@ class OwnerPage(QtWidgets.QWidget):
         calc = SalaryCalculator(hourly_wage)
         res = calc.calculate_period([dict(r) for r in logs])
 
-        # ★ 핵심 수정 1: salary.py의 친절한 설명 기능 호출 (-8700시간 버그 해결)
+        # salary.py의 친절한 설명 기능 호출
         friendly_text = calc.get_friendly_description(res)
 
         total_pay = res['grand_total']
@@ -1072,7 +1079,6 @@ class OwnerPage(QtWidgets.QWidget):
         ju_hyu_hours = 0
 
         if hourly_wage > 0:
-            # 0으로 나누기 방지
             over_hours = round(res['overtime_pay'] / (hourly_wage * 0.5), 1) if hourly_wage else 0
             night_hours = round(res['night_pay'] / (hourly_wage * 0.5), 1) if hourly_wage else 0
             ju_hyu_hours = round(res['ju_hyu_pay'] / hourly_wage, 1) if hourly_wage else 0
@@ -1081,8 +1087,10 @@ class OwnerPage(QtWidgets.QWidget):
 
         if res['overtime_pay'] > 0 or res['night_pay'] > 0:
             over_msg = []
-            if res['overtime_pay'] > 0: over_msg.append(f"연장 {over_hours}h")
-            if res['night_pay'] > 0: over_msg.append(f"야간 {night_hours}h")
+            if res['overtime_pay'] > 0:
+                over_msg.append(f"연장 {over_hours}h")
+            if res['night_pay'] > 0:
+                over_msg.append(f"야간 {night_hours}h")
             sum_add_pay = res['overtime_pay'] + res['night_pay']
             over_str = f"• 가산(0.5배): {' + '.join(over_msg)} = {sum_add_pay:,}원"
         else:
@@ -1093,7 +1101,6 @@ class OwnerPage(QtWidgets.QWidget):
         else:
             ju_hyu_str = "• 주휴수당: 해당 없음 (조건 미충족)"
 
-        note_text = ""
         if res['ju_hyu_pay'] > 0:
             note_text = (
                 "※ 주휴수당 지급 안내:\n"
@@ -1110,7 +1117,9 @@ class OwnerPage(QtWidgets.QWidget):
             "period": f"{d1} ~ {d2}",
             "pay_date": datetime.now().strftime("%Y-%m-%d"),
 
-            # ★ 핵심 수정 2: 상호명 변경
+            # ✅ 추가: 직급 치환 변수
+            "rank": rank,
+
             "company": "Hobby Brown",
 
             "base_pay": res['base_pay'],
@@ -1120,6 +1129,7 @@ class OwnerPage(QtWidgets.QWidget):
             "holiday_pay": res['holiday_pay'],
             "other_pay": 0,
             "total_pay": total_pay,
+
             "ei_ins": ei_tax,
             "pension": pension,
             "health_ins": health,
@@ -1129,7 +1139,6 @@ class OwnerPage(QtWidgets.QWidget):
             "total_deduction": total_deduction,
             "net_pay": net_pay,
 
-            # ★ 핵심 수정 3: 상세 내역을 salary.py가 만든 예쁜 텍스트로 교체
             "calc_detail": friendly_text,
 
             "base_detail": base_str,
@@ -1141,7 +1150,6 @@ class OwnerPage(QtWidgets.QWidget):
 
         try:
             template_path = DATA_DIR / "template.xlsx"
-            # 템플릿이 없으면 새로 생성 (기존 구형 파일 삭제 후 실행 권장)
             if not template_path.exists():
                 print(f"템플릿이 없어서 새로 만듭니다: {template_path}")
                 create_default_template(str(template_path))
@@ -1173,9 +1181,8 @@ class OwnerPage(QtWidgets.QWidget):
                     Message.err(self, "실패", "엑셀 파일 생성 중 오류가 발생했습니다.")
 
         except Exception as e:
-            import traceback
-            traceback.print_exc()
-            Message.err(self, "오류", f"처리 중 오류 발생: {e}")
+            logging.exception("export_payslip failed")
+            Message.err(self, "오류", f"명세서 발급 실패: {e}")
 
     # ==========================================================
     # 5. 데이터 복구 탭
