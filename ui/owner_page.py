@@ -1,7 +1,7 @@
 # timeclock/ui/owner_page.py
 # -*- coding: utf-8 -*-
 import logging
-from PyQt5 import QtWidgets, QtCore
+from PyQt5 import QtWidgets, QtCore, QtGui
 from timeclock import backup_manager
 from datetime import datetime
 import os
@@ -65,6 +65,8 @@ class OwnerPage(QtWidgets.QWidget):
         self.refresh_members()
         self.refresh_disputes()
         self.refresh_signup_requests()
+
+        self.update_badges()
 
     # ==========================================================
     # 1. 근무 기록 관리 탭
@@ -163,9 +165,39 @@ class OwnerPage(QtWidgets.QWidget):
                     rr["owner_comment"] or ""
                 ])
             self.work_table.set_rows(out)
+
+            self.update_badges()
+
         except Exception as e:
             logging.exception("refresh_work_logs failed")
             Message.err(self, "오류", f"근무 기록 조회 실패: {e}")
+
+    def update_badges(self):
+        """DB에서 대기 건수를 가져와 탭 제목과 색상을 변경"""
+        counts = self.db.get_pending_counts()
+
+        # 헬퍼 함수
+        def set_tab_style(index, title, count):
+            # 안전장치: 탭 개수보다 큰 인덱스를 건드리면 꺼지므로 확인
+            if index >= self.tabs.count():
+                return
+
+            if count > 0:
+                self.tabs.setTabText(index, f"{title} ({count})")
+                self.tabs.tabBar().setTabTextColor(index, QtGui.QColor("#D32F2F"))  # 빨강
+            else:
+                self.tabs.setTabText(index, title)
+                self.tabs.tabBar().setTabTextColor(index, QtGui.QColor("black"))
+
+        # ★ [수정됨] 탭 인덱스 재설정 (사장님 화면 기준)
+        # 0번: 근무 기록 관리 (승인)
+        # 1번: 근로자 관리 (배지 없음)
+        # 2번: 이의제기 관리
+        # 3번: 가입신청관리
+
+        set_tab_style(0, "근무 기록 관리 (승인)", counts["work"])  # 1 -> 0으로 수정
+        set_tab_style(2, "이의제기 관리", counts["dispute"])
+        set_tab_style(3, "가입신청관리", counts["signup"])
 
     def approve_selected_log(self, mode="START"):
         row_idx = self.work_table.selected_first_row_index()
@@ -423,6 +455,9 @@ class OwnerPage(QtWidgets.QWidget):
                     rr["created_at"]
                 ])
             self.dispute_table.set_rows(out)
+
+            self.update_badges()
+
         except Exception as e:
             logging.exception("refresh_disputes failed")
             Message.err(self, "오류", f"이의제기 로드 실패: {e}")
@@ -502,6 +537,9 @@ class OwnerPage(QtWidgets.QWidget):
                     status_str
                 ])
             self.signup_table.set_rows(data)
+
+            self.update_badges()
+
         except Exception as e:
             Message.err(self, "오류", str(e))
 

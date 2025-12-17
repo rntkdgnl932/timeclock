@@ -1977,3 +1977,39 @@ AttributeError: 'OwnerPage' object has no attribute 'btn_export_payslip'
 2025-12-17 10:18:12,799 [INFO] Logged in: owner (owner)
 2025-12-17 10:23:38,247 [INFO] file_cache is only supported with oauth2client<4.0.0
 2025-12-17 10:23:38,567 [WARNING] Encountered 403 Forbidden with reason "accessNotConfigured"
+2025-12-17 10:29:33,755 [INFO] file_cache is only supported with oauth2client<4.0.0
+2025-12-17 10:29:52,924 [INFO] Login success: owner (owner)
+2025-12-17 10:29:52,924 [INFO] Logged in: owner (owner)
+2025-12-17 10:29:58,579 [INFO] Logout: owner
+2025-12-17 10:30:03,200 [INFO] Login success: worker (worker)
+2025-12-17 10:30:03,200 [INFO] Logged in: worker (worker)
+2025-12-17 10:30:24,195 [INFO] Logout: worker
+2025-12-17 10:30:25,965 [INFO] Login success: owner (owner)
+2025-12-17 10:30:25,965 [INFO] Logged in: owner (owner)
+2025-12-17 10:37:21,482 [INFO] file_cache is only supported with oauth2client<4.0.0
+2025-12-17 10:37:27,353 [INFO] Login success: owner (owner)
+2025-12-17 10:37:27,353 [INFO] Logged in: owner (owner)
+2025-12-17 10:37:27,381 [ERROR] refresh_work_logs failed
+Traceback (most recent call last):
+  File "C:\my_games\timeclock\ui\owner_page.py", line 169, in refresh_work_logs
+    self.update_badges()
+  File "C:\my_games\timeclock\ui\owner_page.py", line 177, in update_badges
+    counts = self.db.get_pending_counts()
+AttributeError: 'DB' object has no attribute 'get_pending_counts'
+2025-12-17 10:38:42,897 [ERROR] refresh_disputes failed
+Traceback (most recent call last):
+  File "C:\my_games\timeclock\ui\owner_page.py", line 454, in refresh_disputes
+    self.update_badges()
+  File "C:\my_games\timeclock\ui\owner_page.py", line 177, in update_badges
+    counts = self.db.get_pending_counts()
+AttributeError: 'DB' object has no attribute 'get_pending_counts'
+2025-12-17 10:39:08,609 [INFO] file_cache is only supported with oauth2client<4.0.0
+2025-12-17 10:39:13,537 [INFO] Login success: owner (owner)
+2025-12-17 10:39:13,537 [INFO] Logged in: owner (owner)
+2025-12-17 10:39:36,438 [INFO] Logout: owner
+2025-12-17 10:39:41,021 [INFO] Login success: worker (worker)
+2025-12-17 10:39:41,021 [INFO] Logged in: worker (worker)
+2025-12-17 10:40:06,499 [INFO] file_cache is only supported with oauth2client<4.0.0
+2025-12-17 10:40:16,292 [INFO] Logout: worker
+2025-12-17 10:40:18,197 [INFO] Login success: owner (owner)
+2025-12-17 10:40:18,197 [INFO] Logged in: owner (owner)

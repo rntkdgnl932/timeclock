@@ -601,3 +601,30 @@ class DB:
         self.conn.commit()
         out_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(self.db_path, out_path)
+
+    # ----------------------------------------------------------------
+    # [신규] 대기 중인 항목 개수 조회 (배지 알림용)
+    # ----------------------------------------------------------------
+    def get_pending_counts(self):
+        """
+        근무승인대기, 이의제기진행중, 가입승인대기 건수를 딕셔너리로 반환
+        """
+        # 1. 근무 승인 대기 (PENDING 상태)
+        cnt_work = self.conn.execute(
+            "SELECT COUNT(*) FROM work_logs WHERE status='PENDING'"
+        ).fetchone()[0]
+
+        # 2. 이의제기 진행 중 (PENDING 또는 IN_REVIEW)
+        cnt_dispute = self.conn.execute(
+            "SELECT COUNT(*) FROM disputes WHERE status IN ('PENDING', 'IN_REVIEW')"
+        ).fetchone()[0]
+
+        # 3. 가입 승인 대기 (PENDING)
+        cnt_signup = self.conn.execute(
+            "SELECT COUNT(*) FROM signup_requests WHERE status='PENDING'"
+        ).fetchone()[0]
+
+        return {"work": cnt_work, "dispute": cnt_dispute, "signup": cnt_signup}
+
+
+
