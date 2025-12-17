@@ -1,6 +1,6 @@
 # timeclock/ui/dialogs.py
 # -*- coding: utf-8 -*-
-from PyQt5 import QtWidgets, QtCore, QtGui
+from PyQt5 import QtWidgets, QtCore
 
 
 class ChangePasswordDialog(QtWidgets.QDialog):
@@ -102,6 +102,7 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
         input_layout.addWidget(self.le_input, 1)
 
         self.btn_send = QtWidgets.QPushButton("전송")
+        # noinspection PyUnresolvedReferences
         self.btn_send.setCursor(QtCore.Qt.PointingHandCursor)
         self.btn_send.setStyleSheet("""
             QPushButton {
@@ -155,10 +156,12 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
 
         lbl_info = QtWidgets.QLabel(f"<b>근무 일자:</b> {w_date}")
         lbl_info.setStyleSheet("font-size: 14px; color: #333;")
+        # noinspection PyUnresolvedReferences
         lbl_info.setAlignment(QtCore.Qt.AlignCenter)
 
         lbl_type = QtWidgets.QLabel(f"<b>이의 유형:</b> {d_type}")
         lbl_type.setStyleSheet("font-size: 13px; color: #d9534f;")
+        # noinspection PyUnresolvedReferences
         lbl_type.setAlignment(QtCore.Qt.AlignCenter)
 
         vbox.addWidget(lbl_info)
@@ -203,108 +206,142 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
         except Exception:
             return
 
-        html_content = []
+        KAKAO_BG = "#B2C7D9"
+        MY_BUBBLE = "#FEE500"
+        OTHER_BUBBLE = "#FFFFFF"
+        TIME_COLOR = "#666666"
 
-        # 카톡 스타일 색상
-        KAKAO_BG = "#b2c7d9"
-        MY_BUBBLE = "#fef01b"
-        OTHER_BUBBLE = "#ffffff"
+        # 좌/우 정렬을 안정적으로 만들기 위한 스페이서
+        SPACER_W = "45%"
 
-        html_content.append(f"""
-        <html><head><style>
-            body {{ background-color: {KAKAO_BG}; font-family: 'Malgun Gothic', sans-serif; margin: 0; padding: 15px; }}
-            .time {{ font-size: 10px; color: #555; margin-top: 4px; }}
-        </style></head><body>
+        def esc(s: str) -> str:
+            if s is None:
+                return ""
+            s = str(s)
+            s = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            s = s.replace("\n", "<br>")
+            return s
 
-        <table width="100%" border="0" cellspacing="0" cellpadding="0">
-            <tr>
-                <td width="45%"></td>
-                <td width="10%"></td>
-                <td width="45%"></td>
-            </tr>
+        def date_only(ts: str) -> str:
+            if not ts:
+                return ""
+            return ts.split(" ")[0].strip()
+
+        def time_only(ts: str) -> str:
+            if not ts:
+                return ""
+            parts = ts.split(" ")
+            if len(parts) < 2:
+                return ts
+            t = parts[1]
+            return t[:5] if len(t) >= 5 else t
+
+        def date_chip(d: str) -> str:
+            d = esc(d)
+            return f"""
+            <div align="center" style="margin:10px 0 14px 0;">
+              <span style="background:#D7E2EC; color:#333; padding:3px 10px; border-radius:12px; font-size:12px; font-weight:bold;">
+                {d}
+              </span>
+            </div>
+            """
+
+        def sys_chip(msg: str) -> str:
+            msg = esc(msg)
+            return f"""
+            <div align="center" style="margin:18px 0 6px 0;">
+              <span style="background:#90A4AE; color:#fff; padding:5px 12px; border-radius:14px; font-size:12px; font-weight:bold;">
+                {msg}
+              </span>
+            </div>
+            """
+
+        def bubble_html(text: str, t: str, bg: str, align: str) -> str:
+            # 핵심:
+            # - "말풍선 = 내부 테이블"로 만들면 폭이 내용에 맞춰 자연스럽게 잡힘
+            # - 시간은 말풍선 내부의 마지막 줄(우측 정렬)
+            # - radius는 Qt에서 완벽하지 않을 수 있으므로 "있으면 좋고" 수준으로만 적용
+            text = esc(text).strip()
+            t = esc(t)
+            if not text:
+                return ""
+
+            # 말풍선 내부(폭: 내용 기준)
+            inner = f"""
+            <table cellspacing="0" cellpadding="0" style="border-collapse:collapse;">
+              <tr>
+                <td bgcolor="{bg}" style="padding:10px 14px; border:1px solid rgba(0,0,0,0.06); border-radius:14px;">
+                  <div style="font-size:14px; color:#111;">{text}</div>
+                  <div style="margin-top:6px; font-size:10px; color:{TIME_COLOR};" align="right">{t}</div>
+                </td>
+              </tr>
+            </table>
+            """
+
+            if align == "right":
+                return f"""
+                <table width="100%" cellspacing="0" cellpadding="0" style="margin:10px 0;">
+                  <tr>
+                    <td width="{SPACER_W}"></td>
+                    <td align="right" valign="top">{inner}</td>
+                  </tr>
+                </table>
+                """
+            else:
+                return f"""
+                <table width="100%" cellspacing="0" cellpadding="0" style="margin:10px 0;">
+                  <tr>
+                    <td align="left" valign="top">{inner}</td>
+                    <td width="{SPACER_W}"></td>
+                  </tr>
+                </table>
+                """
+
+        html = []
+        html.append(f"""
+        <html><body style="background:{KAKAO_BG}; font-family:'Malgun Gothic','Segoe UI',sans-serif; margin:0; padding:12px 12px 18px 12px;">
         """)
+
+        last_date = None
 
         for event in timeline_events:
             who = event.get("who", "unknown")
-            username = event.get("username", "")
+            username = event.get("username", "") or ""
             at = event.get("at", "") or ""
             comment = event.get("comment", "") or ""
 
-            safe_comment = comment.replace('<', '&lt;').replace('>', '&gt;').replace('\n', '<br>')
-            if not safe_comment.strip(): continue
+            if not comment:
+                continue
+
+            d = date_only(at)
+            if d and d != last_date:
+                html.append(date_chip(d))
+                last_date = d
 
             is_me = (who == self.my_role)
+            t = time_only(at)
 
             if is_me:
-                # [나] - 오른쪽 정렬 (이름 숨김)
-                # 여기도 중첩 테이블을 써서 정렬을 확실하게 잡음
-                html_content.append(f"""
-                <tr>
-                    <td colspan="2"></td>
-                    <td align="right" valign="top">
-                        <table border="0" cellspacing="0" cellpadding="0">
-                            <tr>
-                                <td align="right">
-                                    <div style="background-color: {MY_BUBBLE}; padding: 8px 12px; font-size: 14px; color: #000; border-radius: 4px; display: inline-block;">
-                                        {safe_comment}
-                                    </div>
-                                    <div class="time">{at}</div>
-                                </td>
-                            </tr>
-                        </table>
-                        <br>
-                    </td>
-                </tr>
-                """)
+                html.append(bubble_html(comment, t, MY_BUBBLE, "right"))
             else:
-                # [상대방] - 왼쪽 정렬
-                # ★ 중첩 테이블 사용: 1행(이름) -> 2행(말풍선) -> 3행(시간)
-                # 이렇게 하면 절대로 옆으로 붙을 수가 없음
-                html_content.append(f"""
-                <tr>
-                    <td align="left" valign="top">
-                        <table border="0" cellspacing="0" cellpadding="0">
-                            <tr>
-                                <td align="left" style="padding-bottom: 4px;">
-                                    <span style="font-size: 13px; font-weight: bold; color: #4b4b4b;">{username}</span>
-                                </td>
-                            </tr>
-                            <tr>
-                                <td align="left">
-                                    <div style="background-color: {OTHER_BUBBLE}; padding: 8px 12px; font-size: 14px; color: #000; border-radius: 4px; display: inline-block;">
-                                        {safe_comment}
-                                    </div>
-                                </td>
-                            </tr>
-                            <tr>
-                                <td align="left">
-                                    <div class="time">{at}</div>
-                                </td>
-                            </tr>
-                        </table>
-                        <br>
-                    </td>
-                    <td colspan="2"></td>
-                </tr>
-                """)
+                # 상대는 이름을 위에 표시(원하면 제거 가능)
+                if username:
+                    html.append(
+                        f'<div style="font-size:12px; font-weight:bold; color:#1f2a33; margin:0 0 4px 2px;">{esc(username)}</div>')
+                html.append(bubble_html(comment, t, OTHER_BUBBLE, "left"))
 
-        html_content.append("</table>")
-
-        # 시스템 메시지
         if self.current_status == "RESOLVED":
-            html_content.append(
-                """<div style="text-align: center; margin: 20px;"><span style="background-color: rgba(0,0,0,0.1); color: #fff; padding: 6px 15px; border-radius: 10px; font-size: 12px;">처리 완료된 이의제기입니다.</span></div>""")
+            html.append(sys_chip("처리 완료된 이의제기입니다."))
         elif self.current_status == "REJECTED":
-            html_content.append(
-                """<div style="text-align: center; margin: 20px;"><span style="background-color: rgba(0,0,0,0.1); color: #fff; padding: 6px 15px; border-radius: 10px; font-size: 12px;">기각 처리된 이의제기입니다.</span></div>""")
+            html.append(sys_chip("기각 처리된 이의제기입니다."))
+        elif self.current_status == "IN_REVIEW":
+            html.append(sys_chip("현재 검토 중입니다."))
 
-        html_content.append("<br></body></html>")
+        html.append("</body></html>")
+        self.browser.setHtml("".join(html))
 
-        self.browser.setHtml("".join(html_content))
-
-        # 스크롤 아래로
-        slider = self.browser.verticalScrollBar()
-        slider.setValue(slider.maximum())
+        sb = self.browser.verticalScrollBar()
+        sb.setValue(sb.maximum())
 
 
 # timeclock/ui/dialogs.py 파일 맨 아래에 추가하세요.
@@ -319,6 +356,7 @@ class DateRangeDialog(QtWidgets.QDialog):
 
         # 설명 라벨
         lbl_guide = QtWidgets.QLabel("급여를 정산할 기간을 선택하세요.")
+        # noinspection PyUnresolvedReferences
         lbl_guide.setAlignment(QtCore.Qt.AlignCenter)
         lbl_guide.setStyleSheet("font-weight: bold; margin-bottom: 10px;")
         layout.addWidget(lbl_guide)

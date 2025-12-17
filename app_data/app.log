@@ -2141,3 +2141,17 @@ Traceback (most recent call last):
   File "C:\my_games\timeclock\ui\owner_page.py", line 89, in __init__
     kpi_row.addWidget(self.kpi_work["frame"])
 TypeError: 'QFrame' object is not subscriptable
+2025-12-18 06:22:19,196 [INFO] file_cache is only supported with oauth2client<4.0.0
+2025-12-18 06:22:24,989 [INFO] Logged in: owner (owner)
+2025-12-18 06:24:07,442 [INFO] Logout: owner
+2025-12-18 06:24:09,292 [INFO] Logged in: worker (worker)
+2025-12-18 06:31:31,120 [INFO] file_cache is only supported with oauth2client<4.0.0
+2025-12-18 06:33:45,454 [INFO] Logged in: owner (owner)
+2025-12-18 06:41:25,035 [INFO] file_cache is only supported with oauth2client<4.0.0
+2025-12-18 06:41:31,746 [INFO] Logged in: worker (worker)
+2025-12-18 06:43:17,473 [INFO] Logout: worker
+2025-12-18 06:43:19,007 [INFO] Logged in: owner (owner)
+2025-12-18 06:47:47,997 [INFO] access_token is expired. Now: 2025-12-17 21:47:47.997799, token_expiry: 2025-12-17 21:45:18
+2025-12-18 06:47:47,997 [INFO] Refreshing access_token
+2025-12-18 06:47:48,231 [INFO] file_cache is only supported with oauth2client<4.0.0
+2025-12-18 06:47:55,581 [INFO] Logged in: owner (owner)
