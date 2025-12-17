@@ -42,8 +42,8 @@ class DB:
             """
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY,
-                username TEXT NOT NULL UNIQUE,  -- 이건 로그인 아이디
-                name TEXT,                      -- ★ [추가] 실제 성함
+                username TEXT NOT NULL UNIQUE,
+                name TEXT,
                 pw_hash TEXT NOT NULL,
                 role TEXT NOT NULL DEFAULT 'worker', 
                 created_at TEXT NOT NULL,
@@ -53,17 +53,15 @@ class DB:
             )
             """
         )
-        # 기존 DB 호환용 (이미 파일이 있다면 이 구문이 실행되어 컬럼이 추가됨)
+        # 기존 DB 호환용 (컬럼 추가)
         try:
             cur.execute("ALTER TABLE users ADD COLUMN name TEXT")
         except Exception:
             pass
-
         try:
             cur.execute("ALTER TABLE users ADD COLUMN phone TEXT")
         except Exception:
             pass
-
         try:
             cur.execute("ALTER TABLE users ADD COLUMN birthdate TEXT")
         except Exception:
@@ -83,11 +81,24 @@ class DB:
                 approved_end TEXT,
                 owner_comment TEXT,
                 created_at TEXT NOT NULL,
+                approver_id INTEGER,    -- [신규] 승인자 ID
+                updated_at TEXT,        -- [신규] 수정 일시
                 FOREIGN KEY (user_id) REFERENCES users(id)
             )
             """
         )
         cur.execute("CREATE INDEX IF NOT EXISTS idx_work_logs_user_date ON work_logs(user_id, work_date)")
+
+        # ★ [핵심 수정] 오류 발생 원인 해결 (기존 DB에 컬럼 추가)
+        try:
+            cur.execute("ALTER TABLE work_logs ADD COLUMN approver_id INTEGER")
+        except Exception:
+            pass
+
+        try:
+            cur.execute("ALTER TABLE work_logs ADD COLUMN updated_at TEXT")
+        except Exception:
+            pass
 
         # 3. disputes (이의 제기)
         cur.execute(
@@ -132,7 +143,7 @@ class DB:
             CREATE TABLE IF NOT EXISTS signup_requests (
                 id INTEGER PRIMARY KEY,
                 username TEXT NOT NULL UNIQUE,
-                name TEXT,                      -- ★ [추가] 실제 성함
+                name TEXT,
                 phone TEXT NOT NULL,
                 birthdate TEXT NOT NULL,
                 pw_hash TEXT NOT NULL,
@@ -173,7 +184,7 @@ class DB:
             self.create_user(DEFAULT_WORKER_USER, "worker", DEFAULT_WORKER_PASS)
 
     # ----------------------------------------------------------------
-    # User / Auth / Member Management (★ 수정됨)
+    # User / Auth / Member Management
     # ----------------------------------------------------------------
     def create_user(self, username, role, password):
         pw_hash = pbkdf2_hash_password(password)
@@ -199,10 +210,7 @@ class DB:
         self.conn.execute("UPDATE users SET pw_hash=?, must_change_pw=0 WHERE id=?", (pw_hash, user_id))
         self.conn.commit()
 
-
-
     def list_workers(self, keyword=None, status_filter="ACTIVE"):
-        # [수정] name, phone, birthdate 추가 조회
         sql = "SELECT id, username, name, phone, birthdate, hourly_wage, created_at, is_active FROM users WHERE role='worker'"
         params = []
 
@@ -212,18 +220,14 @@ class DB:
             sql += " AND is_active = 0"
 
         if keyword:
-            # 이름(name)이나 아이디(username)로 검색되게 개선
             sql += " AND (username LIKE ? OR name LIKE ?)"
             params.append(f"%{keyword}%")
             params.append(f"%{keyword}%")
 
         sql += " ORDER BY username ASC"
-
         return self.conn.execute(sql, tuple(params)).fetchall()
 
     def resign_user(self, user_id):
-        """직원 퇴사 처리 (삭제가 아닌 비활성화)"""
-        # is_active를 0으로 변경
         self.conn.execute(
             "UPDATE users SET is_active=0 WHERE id=?",
             (user_id,)
@@ -231,7 +235,6 @@ class DB:
         self.conn.commit()
 
     def update_user_wage(self, user_id, new_wage):
-        """★ 시급 업데이트 함수"""
         self.conn.execute(
             "UPDATE users SET hourly_wage=? WHERE id=?",
             (new_wage, user_id)
@@ -252,19 +255,20 @@ class DB:
         today = datetime.date.today().strftime("%Y-%m-%d")
         now = now_str()
 
-        # 중복 근무 체크: 현재 근무 중(WORKING)인 기록이 있는지 확인
-        existing = self.conn.execute(
-            "SELECT 1 FROM work_logs WHERE user_id=? AND status='WORKING'",
-            (user_id,)
-        ).fetchone()
+        # 오늘 날짜의 '유효한(Active)' 근무 기록이 있는지 확인 (반려된 건은 제외)
+        sql_check = """
+            SELECT 1 FROM work_logs 
+            WHERE user_id = ? AND work_date = ? AND status IN ('PENDING', 'WORKING', 'APPROVED')
+        """
+        row = self.conn.execute(sql_check, (user_id, today)).fetchone()
 
-        if existing:
-            raise ValueError("이미 근무 중입니다. 먼저 퇴근 처리를 해주세요.")
+        if row:
+            raise ValueError("이미 처리 중이거나 완료된 근무 기록이 있습니다.")
 
         self.conn.execute(
             """
             INSERT INTO work_logs (user_id, work_date, start_time, status, created_at)
-            VALUES (?, ?, ?, 'WORKING', ?)
+            VALUES (?, ?, ?, 'PENDING', ?)
             """,
             (user_id, today, now, now)
         )
@@ -286,6 +290,14 @@ class DB:
         )
         self.conn.commit()
 
+    def reject_work_log(self, log_id):
+        """
+        작업 기록을 삭제하지 않고 'REJECTED' 상태로 변경하여 기록을 남김.
+        """
+        sql = "UPDATE work_logs SET status = 'REJECTED' WHERE id = ?"
+        self.conn.execute(sql, (log_id,))
+        self.conn.commit()
+
     def list_work_logs(self, user_id, date_from, date_to, limit=1000):
         date_from, date_to = normalize_date_range(date_from, date_to)
         return self.conn.execute(
@@ -302,19 +314,17 @@ class DB:
         date_from, date_to = normalize_date_range(date_from, date_to)
 
         sql = """
-            SELECT w.*, u.username as worker_username
+            SELECT w.*, u.username as worker_username, u.name as worker_name
             FROM work_logs w
             JOIN users u ON u.id = w.user_id
             WHERE w.work_date >= ? AND w.work_date <= ?
         """
         params = [date_from, date_to]
 
-        # 특정 근로자만 조회 시
         if worker_id and isinstance(worker_id, int) and worker_id > 0:
             sql += " AND w.user_id = ?"
             params.append(str(worker_id))
 
-        # [추가] 상태 필터 적용 (ALL이 아닐 경우에만 조건 추가)
         if status_filter and status_filter != "ALL":
             sql += " AND w.status = ?"
             params.append(status_filter)
@@ -326,32 +336,21 @@ class DB:
 
     def approve_work_log(self, work_log_id, owner_id, app_start, app_end, comment):
         with self.conn:
-            # 1. 상태 결정 로직 개선
+            # 1. 상태 결정 로직
             if app_end:
-                # 확정 퇴근 시간이 있으면 -> 승인 완료
                 new_status = 'APPROVED'
             else:
-                # 확정 퇴근 시간이 없으면(출근만 수정 시) -> 기존 퇴근 기록 확인
-                row = self.conn.execute(
-                    "SELECT end_time FROM work_logs WHERE id=?",
-                    (work_log_id,)
-                ).fetchone()
-
-                if row and row["end_time"]:
-                    # 이미 근로자가 퇴근을 찍었었다면 -> 승인 대기(PENDING) 상태로
-                    new_status = 'PENDING'
-                else:
-                    # 퇴근 기록도 없다면 -> 근무중(WORKING)
-                    new_status = 'WORKING'
+                new_status = 'WORKING'
 
             # 2. 업데이트 수행
             self.conn.execute(
                 """
                 UPDATE work_logs
-                SET approved_start=?, approved_end=?, owner_comment=?, status=?
+                SET approved_start=?, approved_end=?, owner_comment=?, status=?, 
+                    approver_id=?, updated_at=?
                 WHERE id=?
                 """,
-                (app_start, app_end, comment, new_status, work_log_id)
+                (app_start, app_end, comment, new_status, owner_id, now_str(), work_log_id)
             )
 
     # ----------------------------------------------------------------
@@ -521,11 +520,9 @@ class DB:
     # ----------------------------------------------------------------
     # Signup / Audit / Export
     # ----------------------------------------------------------------
-    # name 인자 추가
     def create_signup_request(self, username, pw_hash, name, phone, birth, email=None, account=None, address=None):
         with self.conn:
             self.conn.execute(
-                # name 컬럼 추가
                 "INSERT INTO signup_requests (username, pw_hash, name, phone, birthdate, email, account, address, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?)",
                 (username, pw_hash, name, phone, birth, email, account, address,
                  datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
@@ -543,14 +540,12 @@ class DB:
         return self.conn.execute("SELECT * FROM signup_requests WHERE status='PENDING' ORDER BY id ASC LIMIT ?",
                                  (limit,)).fetchall()
 
-
     def approve_signup_request(self, request_id, owner_id, comment):
         sr = self.conn.execute("SELECT * FROM signup_requests WHERE id=?", (request_id,)).fetchone()
         if not sr or sr["status"] != "PENDING": raise ValueError("처리할 수 없는 요청입니다.")
 
         with self.conn:
             self.conn.execute(
-                # [수정] phone, birthdate 컬럼 추가
                 """
                 INSERT INTO users (username, role, pw_hash, name, phone, birthdate, created_at, is_active, must_change_pw, hourly_wage) 
                 VALUES (?, 'worker', ?, ?, ?, ?, ?, 1, 1, 9860)
@@ -560,12 +555,12 @@ class DB:
             self.conn.execute(
                 "UPDATE signup_requests SET status='APPROVED', decided_at=?, decided_by=?, decision_comment=? WHERE id=?",
                 (now_str(), owner_id, comment, request_id))
+
     def reject_signup_request(self, request_id, owner_id, comment=""):
         self.conn.execute(
             "UPDATE signup_requests SET status='REJECTED', decided_at=?, decided_by=?, decision_comment=? WHERE id=?",
             (now_str(), owner_id, comment, request_id))
         self.conn.commit()
-
 
     def log_audit(self, action, actor_user_id=None, target_type=None, target_id=None, detail=None):
         dj = json.dumps(detail, ensure_ascii=False) if detail else None

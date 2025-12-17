@@ -75,8 +75,8 @@ AUDIT_ACTIONS = {
 
 # ★ [NEW] 근무 상태 (통합 테이블용) - settings.py 로 이동 완료
 WORK_STATUS = {
-    "WORKING": "근무중",
-    "PENDING": "승인대기(퇴근완료)",
-    "APPROVED": "확정(승인)",
+    "WORKING": "근무중",       # 관리자가 시작 승인한 상태
+    "PENDING": "승인대기",     # 근로자가 요청만 한 상태 (시작 전 or 퇴근 후)
+    "APPROVED": "확정(승인)",  # 퇴근까지 관리자가 다 승인한 상태
     "REJECTED": "반려"
 }

@@ -1,14 +1,12 @@
 # timeclock/ui/worker_page.py
 # -*- coding: utf-8 -*-
 from PyQt5 import QtWidgets, QtCore
-# timeclock/ui/worker_page.py 상단
-
-from datetime import datetime  # [추가]
-from timeclock.salary import SalaryCalculator  # [추가]
+from datetime import datetime
+from timeclock.salary import SalaryCalculator
 from timeclock import backup_manager
 
 from timeclock.utils import Message
-from timeclock.settings import WORK_STATUS  # ★ [수정] 설정 파일에서 상태값 가져옴
+from timeclock.settings import WORK_STATUS
 from ui.widgets import DateRangeBar, Table
 from ui.dialogs import DisputeTimelineDialog, DateRangeDialog
 
@@ -34,7 +32,7 @@ class WorkerPage(QtWidgets.QWidget):
         self.filter = DateRangeBar(label="근무 조회기간")
         self.filter.applied.connect(lambda *_: self.refresh())
 
-        self.btn_action = QtWidgets.QPushButton("출근하기")
+        self.btn_action = QtWidgets.QPushButton("작업시작요청")
         self.btn_action.setMinimumHeight(40)
         self.btn_action.setStyleSheet("font-weight: bold; font-size: 14px;")
         self.btn_action.clicked.connect(self.on_work_action)
@@ -52,7 +50,7 @@ class WorkerPage(QtWidgets.QWidget):
         top_layout = QtWidgets.QHBoxLayout()
         top_layout.addWidget(self.btn_action)
         top_layout.addSpacing(10)
-        top_layout.addWidget(self.btn_calc)  # [추가] 레이아웃에 버튼 넣기
+        top_layout.addWidget(self.btn_calc)
         top_layout.addSpacing(10)
         top_layout.addWidget(self.btn_refresh)
         top_layout.addStretch(1)
@@ -62,8 +60,8 @@ class WorkerPage(QtWidgets.QWidget):
         # 2. 근무 기록 테이블
         # ----------------------------------------------------
         self.work_table = Table([
-            "ID", "일자", "출근(요청)", "퇴근(요청)", "상태",
-            "확정 출근", "확정 퇴근", "사업주 비고"
+            "ID", "일자", "작업시작(요청)", "퇴근(요청)", "상태",
+            "확정 시작", "확정 종료", "관리자 승인/비고"
         ])
         self.work_table.setColumnWidth(0, 0)  # ID 숨김
 
@@ -103,7 +101,7 @@ class WorkerPage(QtWidgets.QWidget):
         layout.addWidget(header)
         layout.addLayout(top_layout)
 
-        layout.addWidget(QtWidgets.QLabel("<b>[나의 근무 기록]</b>"))
+        layout.addWidget(QtWidgets.QLabel("<b>[나의 근무 기록]</b> - 승인이 완료되어야 실제 근무로 인정됩니다."))
         layout.addWidget(self.filter)
         layout.addWidget(self.work_table)
 
@@ -122,20 +120,32 @@ class WorkerPage(QtWidgets.QWidget):
     def _update_action_button(self):
         today_log = self.db.get_today_work_log(self.session.user_id)
 
-        if not today_log:
-            self.btn_action.setText("출근하기 (Clock In)")
+        # 1. 기록이 없거나, 있더라도 '반려(REJECTED)'된 상태라면 -> [작업시작요청] 가능
+        if not today_log or today_log["status"] == "REJECTED":
+            self.btn_action.setText("작업시작요청")
             self.btn_action.setStyleSheet(
                 "background-color: #4CAF50; color: white; font-weight: bold; font-size: 14px;")
             self.btn_action.setProperty("mode", "IN")
             self.btn_action.setEnabled(True)
+
+        # 2. 승인 대기중 (PENDING) -> 대기 상태
+        elif today_log["status"] == "PENDING":
+            self.btn_action.setText("승인 대기중")
+            self.btn_action.setStyleSheet("background-color: #FF9800; color: white; font-weight: bold;")
+            self.btn_action.setProperty("mode", "WAIT")
+            self.btn_action.setEnabled(False)
+
+        # 3. 근무중 (WORKING) -> 퇴근 요청 가능
         elif today_log["status"] == "WORKING":
-            self.btn_action.setText("퇴근하기 (Clock Out)")
+            self.btn_action.setText("퇴근요청")
             self.btn_action.setStyleSheet(
                 "background-color: #f44336; color: white; font-weight: bold; font-size: 14px;")
             self.btn_action.setProperty("mode", "OUT")
             self.btn_action.setEnabled(True)
+
+        # 4. 퇴근 완료(APPROVED) 등 -> 종료
         else:
-            self.btn_action.setText("금일 근무 종료")
+            self.btn_action.setText("금일 작업 종료")
             self.btn_action.setStyleSheet("background-color: #9e9e9e; color: white;")
             self.btn_action.setProperty("mode", "DONE")
             self.btn_action.setEnabled(False)
@@ -144,21 +154,42 @@ class WorkerPage(QtWidgets.QWidget):
         mode = self.btn_action.property("mode")
         try:
             if mode == "IN":
-                if Message.confirm(self, "출근", "지금 출근하시겠습니까?"):
+                # 커스텀 알림창 생성
+                msg_box = QtWidgets.QMessageBox(self)
+                msg_box.setWindowTitle("작업 시작 확인")
+                msg_box.setIcon(QtWidgets.QMessageBox.Warning)
+                msg_box.setText("반드시 작업 시작시 작업 시작 요청을 해야합니다.\n\n작업 준비 시간은 실제 근무시간에 포함되지 않습니다.")
+
+                # 버튼 추가 (이해했습니다 / 준비하러갈게요)
+                btn_yes = msg_box.addButton("이해했습니다", QtWidgets.QMessageBox.YesRole)
+                btn_no = msg_box.addButton("준비하러갈게요", QtWidgets.QMessageBox.NoRole)
+
+                msg_box.exec_()
+
+                if msg_box.clickedButton() == btn_yes:
+                    # DB에 시작 요청 기록 (PENDING 상태)
                     self.db.start_work(self.session.user_id)
-
-                    # ▼ [추가됨] 출근 성공 시 자동 백업
                     backup_manager.run_backup("request_in")
+                    Message.info(self, "요청 완료", "관리자에게 승인 요청을 보냈습니다.")
+                else:
+                    # 취소 시 아무 동작 안함
+                    return
 
-                    Message.info(self, "완료", "출근 처리되었습니다.")
             elif mode == "OUT":
-                if Message.confirm(self, "퇴근", "지금 퇴근하시겠습니까?"):
+                # 퇴근 요청 (추가 확인 없이 바로, 혹은 간단한 확인 후)
+                if Message.confirm(self, "퇴근 요청", "작업을 모두 마치고 퇴근 승인을 요청하시겠습니까?"):
                     self.db.end_work(self.session.user_id)
-
-                    # ▼ [추가됨] 퇴근 성공 시 자동 백업
                     backup_manager.run_backup("request_out")
 
-                    Message.info(self, "완료", "퇴근 처리되었습니다.")
+                    # 3초 후 자동 닫히는 알림창
+                    auto_close_dlg = QtWidgets.QMessageBox(self)
+                    auto_close_dlg.setWindowTitle("퇴근")
+                    auto_close_dlg.setText("수고하셨습니다.")
+                    auto_close_dlg.setStandardButtons(QtWidgets.QMessageBox.NoButton)  # 버튼 없음
+
+                    # 3초(3000ms) 뒤에 자동으로 닫힘
+                    QtCore.QTimer.singleShot(3000, auto_close_dlg.accept)
+                    auto_close_dlg.exec_()
 
             self.refresh()
             self._update_action_button()
@@ -173,7 +204,6 @@ class WorkerPage(QtWidgets.QWidget):
         for r in rows:
             rr = dict(r)
             st = rr["status"]
-            # ★ [수정] settings.py 의 WORK_STATUS 사용 (중복 코드 제거됨)
             status_str = WORK_STATUS.get(st, st)
 
             out.append([
@@ -274,7 +304,6 @@ class WorkerPage(QtWidgets.QWidget):
         Message.warn(self, "알림", "이의 제기 내역 또는 근무 기록을 먼저 선택해주세요.")
 
     def calculate_my_salary(self):
-        # 1. 내 시급 정보 가져오기 (DB에서 최신 정보 조회)
         user_info = self.db.get_user_by_username(self.session.username)
         if not user_info:
             Message.err(self, "오류", "사용자 정보를 찾을 수 없습니다.")
@@ -288,7 +317,6 @@ class WorkerPage(QtWidgets.QWidget):
 
         d1, d2 = dlg.get_range()
 
-        # 2. 기간 입력 받기
         today_str = datetime.now().strftime("%Y-%m-%d")
         first_day = datetime.now().replace(day=1).strftime("%Y-%m-%d")
 
@@ -310,15 +338,12 @@ class WorkerPage(QtWidgets.QWidget):
             Message.err(self, "오류", "날짜 형식이 올바르지 않습니다.")
             return
 
-        # 3. '내' 근무 기록 중 '확정(APPROVED)'된 것만 조회
-        #    (list_all_work_logs 함수를 재사용하되 user_id 필터 적용)
         logs = self.db.list_all_work_logs(self.session.user_id, d1, d2, status_filter='APPROVED')
 
         if not logs:
             Message.info(self, "조회 결과", "해당 기간에 확정(승인)된 근무 기록이 없습니다.\n(아직 승인 대기 중인 기록은 계산에 포함되지 않습니다.)")
             return
 
-        # 4. 계산기 가동
         log_dicts = [dict(r) for r in logs]
         calc = SalaryCalculator(wage_per_hour=hourly_wage)
         res = calc.calculate_period(log_dicts)
@@ -327,7 +352,6 @@ class WorkerPage(QtWidgets.QWidget):
             Message.info(self, "결과", "계산할 데이터가 없습니다.")
             return
 
-        # 5. 결과 보여주기 (주휴수당 상세 내역 포함)
         final_pay = res['grand_total']
 
         details = res.get('ju_hyu_details', [])
@@ -349,8 +373,3 @@ class WorkerPage(QtWidgets.QWidget):
         )
 
         QtWidgets.QMessageBox.information(self, "예상 급여 내역", msg)
-
-
-
-
-

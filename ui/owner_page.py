@@ -13,8 +13,8 @@ from timeclock.excel_maker import generate_payslip, create_default_template
 from timeclock.utils import Message
 from ui.widgets import DateRangeBar, Table
 from timeclock.settings import WORK_STATUS, SIGNUP_STATUS
-from ui.dialogs import ChangePasswordDialog, DisputeTimelineDialog, DateRangeDialog # ◀ 추가
-from timeclock.salary import SalaryCalculator  # [NEW]
+from ui.dialogs import ChangePasswordDialog, DisputeTimelineDialog, DateRangeDialog
+from timeclock.salary import SalaryCalculator
 
 
 class OwnerPage(QtWidgets.QWidget):
@@ -73,50 +73,55 @@ class OwnerPage(QtWidgets.QWidget):
         self.filter_work = DateRangeBar(label="조회기간")
         self.filter_work.applied.connect(lambda *_: self.refresh_work_logs())
 
-        # [추가] 상태 필터 콤보박스
         self.cb_work_status = QtWidgets.QComboBox()
-
-        self.cb_work_status.addItem("승인 대기 (처리 필요)", "PENDING")
-        self.cb_work_status.addItem("승인 완료 (확정됨)", "APPROVED")
-        self.cb_work_status.addItem("근무 중", "WORKING")
+        self.cb_work_status.addItem("승인 대기 (요청 확인필요)", "PENDING")
+        self.cb_work_status.addItem("근무 중 (작업 승인됨)", "WORKING")
+        self.cb_work_status.addItem("승인 완료 (퇴근 확정됨)", "APPROVED")
         self.cb_work_status.addItem("전체 보기", "ALL")
         self.cb_work_status.currentIndexChanged.connect(lambda *_: self.refresh_work_logs())
 
         self.btn_work_refresh = QtWidgets.QPushButton("새로고침")
         self.btn_work_refresh.clicked.connect(self.refresh_work_logs)
 
-        # ... (기존 버튼들: edit_start, edit_end 등) ...
-        self.btn_edit_start = QtWidgets.QPushButton("출근 승인/수정")
+        # 작업시작 승인 버튼
+        self.btn_edit_start = QtWidgets.QPushButton("작업시작 승인 (시간정정)")
         self.btn_edit_start.setStyleSheet("font-weight: bold; color: #004d40; background-color: #e0f2f1;")
         self.btn_edit_start.clicked.connect(lambda: self.approve_selected_log(mode="START"))
 
-        self.btn_edit_end = QtWidgets.QPushButton("퇴근 승인/수정")
+        # 작업시작 반려 버튼 (요청 삭제)
+        self.btn_reject_start = QtWidgets.QPushButton("작업시작 반려")
+        self.btn_reject_start.setStyleSheet("font-weight: bold; color: #fff; background-color: #757575;")
+        self.btn_reject_start.clicked.connect(self.reject_start_request)
+
+        # 퇴근 승인 버튼
+        self.btn_edit_end = QtWidgets.QPushButton("퇴근 승인 (마감)")
         self.btn_edit_end.setStyleSheet("font-weight: bold; color: #b71c1c; background-color: #ffebee;")
         self.btn_edit_end.clicked.connect(lambda: self.approve_selected_log(mode="END"))
 
         self.work_table = Table([
-            "ID", "일자", "근로자", "출근(요청)", "퇴근(요청)", "상태",
-            "확정 출근", "확정 퇴근", "비고(코멘트)"
+            "ID", "일자", "근로자",
+            "작업시작요청시간", "작업종료요청시간", "상태",
+            "작업시작확정시간", "작업종료확정시간", "비고(코멘트)"
         ])
         self.work_table.setColumnWidth(0, 0)
 
-        # [수정] 상단 레이아웃에 콤보박스 추가
         top_layout = QtWidgets.QHBoxLayout()
         top_layout.addWidget(self.filter_work)
-        top_layout.addWidget(self.cb_work_status)  # 콤보박스 배치
+        top_layout.addWidget(self.cb_work_status)
         top_layout.addWidget(self.btn_work_refresh)
         top_layout.addStretch(1)
 
-        # 버튼 레이아웃
         btn_layout = QtWidgets.QHBoxLayout()
         btn_layout.addWidget(self.btn_edit_start)
+        btn_layout.addWidget(self.btn_reject_start)  # 반려 버튼 배치
+        btn_layout.addSpacing(20)  # 간격 띄우기
         btn_layout.addWidget(self.btn_edit_end)
         btn_layout.addStretch(1)
 
         l = QtWidgets.QVBoxLayout()
         l.addLayout(top_layout)
         l.addLayout(btn_layout)
-        l.addWidget(QtWidgets.QLabel("※ 출근 시간만 고치려면 '출근 승인', 퇴근까지 확정하려면 '퇴근 승인'을 누르세요."))
+        l.addWidget(QtWidgets.QLabel("※ '반려' 시 해당 요청은 반려 처리되며(기록 보존), 근로자는 다시 요청할 수 있게 됩니다."))
         l.addWidget(self.work_table)
 
         w = QtWidgets.QWidget()
@@ -125,12 +130,9 @@ class OwnerPage(QtWidgets.QWidget):
 
     def refresh_work_logs(self):
         d1, d2 = self.filter_work.get_range()
-
-        # [추가] 현재 선택된 상태값 가져오기
         status_filter = self.cb_work_status.currentData()
 
         try:
-            # [수정] status_filter 인자 전달
             rows = self.db.list_all_work_logs(None, d1, d2, status_filter=status_filter)
             self._work_rows = rows
 
@@ -140,10 +142,19 @@ class OwnerPage(QtWidgets.QWidget):
                 st = rr["status"]
                 st_str = WORK_STATUS.get(st, st)
 
+                # [수정] 근로자 이름 표시 형식: 성함(ID) 또는 ID(ID)
+                name = rr.get("worker_name")
+                uid = rr["worker_username"]
+
+                if name:
+                    display_name = f"{name} ({uid})"
+                else:
+                    display_name = f"{uid} ({uid})"
+
                 out.append([
                     str(rr["id"]),
                     rr["work_date"],
-                    rr["worker_username"],
+                    display_name,  # 변경된 이름 형식 적용
                     rr["start_time"] or "",
                     rr["end_time"] or "",
                     st_str,
@@ -175,20 +186,45 @@ class OwnerPage(QtWidgets.QWidget):
                     app_start, app_end, comment
                 )
 
-                # ▼ [추가됨] 승인 성공 시 자동 백업 (구글드라이브 + PC)
                 backup_manager.run_backup("approve")
 
-                msg = "출근 시간이 수정되었습니다." if mode == "START" else "퇴근 승인(수정)이 완료되었습니다."
+                msg = "작업 시작이 승인되었습니다." if mode == "START" else "퇴근이 승인되었습니다."
                 Message.info(self, "성공", msg)
                 self.refresh_work_logs()
             except Exception as e:
                 Message.err(self, "오류", f"처리 중 오류: {e}")
 
+    # [추가] 작업 시작 반려(삭제) 기능
+    def reject_start_request(self):
+        row_idx = self.work_table.selected_first_row_index()
+        if row_idx < 0:
+            Message.warn(self, "알림", "반려할 요청을 선택하세요.")
+            return
+
+        target_row = dict(self._work_rows[row_idx])
+
+        # 이미 근무중이거나 완료된 건은 경고
+        if target_row["status"] in ["WORKING", "APPROVED"]:
+            if not Message.confirm(self, "경고", "이미 승인된 작업입니다. 반려 처리하시겠습니까?\n(기록은 남지만 근무 시간에서는 제외됩니다.)"):
+                return
+        else:
+            if not Message.confirm(self, "반려 확인", "해당 작업 요청을 반려하시겠습니까?\n근로자는 다시 요청을 보낼 수 있게 되며,\n이 기록은 '반려' 상태로 남습니다."):
+                return
+
+        try:
+            # ★ 삭제(delete) 대신 반려(reject) 함수 호출
+            self.db.reject_work_log(target_row["id"])
+
+            backup_manager.run_backup("reject_log")
+            Message.info(self, "완료", "작업 요청이 반려되었습니다.\n근로자는 다시 요청할 수 있습니다.")
+            self.refresh_work_logs()
+        except Exception as e:
+            Message.err(self, "오류", f"반려 처리 실패: {e}")
+
     # ==========================================================
     # 2. 회원(급여) 관리 탭
     # ==========================================================
     def _build_member_tab(self):
-        # 1. 검색 및 필터 컨트롤
         self.le_member_search = QtWidgets.QLineEdit()
         self.le_member_search.setPlaceholderText("이름 검색...")
         self.le_member_search.returnPressed.connect(self.refresh_members)
@@ -202,19 +238,14 @@ class OwnerPage(QtWidgets.QWidget):
         self.btn_member_search = QtWidgets.QPushButton("검색")
         self.btn_member_search.clicked.connect(self.refresh_members)
 
-        # 2. 기능 버튼들 생성 (★ 순서 중요: addWidget 전에 무조건 생성되어야 함)
-
-        # [시급 변경]
         self.btn_edit_wage = QtWidgets.QPushButton("시급 변경")
         self.btn_edit_wage.setStyleSheet("background-color: #E3F2FD; color: #0D47A1;")
         self.btn_edit_wage.clicked.connect(self.edit_wage)
 
-        # [급여 정산]
         self.btn_calc_salary = QtWidgets.QPushButton("급여 정산")
         self.btn_calc_salary.setStyleSheet("background-color: #fff3e0; color: #e65100; font-weight: bold;")
         self.btn_calc_salary.clicked.connect(self.calculate_salary)
 
-        # [명세서 발급] (★ 여기가 누락되었거나 순서가 뒤였을 수 있음)
         self.btn_export_payslip = QtWidgets.QPushButton("명세서 발급 (Excel)")
         try:
             self.btn_export_payslip.clicked.disconnect()
@@ -223,34 +254,27 @@ class OwnerPage(QtWidgets.QWidget):
         self.btn_export_payslip.setStyleSheet("background-color: #e8f5e9; color: #1b5e20; font-weight: bold;")
         self.btn_export_payslip.clicked.connect(self.export_payslip)
 
-
-
-        # [퇴사 처리]
         self.btn_resign = QtWidgets.QPushButton("퇴사 처리")
         self.btn_resign.setStyleSheet("background-color: #ffebee; color: #b71c1c;")
         self.btn_resign.clicked.connect(self.resign_worker)
 
-        # 3. 레이아웃 배치
         top_layout = QtWidgets.QHBoxLayout()
         top_layout.addWidget(self.le_member_search)
         top_layout.addWidget(self.cb_member_filter)
         top_layout.addWidget(self.btn_member_search)
-        top_layout.addStretch(1)  # 중간 여백
+        top_layout.addStretch(1)
 
-        # 버튼들 순서대로 추가
         top_layout.addWidget(self.btn_edit_wage)
         top_layout.addWidget(self.btn_calc_salary)
-        top_layout.addWidget(self.btn_export_payslip)  # 생성된 버튼 추가
+        top_layout.addWidget(self.btn_export_payslip)
         top_layout.addWidget(self.btn_resign)
 
-        # 4. 테이블 구성
         self.member_table = Table([
             "ID", "아이디", "성함", "전화번호", "생년월일", "시급", "가입일", "상태"
         ])
         self.member_table.setColumnWidth(0, 0)
         self.member_table.itemDoubleClicked.connect(self.edit_wage)
 
-        # 전체 레이아웃 조합
         l = QtWidgets.QVBoxLayout()
         l.addLayout(top_layout)
         l.addWidget(self.member_table)
@@ -258,7 +282,6 @@ class OwnerPage(QtWidgets.QWidget):
         w = QtWidgets.QWidget()
         w.setLayout(l)
         return w
-
 
     def refresh_members(self):
         keyword = self.le_member_search.text().strip()
@@ -273,13 +296,12 @@ class OwnerPage(QtWidgets.QWidget):
                 wage_str = f"{rr['hourly_wage']:,}" if rr['hourly_wage'] else "0"
                 status = "재직중" if rr['is_active'] else "퇴사"
 
-                # [수정] 데이터 매핑 (없는 경우 빈칸 처리)
                 out.append([
                     str(rr['id']),
                     rr['username'],
-                    rr.get('name') or "",  # 성함
-                    rr.get('phone') or "",  # 전화번호
-                    rr.get('birthdate') or "",  # 생년월일
+                    rr.get('name') or "",
+                    rr.get('phone') or "",
+                    rr.get('birthdate') or "",
                     wage_str,
                     rr['created_at'],
                     status
@@ -289,7 +311,6 @@ class OwnerPage(QtWidgets.QWidget):
             Message.err(self, "오류", f"회원 목록 로드 실패: {e}")
 
     def resign_worker(self):
-        """퇴사 처리 버튼 핸들러"""
         row = self.member_table.selected_first_row_index()
         if row < 0:
             Message.warn(self, "알림", "퇴사 처리할 직원을 선택하세요.")
@@ -469,11 +490,7 @@ class OwnerPage(QtWidgets.QWidget):
             for r in rows:
                 rr = dict(r)
                 phone = rr.get("phone", "")
-
-                # DB의 영어 상태값
                 raw_status = rr["status"]
-
-                # [수정] settings.py에서 가져온 표를 사용 (없으면 영어 그대로 표시)
                 status_str = SIGNUP_STATUS.get(raw_status, raw_status)
 
                 data.append([
@@ -482,7 +499,7 @@ class OwnerPage(QtWidgets.QWidget):
                     phone,
                     rr["birthdate"],
                     rr["created_at"],
-                    status_str  # 한글로 변환된 값
+                    status_str
                 ])
             self.signup_table.set_rows(data)
         except Exception as e:
@@ -525,11 +542,8 @@ class OwnerPage(QtWidgets.QWidget):
                 self.db.change_password(self.session.user_id, pw)
                 Message.info(self, "성공", "비밀번호가 변경되었습니다.")
 
-        # OwnerPage 클래스 내부 메서드로 추가
-
     def calculate_salary(self):
         try:
-            # 1. 대상 선택 확인
             row = self.member_table.selected_first_row_index()
             if row < 0:
                 Message.warn(self, "알림", "급여를 정산할 직원을 목록에서 선택하세요.")
@@ -537,24 +551,19 @@ class OwnerPage(QtWidgets.QWidget):
 
             rr = dict(self._member_rows[row])
             user_id = rr['id']
-            username = rr['username']
             hourly_wage = rr['hourly_wage'] or 0
 
-            # 2. 기간 선택 (달력 팝업)
             dlg = DateRangeDialog(self)
             if dlg.exec_() != QtWidgets.QDialog.Accepted:
-                return  # 취소 시 중단
+                return
 
             d1, d2 = dlg.get_range()
-
-            # 3. DB에서 확정된(APPROVED) 근무 기록만 가져오기
             logs = self.db.list_all_work_logs(user_id, d1, d2, status_filter='APPROVED')
 
             if not logs:
                 Message.info(self, "결과", "해당 기간에 승인된 근무 기록이 없습니다.")
                 return
 
-            # 4. 계산기 가동
             calc = SalaryCalculator(wage_per_hour=hourly_wage)
             res = calc.calculate_period([dict(r) for r in logs])
 
@@ -562,10 +571,7 @@ class OwnerPage(QtWidgets.QWidget):
                 Message.info(self, "결과", "계산할 데이터가 없습니다.")
                 return
 
-            # 5. 결과 문자열 만들기 (새로운 salary.py 로직 반영)
             final_pay = res['grand_total']
-
-            # 주휴수당 상세 내역
             details = res.get('ju_hyu_details', [])
             if details:
                 detail_str = " + ".join([f"{x:,}" for x in details])
@@ -573,7 +579,6 @@ class OwnerPage(QtWidgets.QWidget):
             else:
                 ju_hyu_msg = f"주휴수당: {res['ju_hyu_pay']:,}원"
 
-            # 메시지 구성 (연장/야간 분리 표시)
             msg = (
                 f"[{d1} ~ {d2} 급여 정산 결과]\n\n"
                 f"• 총 근무시간: {res['total_hours']}시간\n"
@@ -586,17 +591,13 @@ class OwnerPage(QtWidgets.QWidget):
                 f"---------------------------------------\n"
                 f"💰 예상 지급 총액: {final_pay:,}원"
             )
-
             QtWidgets.QMessageBox.information(self, "예상 급여 내역", msg)
-
         except Exception as e:
             import traceback
             traceback.print_exc()
             Message.err(self, "오류", f"계산 중 오류가 발생했습니다.\n{e}")
 
-    #
     def export_payslip(self):
-        # 1. 직원 선택 확인
         row = self.member_table.selected_first_row_index()
         if row < 0:
             Message.warn(self, "알림", "명세서를 발급할 직원을 선택하세요.")
@@ -608,23 +609,19 @@ class OwnerPage(QtWidgets.QWidget):
         real_name = rr.get('name') or username
         hourly_wage = rr['hourly_wage'] or 0
 
-        # 2. 기간 선택
         dlg = DateRangeDialog(self)
         if dlg.exec_() != QtWidgets.QDialog.Accepted: return
         d1, d2 = dlg.get_range()
 
-        # 3. 데이터 조회
         logs = self.db.list_all_work_logs(user_id, d1, d2, status_filter='APPROVED')
         if not logs:
             Message.warn(self, "알림", "해당 기간에 승인된 근무 기록이 없습니다.")
             return
 
-        # 4. 급여 계산
         calc = SalaryCalculator(hourly_wage)
         res = calc.calculate_period([dict(r) for r in logs])
         total_pay = res['grand_total']
 
-        # 5. 공제 계산
         ei_tax = int(total_pay * 0.009 / 10) * 10
         pension = 0
         health = 0
@@ -634,8 +631,6 @@ class OwnerPage(QtWidgets.QWidget):
         total_deduction = ei_tax + pension + health + care + income_tax + local_tax
         net_pay = total_pay - total_deduction
 
-        # 6. 상세 문구 작성
-        # (1) 시간 역산
         over_hours = 0
         night_hours = 0
         ju_hyu_hours = 0
@@ -644,7 +639,6 @@ class OwnerPage(QtWidgets.QWidget):
             night_hours = round(res['night_pay'] / (hourly_wage * 0.5), 1)
             ju_hyu_hours = round(res['ju_hyu_pay'] / hourly_wage, 1)
 
-        # (2) 텍스트 생성
         break_time = round(res['total_hours'] - res['actual_hours'], 1)
         calc_str = f"• 근태: 총 {res['total_hours']}h - 휴게 {break_time}h = 실 근무 {res['actual_hours']}h"
         base_str = f"• 기본급: {res['actual_hours']}시간 × {hourly_wage:,}원 = {res['base_pay']:,}원"
@@ -673,14 +667,12 @@ class OwnerPage(QtWidgets.QWidget):
         else:
             note_text = "※ 본 명세서는 근로기준법 제48조에 따라 교부합니다."
 
-        # 7. 엑셀 데이터 매핑
         data_ctx = {
             "title": f"{d1[:4]}년 {d1[5:7]}월 급여명세서",
             "name": real_name,
             "period": f"{d1} ~ {d2}",
             "pay_date": datetime.now().strftime("%Y-%m-%d"),
             "company": "Hobby Store",
-
             "base_pay": res['base_pay'],
             "ju_hyu_pay": res['ju_hyu_pay'],
             "overtime_pay": res['overtime_pay'],
@@ -688,7 +680,6 @@ class OwnerPage(QtWidgets.QWidget):
             "holiday_pay": res['holiday_pay'],
             "other_pay": 0,
             "total_pay": total_pay,
-
             "ei_ins": ei_tax,
             "pension": pension,
             "health_ins": health,
@@ -697,7 +688,6 @@ class OwnerPage(QtWidgets.QWidget):
             "local_tax": local_tax,
             "total_deduction": total_deduction,
             "net_pay": net_pay,
-
             "calc_detail": calc_str,
             "base_detail": base_str,
             "over_detail": over_str,
@@ -706,11 +696,8 @@ class OwnerPage(QtWidgets.QWidget):
             "note": note_text
         }
 
-        # 8. 파일 생성 및 저장
         try:
             template_path = DATA_DIR / "template.xlsx"
-
-            # ★ [핵심 수정] 파일이 없으면 에러 내지 말고, 즉시 생성!
             if not template_path.exists():
                 print(f"템플릿이 없어서 새로 만듭니다: {template_path}")
                 create_default_template(str(template_path))
@@ -731,9 +718,7 @@ class OwnerPage(QtWidgets.QWidget):
             )
 
             if save_path:
-                # 파일 생성
                 result = generate_payslip(str(template_path), save_path, data_ctx)
-
                 if result:
                     Message.info(self, "완료", f"급여명세서가 생성되었습니다.\n{save_path}")
                     try:
@@ -744,25 +729,20 @@ class OwnerPage(QtWidgets.QWidget):
                     Message.err(self, "실패", "엑셀 파일 생성 중 오류가 발생했습니다.")
 
         except Exception as e:
-            print("=" * 50)
             import traceback
             traceback.print_exc()
-            print("=" * 50)
             Message.err(self, "오류", f"처리 중 오류 발생: {e}")
 
-    #
     # ==========================================================
-    # 5. 데이터 복구 탭 (새로 추가된 기능)
+    # 5. 데이터 복구 탭
     # ==========================================================
     def _build_restore_tab(self):
         layout = QtWidgets.QVBoxLayout()
 
-        # 안내 문구
         lbl_info = QtWidgets.QLabel("⚠️ 원하는 시점을 선택하고 [복구]를 누르면, 데이터가 그 시절로 돌아갑니다.")
         lbl_info.setStyleSheet("color: #d32f2f; font-weight: bold; margin: 10px;")
         layout.addWidget(lbl_info)
 
-        # 버튼들
         btn_layout = QtWidgets.QHBoxLayout()
         btn_refresh = QtWidgets.QPushButton("🔄 목록 새로고침")
         btn_refresh.clicked.connect(self.refresh_backup_list)
@@ -773,24 +753,21 @@ class OwnerPage(QtWidgets.QWidget):
         btn_layout.addWidget(btn_manual)
         layout.addLayout(btn_layout)
 
-        # 테이블 (리스트)
         self.table_backup = QtWidgets.QTableWidget()
         self.table_backup.setColumnCount(4)
         self.table_backup.setHorizontalHeaderLabels(["저장 시각", "저장 이유", "크기", "파일명(숨김)"])
         self.table_backup.horizontalHeader().setSectionResizeMode(0, QtWidgets.QHeaderView.Stretch)
         self.table_backup.horizontalHeader().setSectionResizeMode(1, QtWidgets.QHeaderView.Stretch)
-        self.table_backup.setColumnHidden(3, True)  # 파일명은 숨김
+        self.table_backup.setColumnHidden(3, True)
         self.table_backup.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
         self.table_backup.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
         layout.addWidget(self.table_backup)
 
-        # 복구 버튼
         self.btn_restore = QtWidgets.QPushButton("⏳ 선택한 시점으로 되돌리기 (복구)")
         self.btn_restore.setStyleSheet("background-color: #d32f2f; color: white; font-weight: bold; padding: 12px;")
         self.btn_restore.clicked.connect(self.run_restore)
         layout.addWidget(self.btn_restore)
 
-        # 탭 만들어질 때 리스트 로딩
         self.refresh_backup_list()
 
         w = QtWidgets.QWidget()
@@ -798,7 +775,6 @@ class OwnerPage(QtWidgets.QWidget):
         return w
 
     def refresh_backup_list(self):
-        """백업 매니저에서 목록을 가져와 테이블 갱신"""
         data = backup_manager.get_backup_list()
         self.table_backup.setRowCount(0)
 
@@ -812,7 +788,6 @@ class OwnerPage(QtWidgets.QWidget):
             self.table_backup.setItem(row, 3, QtWidgets.QTableWidgetItem(item['filename']))
 
     def manual_backup(self):
-        """수동 저장 버튼 클릭 시"""
         res = QtWidgets.QMessageBox.question(self, "저장", "현재 데이터를 백업하시겠습니까?",
                                              QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
         if res == QtWidgets.QMessageBox.Yes:
@@ -824,7 +799,6 @@ class OwnerPage(QtWidgets.QWidget):
             self.refresh_backup_list()
 
     def run_restore(self):
-        """복구 버튼 클릭 시"""
         row = self.table_backup.currentRow()
         if row < 0:
             Message.warn(self, "선택", "복구할 시점을 목록에서 선택해주세요.")
@@ -848,10 +822,11 @@ class OwnerPage(QtWidgets.QWidget):
             if ok:
                 QtWidgets.QMessageBox.information(self, "복구 완료",
                                                   "데이터가 성공적으로 복구되었습니다.\n안전한 적용을 위해 프로그램이 종료됩니다.\n다시 실행해주세요.")
-                QtWidgets.QApplication.quit()  # 프로그램 종료 (재시작 유도)
+                QtWidgets.QApplication.quit()
             else:
                 Message.err(self, "오류", result_msg)
             self.refresh_backup_list()
+
 
 class WorkLogApproveDialog(QtWidgets.QDialog):
     def __init__(self, parent=None, row_data=None, mode="START"):
@@ -860,9 +835,9 @@ class WorkLogApproveDialog(QtWidgets.QDialog):
         self.mode = mode
 
         if self.mode == "START":
-            self.setWindowTitle("출근 시간 승인/수정")
+            self.setWindowTitle("작업 시작 승인 (시간 확정)")
         else:
-            self.setWindowTitle("퇴근 시간 승인/수정")
+            self.setWindowTitle("퇴근 승인 (시간 확정)")
 
         self.resize(450, 250)
 
@@ -898,11 +873,15 @@ class WorkLogApproveDialog(QtWidgets.QDialog):
             self.dte_end.setDateTime(QtCore.QDateTime.currentDateTime())
 
         if self.mode == "START":
+            # 시작 승인 시 퇴근시간은 수정 불가
             self.dte_end.setEnabled(False)
             self.dte_end.setStyleSheet("color: #aaa; background-color: #eee;")
+            self.dte_start.setStyleSheet("font-weight: bold; background-color: #e0f2f1;")
         else:
+            # 퇴근 승인 시 시작시간은 수정 불가
             self.dte_start.setEnabled(False)
             self.dte_start.setStyleSheet("color: #aaa; background-color: #eee;")
+            self.dte_end.setStyleSheet("font-weight: bold; background-color: #ffebee;")
 
         self.cb_comment = QtWidgets.QComboBox()
         self.cb_comment.setEditable(True)
@@ -920,17 +899,17 @@ class WorkLogApproveDialog(QtWidgets.QDialog):
         if old_comment:
             self.cb_comment.setCurrentText(old_comment)
 
-        form.addRow("확정 출근시각", self.dte_start)
-        form.addRow("확정 퇴근시각", self.dte_end)
+        form.addRow("확정 시작시각", self.dte_start)
+        form.addRow("확정 종료시각", self.dte_end)
         form.addRow("비고(사유)", self.cb_comment)
 
         layout.addLayout(form)
 
         btns = QtWidgets.QHBoxLayout()
-        btn_label = "출근 확정" if self.mode == "START" else "퇴근 확정"
+        btn_label = "작업 시작 승인" if self.mode == "START" else "퇴근 완료 승인"
 
         self.btn_ok = QtWidgets.QPushButton(btn_label)
-        self.btn_ok.setStyleSheet("font-weight: bold; color: #003366; padding: 6px;")
+        self.btn_ok.setStyleSheet("font-weight: bold; color: white; background-color: #003366; padding: 8px;")
         self.btn_ok.clicked.connect(self.on_ok_clicked)
 
         self.btn_cancel = QtWidgets.QPushButton("취소")
@@ -944,6 +923,7 @@ class WorkLogApproveDialog(QtWidgets.QDialog):
         self.setLayout(layout)
 
     def on_ok_clicked(self):
+        # 퇴근 승인 모드일 때만 휴게시간 체크
         if self.mode == "END" and self.dte_end.isEnabled():
             s_dt = self.dte_start.dateTime()
             e_dt = self.dte_end.dateTime()
@@ -989,16 +969,10 @@ class WorkLogApproveDialog(QtWidgets.QDialog):
 
     def get_data(self):
         s = self.dte_start.dateTime().toString("yyyy-MM-dd HH:mm:ss")
-
-        # [수정] START 모드이면 퇴근 시간은 건드리지 않음 (None으로 처리)
-        if self.mode == "START":
-            e = None
+        if self.mode == "END":
+            e = self.dte_end.dateTime().toString("yyyy-MM-dd HH:mm:ss")
         else:
-            # END 모드일 때만 퇴근 시간 값을 가져감
-            if self.dte_end.isEnabled():
-                e = self.dte_end.dateTime().toString("yyyy-MM-dd HH:mm:ss")
-            else:
-                e = None
+            e = None
 
         c = self.cb_comment.currentText().strip()
         return s, e, c
