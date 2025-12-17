@@ -2065,3 +2065,12 @@ AttributeError: 'DB' object has no attribute 'get_pending_counts'
 2025-12-17 18:04:48,268 [INFO] Login success: owner (owner)
 2025-12-17 18:04:48,268 [INFO] Logged in: owner (owner)
 2025-12-17 18:05:35,915 [INFO] file_cache is only supported with oauth2client<4.0.0
+2025-12-17 18:10:41,047 [INFO] file_cache is only supported with oauth2client<4.0.0
+2025-12-17 18:10:46,078 [INFO] Login success: owner (owner)
+2025-12-17 18:10:46,078 [INFO] Logged in: owner (owner)
+2025-12-17 18:11:23,888 [INFO] file_cache is only supported with oauth2client<4.0.0
+2025-12-17 18:12:28,186 [INFO] file_cache is only supported with oauth2client<4.0.0
+2025-12-17 19:06:40,750 [INFO] Logout: owner
+2025-12-18 01:00:48,267 [INFO] access_token is expired. Now: 2025-12-17 16:00:48.267927, token_expiry: 2025-12-17 09:52:47
+2025-12-18 01:00:48,268 [INFO] Refreshing access_token
+2025-12-18 01:00:48,521 [INFO] file_cache is only supported with oauth2client<4.0.0
