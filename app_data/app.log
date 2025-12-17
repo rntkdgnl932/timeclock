@@ -1956,3 +1956,24 @@ AttributeError: 'OwnerPage' object has no attribute 'btn_export_payslip'
 2025-12-17 09:18:48,905 [INFO] Logout: test01
 2025-12-17 09:18:50,756 [INFO] Login success: owner (owner)
 2025-12-17 09:18:50,756 [INFO] Logged in: owner (owner)
+2025-12-17 09:22:25,038 [INFO] Login success: owner (owner)
+2025-12-17 09:22:25,039 [INFO] Logged in: owner (owner)
+2025-12-17 09:22:39,933 [INFO] Logout: owner
+2025-12-17 09:22:41,383 [INFO] Login success: worker (worker)
+2025-12-17 09:22:41,383 [INFO] Logged in: worker (worker)
+2025-12-17 09:22:48,838 [INFO] Logout: worker
+2025-12-17 09:22:52,538 [INFO] Login success: owner (owner)
+2025-12-17 09:22:52,538 [INFO] Logged in: owner (owner)
+2025-12-17 09:57:12,453 [INFO] Login success: owner (owner)
+2025-12-17 09:57:12,454 [INFO] Logged in: owner (owner)
+2025-12-17 10:04:54,503 [INFO] Login success: owner (owner)
+2025-12-17 10:04:54,504 [INFO] Logged in: owner (owner)
+2025-12-17 10:18:02,443 [INFO] Successfully retrieved access token
+2025-12-17 10:18:02,448 [INFO] file_cache is only supported with oauth2client<4.0.0
+2025-12-17 10:18:02,968 [WARNING] Encountered 403 Forbidden with reason "accessNotConfigured"
+2025-12-17 10:18:10,188 [INFO] file_cache is only supported with oauth2client<4.0.0
+2025-12-17 10:18:10,588 [WARNING] Encountered 403 Forbidden with reason "accessNotConfigured"
+2025-12-17 10:18:12,799 [INFO] Login success: owner (owner)
+2025-12-17 10:18:12,799 [INFO] Logged in: owner (owner)
+2025-12-17 10:23:38,247 [INFO] file_cache is only supported with oauth2client<4.0.0
+2025-12-17 10:23:38,567 [WARNING] Encountered 403 Forbidden with reason "accessNotConfigured"

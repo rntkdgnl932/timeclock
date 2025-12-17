@@ -743,6 +743,24 @@ class OwnerPage(QtWidgets.QWidget):
         lbl_info.setStyleSheet("color: #d32f2f; font-weight: bold; margin: 10px;")
         layout.addWidget(lbl_info)
 
+        # -------------------------------------------------------
+        # [수정] 구글 드라이브 관련 버튼들
+        # -------------------------------------------------------
+        gdrive_layout = QtWidgets.QHBoxLayout()
+
+        self.btn_gdrive_auth = QtWidgets.QPushButton("🌍 1. 구글 연동 (로그인)")
+        self.btn_gdrive_auth.setStyleSheet("background-color: #E8F5E9; color: #2E7D32; font-weight: bold;")
+        self.btn_gdrive_auth.clicked.connect(self.auth_gdrive)
+
+        self.btn_gdrive_test = QtWidgets.QPushButton("🚀 2. 테스트 파일 업로드")
+        self.btn_gdrive_test.setStyleSheet("background-color: #E3F2FD; color: #1565C0; font-weight: bold;")
+        self.btn_gdrive_test.clicked.connect(self.test_gdrive_upload)
+
+        gdrive_layout.addWidget(self.btn_gdrive_auth)
+        gdrive_layout.addWidget(self.btn_gdrive_test)
+        layout.addLayout(gdrive_layout)
+        # -------------------------------------------------------
+
         btn_layout = QtWidgets.QHBoxLayout()
         btn_refresh = QtWidgets.QPushButton("🔄 목록 새로고침")
         btn_refresh.clicked.connect(self.refresh_backup_list)
@@ -773,6 +791,21 @@ class OwnerPage(QtWidgets.QWidget):
         w = QtWidgets.QWidget()
         w.setLayout(layout)
         return w
+
+    # [추가] 핸들러 함수들
+    def auth_gdrive(self):
+        ok, msg = backup_manager.authenticate_gdrive()
+        if ok:
+            Message.info(self, "성공", msg)
+        else:
+            Message.err(self, "실패", msg)
+
+    def test_gdrive_upload(self):
+        ok, msg = backup_manager.test_gdrive_upload()
+        if ok:
+            Message.info(self, "성공", msg)
+        else:
+            Message.err(self, "업로드 실패", msg)
 
     def refresh_backup_list(self):
         data = backup_manager.get_backup_list()
