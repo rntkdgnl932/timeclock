@@ -9,12 +9,10 @@ __pycache__/
 build/
 dist/
 .env
-app_data/
 
 # .gitignore 파일 내용
 client_secrets.json
 mycreds.txt
-__pycache__/
 *.pyc
 app_data/
 timeclock.db
