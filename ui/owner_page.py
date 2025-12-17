@@ -29,44 +29,308 @@ class OwnerPage(QtWidgets.QWidget):
         self._work_rows = []
         self._member_rows = []
 
-        header = QtWidgets.QLabel(f"사업주 화면 - {session.username}")
-        f = header.font()
-        f.setPointSize(14)
-        f.setBold(True)
-        header.setFont(f)
+        # ----------------------------------------------------------
+        # Theme / base style (Owner mode)
+        # ----------------------------------------------------------
+        self._apply_owner_theme()
+
+        # ----------------------------------------------------------
+        # Header (brand + actions)
+        # ----------------------------------------------------------
+        header_panel = QtWidgets.QFrame()
+        header_panel.setObjectName("OwnerHeader")
+        header_panel.setFixedHeight(110)
+
+        header_layout = QtWidgets.QHBoxLayout(header_panel)
+        header_layout.setContentsMargins(28, 18, 28, 18)
+        header_layout.setSpacing(12)
+
+        title_box = QtWidgets.QVBoxLayout()
+        title_box.setSpacing(2)
+
+        logo_label = QtWidgets.QLabel("HobbyBrown")
+        logo_label.setObjectName("OwnerBrand")
+        subtitle_label = QtWidgets.QLabel(f"사업주 관리 모드 | {session.username} 사장님")
+        subtitle_label.setObjectName("OwnerSubtitle")
+
+        title_box.addStretch(1)
+        title_box.addWidget(logo_label)
+        title_box.addWidget(subtitle_label)
+        title_box.addStretch(1)
+
+        header_layout.addLayout(title_box)
+        header_layout.addStretch(1)
 
         self.btn_change_pw = QtWidgets.QPushButton("비밀번호 변경")
         self.btn_logout = QtWidgets.QPushButton("로그아웃")
+
+        self._set_btn_variant(self.btn_change_pw, "ghost")
+        self._set_btn_variant(self.btn_logout, "danger_outline")
+
         self.btn_change_pw.clicked.connect(self.change_password)
         self.btn_logout.clicked.connect(self.logout_requested.emit)
 
-        top_btns = QtWidgets.QHBoxLayout()
-        top_btns.addStretch(1)
-        top_btns.addWidget(self.btn_change_pw)
-        top_btns.addWidget(self.btn_logout)
+        header_layout.addWidget(self.btn_change_pw)
+        header_layout.addWidget(self.btn_logout)
 
-        # 탭 구성
+        # ----------------------------------------------------------
+        # KPI cards row (pending counts)
+        # ----------------------------------------------------------
+        kpi_row = QtWidgets.QHBoxLayout()
+        kpi_row.setContentsMargins(0, 0, 0, 0)
+        kpi_row.setSpacing(12)
+
+        self.kpi_work = self._mk_stat_card("근무 승인 대기", "0", "승인/반려 처리 필요")
+        self.kpi_dispute = self._mk_stat_card("이의제기 진행", "0", "대화/처리 진행 필요")
+        self.kpi_signup = self._mk_stat_card("가입 승인 대기", "0", "직원 가입 요청")
+
+        kpi_row.addWidget(self.kpi_work["frame"])
+        kpi_row.addWidget(self.kpi_dispute["frame"])
+        kpi_row.addWidget(self.kpi_signup["frame"])
+
+        # ----------------------------------------------------------
+        # Main tabs
+        # ----------------------------------------------------------
         self.tabs = QtWidgets.QTabWidget()
-        self.tabs.addTab(self._build_work_log_tab(), "근무 기록 관리 (승인)")
-        self.tabs.addTab(self._build_member_tab(), "회원(급여) 관리")
-        self.tabs.addTab(self._build_dispute_tab(), "이의 제기 관리")
-        self.tabs.addTab(self._build_signup_tab(), "가입 신청 관리")
+        self.tabs.setObjectName("OwnerTabs")
 
-        self.tabs.addTab(self._build_restore_tab(), "데이터 복구 (백업)")
+        self.tabs.addTab(self._build_work_log_tab(), "근무 승인")
+        self.tabs.addTab(self._build_dispute_tab(), "이의 제기")
+        self.tabs.addTab(self._build_signup_tab(), "직원 가입 승인")
+        self.tabs.addTab(self._build_member_tab(), "직원 관리")
+        self.tabs.addTab(self._build_restore_tab(), "백업/복구")
 
-        layout = QtWidgets.QVBoxLayout()
-        layout.addWidget(header)
-        layout.addLayout(top_btns)
-        layout.addWidget(self.tabs)
+        self._tune_owner_tabbar()
 
-        self.setLayout(layout)
+        # container card around tabs
+        tabs_card = QtWidgets.QFrame()
+        tabs_card.setObjectName("OwnerTabsCard")
+        tabs_card_layout = QtWidgets.QVBoxLayout(tabs_card)
+        tabs_card_layout.setContentsMargins(14, 14, 14, 14)
+        tabs_card_layout.addWidget(self.tabs)
 
+        # ----------------------------------------------------------
+        # Root layout
+        # ----------------------------------------------------------
+        root = QtWidgets.QVBoxLayout(self)
+        root.setContentsMargins(24, 18, 24, 24)
+        root.setSpacing(14)
+
+        root.addWidget(header_panel)
+        root.addLayout(kpi_row)
+        root.addWidget(tabs_card, 1)
+
+        # Initial load
         self.refresh_work_logs()
         self.refresh_members()
         self.refresh_disputes()
         self.refresh_signup_requests()
-
         self.update_badges()
+
+        QtCore.QTimer.singleShot(0, self._refresh_kpis)
+
+    # --------------------------------------------------------------
+    # Theme helpers
+    # --------------------------------------------------------------
+    def _apply_owner_theme(self) -> None:
+        # Window base
+        self.setAutoFillBackground(True)
+        pal = self.palette()
+        pal.setColor(QtGui.QPalette.Window, QtGui.QColor("#FCFBF8"))
+        self.setPalette(pal)
+
+        # A single stylesheet for OwnerPage (keeps UI consistent)
+        self.setStyleSheet("""
+            QWidget { font-family: 'Malgun Gothic', 'Segoe UI', sans-serif; font-size: 12px; color: #2b2b2b; }
+            QLabel#OwnerBrand { font-size: 26px; font-weight: 900; letter-spacing: 0.5px; color: #5D4037; }
+            QLabel#OwnerSubtitle { font-size: 13px; color: #6f6f6f; }
+
+            QFrame#OwnerHeader {
+                background: #ffffff;
+                border: 1px solid #ececec;
+                border-radius: 16px;
+            }
+            QFrame#OwnerTabsCard {
+                background: #ffffff;
+                border: 1px solid #ececec;
+                border-radius: 16px;
+            }
+
+            /* Tabs */
+            QTabWidget#OwnerTabs::pane { border: none; }
+            QTabBar::tab {
+                background: transparent;
+                color: #6a6a6a;
+            
+                /* 글자 잘림 체감 줄이기: 높이/패딩 균형 */
+                padding: 10px 18px;
+                min-height: 34px;
+            
+                /* 탭 간격 */
+                margin-right: 8px;
+            
+                border-radius: 12px;
+                font-weight: 700;
+                font-size: 12px;  /* 글자 크기 살짝 안정화 */
+            
+                /* 탭 폭은 내용 길이에 따라 자연스럽게 늘어나게 두되,
+                   너무 작아지지 않도록 하한만 줌 */
+                min-width: 120px;
+            }
+            
+            QTabBar::tab:selected {
+                background: #FFF3E0;
+                color: #5D4037;
+            }
+            
+            QTabBar::tab:hover {
+                background: #f5f5f5;
+            }
+
+
+            /* Inputs */
+            QLineEdit, QComboBox, QDateEdit {
+                background: #ffffff;
+                border: 1px solid #dcdcdc;
+                border-radius: 10px;
+                padding: 6px 10px;
+                min-height: 28px;
+            }
+            QLineEdit:focus, QComboBox:focus, QDateEdit:focus { border: 1px solid #caa57a; }
+
+            /* GroupBox */
+            QGroupBox {
+                border: 1px solid #ececec;
+                border-radius: 14px;
+                margin-top: 12px;
+                padding: 12px;
+                background: #ffffff;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 12px;
+                padding: 0 6px;
+                color: #5D4037;
+                font-weight: 800;
+            }
+
+            /* Buttons (variant by dynamic property) */
+            QPushButton {
+                border-radius: 10px;
+                padding: 8px 14px;
+                font-weight: 800;
+            }
+            QPushButton[variant="primary"] { background: #6D4C41; color: #ffffff; border: 1px solid #6D4C41; }
+            QPushButton[variant="primary"]:hover { background: #5e4036; border-color: #5e4036; }
+            QPushButton[variant="secondary"] { background: #f3f3f3; color: #333; border: 1px solid #e2e2e2; }
+            QPushButton[variant="secondary"]:hover { background: #ededed; }
+
+            QPushButton[variant="ghost"] { background: #ffffff; color: #5D4037; border: 1px solid #e7e7e7; }
+            QPushButton[variant="ghost"]:hover { background: #fafafa; }
+
+            QPushButton[variant="danger_outline"] { background: #ffffff; color: #b71c1c; border: 1px solid #f0c7c7; }
+            QPushButton[variant="danger_outline"]:hover { background: #fff5f5; }
+
+            QPushButton[variant="warn"] { background: #FFF3E0; color: #E65100; border: 1px solid #FFE0B2; }
+            QPushButton[variant="warn"]:hover { background: #FFE0B2; }
+
+            /* Tables (QTableWidget) */
+            QTableWidget {
+                background: #ffffff;
+                border: 1px solid #e9e9e9;
+                border-radius: 12px;
+                gridline-color: #f1f1f1;
+                selection-background-color: #FFE0B2;
+                selection-color: #2b2b2b;
+            }
+            QHeaderView::section {
+                background: #fafafa;
+                border: none;
+                border-bottom: 1px solid #e9e9e9;
+                padding: 8px 10px;
+                font-weight: 900;
+                color: #5D4037;
+            }
+            QTableWidget::item { padding-left: 6px; padding-right: 6px; }
+            QTableWidget::item:selected { background: #FFE0B2; }
+            QScrollBar:vertical { background: transparent; width: 10px; margin: 2px; }
+            QScrollBar::handle:vertical { background: #dcdcdc; border-radius: 5px; min-height: 30px; }
+            QScrollBar::handle:vertical:hover { background: #cfcfcf; }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
+        """)
+
+    def _set_btn_variant(self, btn: QtWidgets.QPushButton, variant: str) -> None:
+        btn.setProperty("variant", variant)
+        btn.setCursor(QtCore.Qt.PointingHandCursor)
+        btn.style().unpolish(btn)
+        btn.style().polish(btn)
+        btn.update()
+
+    def _mk_stat_card(self, title: str, value: str, hint: str):
+        frame = QtWidgets.QFrame()
+        frame.setObjectName("OwnerStatCard")
+        frame.setStyleSheet("""
+            QFrame#OwnerStatCard {
+                background: #ffffff;
+                border: 1px solid #ececec;
+                border-radius: 16px;
+            }
+        """)
+        lay = QtWidgets.QVBoxLayout(frame)
+        lay.setContentsMargins(16, 14, 16, 14)
+        lay.setSpacing(2)
+
+        lbl_t = QtWidgets.QLabel(title)
+        lbl_t.setStyleSheet("color:#6f6f6f; font-weight:800;")
+        lbl_v = QtWidgets.QLabel(value)
+        lbl_v.setStyleSheet("font-size:24px; font-weight:900; color:#5D4037;")
+        lbl_h = QtWidgets.QLabel(hint)
+        lbl_h.setStyleSheet("color:#8a8a8a;")
+
+        lay.addWidget(lbl_t)
+        lay.addWidget(lbl_v)
+        lay.addWidget(lbl_h)
+
+        return {"frame": frame, "title": lbl_t, "value": lbl_v, "hint": lbl_h}
+
+    def _refresh_kpis(self) -> None:
+        try:
+            counts = self.db.get_pending_counts() or {}
+            self.kpi_work["value"].setText(str(int(counts.get("work", 0) or 0)))
+            self.kpi_dispute["value"].setText(str(int(counts.get("dispute", 0) or 0)))
+            self.kpi_signup["value"].setText(str(int(counts.get("signup", 0) or 0)))
+        except Exception:
+            # KPI는 UI 보조 정보이므로 실패해도 화면이 죽지 않게 처리
+            logging.exception("refresh_kpis failed")
+
+    def _tune_owner_tabbar(self) -> None:
+        """
+        탭 글자 잘림 방지:
+        - 탭은 내용 길이대로(width) 잡고
+        - 공간이 부족하면 스크롤 버튼으로 좌/우 이동
+        - 글자 생략(… ) 금지
+        """
+        if not hasattr(self, "tabs") or self.tabs is None:
+            return
+
+        tabs = self.tabs
+        bar = tabs.tabBar()
+
+        # 핵심: 탭을 강제로 균등분할(expand)하지 않게 → 내용 길이대로
+        bar.setExpanding(False)
+
+        # 공간 부족 시 좌/우 스크롤 버튼 표시
+        tabs.setUsesScrollButtons(True)
+
+        # …(엘리드)로 잘라먹지 않게
+        bar.setElideMode(QtCore.Qt.ElideNone)
+
+        # 문서모드: 탭 상단 UI가 더 깔끔해지는 경향
+        tabs.setDocumentMode(True)
+
+        # 탭 클릭 영역/레이아웃 안정화
+        bar.setMovable(False)
+        bar.setDrawBase(False)
 
     # ==========================================================
     # 1. 근무 기록 관리 탭
@@ -192,12 +456,13 @@ class OwnerPage(QtWidgets.QWidget):
         # ★ [수정됨] 탭 인덱스 재설정 (사장님 화면 기준)
         # 0번: 근무 기록 관리 (승인)
         # 1번: 근로자 관리 (배지 없음)
-        # 2번: 이의제기 관리
+        # 2번: 이의 제기 관리
         # 3번: 가입신청관리
 
-        set_tab_style(0, "근무 기록 관리 (승인)", counts["work"])  # 1 -> 0으로 수정
-        set_tab_style(2, "이의제기 관리", counts["dispute"])
-        set_tab_style(3, "가입신청관리", counts["signup"])
+        set_tab_style(0, "근무 승인", counts["work"])  # 1 -> 0으로 수정
+        set_tab_style(2, "직원 가입 승인", counts["dispute"])
+        set_tab_style(3, "직원 관리", counts["signup"])
+        self._refresh_kpis()
 
     # ----------------------------------------------------------------
     # [수정] 작업/퇴근 승인 (오류 수정됨: now_str -> datetime 사용)

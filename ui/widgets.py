@@ -72,6 +72,15 @@ class Table(QtWidgets.QTableWidget):
 
         # 행 높이 고정 (가독성)
         self.verticalHeader().setDefaultSectionSize(24)
+        # ✅ Modern table defaults
+        self.setAlternatingRowColors(True)
+        self.setShowGrid(False)
+        self.setFocusPolicy(QtCore.Qt.NoFocus)
+        self.horizontalHeader().setHighlightSections(False)
+        self.setFrameShape(QtWidgets.QFrame.NoFrame)
+        self.setVerticalScrollMode(QtWidgets.QAbstractItemView.ScrollPerPixel)
+        self.setHorizontalScrollMode(QtWidgets.QAbstractItemView.ScrollPerPixel)
+
 
     def set_rows(self, rows):
         self.setRowCount(0)

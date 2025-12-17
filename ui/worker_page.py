@@ -19,136 +19,145 @@ class WorkerPage(QtWidgets.QWidget):
         self.db = db
         self.session = session
         self._my_dispute_rows = []
+        self.setStyleSheet("background-color: #fcfaf5;")
 
-        header = QtWidgets.QLabel(f"근로자 화면 - {session.username}")
-        f = header.font()
-        f.setPointSize(14)
-        f.setBold(True)
-        header.setFont(f)
+        # 상단 헤더 패널
+        header_card = QtWidgets.QFrame()
+        header_card.setStyleSheet("background-color: white; border-radius: 15px; border: 1px solid #eee;")
+        header_layout = QtWidgets.QHBoxLayout(header_card)
+        header_layout.setContentsMargins(25, 20, 25, 20)
 
-        # ----------------------------------------------------
-        # 1. 상단 컨트롤
-        # ----------------------------------------------------
-        self.filter = DateRangeBar(label="근무 조회기간")
+        title_info = QtWidgets.QVBoxLayout()
+        header_title = QtWidgets.QLabel("HobbyBrown")
+        header_title.setStyleSheet("font-family: 'Arial Rounded MT Bold'; font-size: 22px; color: #5d4037;")
+        user_label = QtWidgets.QLabel(f"{session.username} 근로자님, 오늘도 힘찬 하루 되세요!")
+        user_label.setStyleSheet("font-size: 13px; color: #888;")
+        title_info.addWidget(header_title)
+        title_info.addWidget(user_label)
+        header_layout.addLayout(title_info)
+
+        header_layout.addStretch()
+
+        self.btn_logout = QtWidgets.QPushButton("로그아웃")
+        self.btn_logout.setCursor(QtCore.Qt.PointingHandCursor)
+        self.btn_logout.setStyleSheet("""
+            QPushButton {
+                background-color: #f5f5f5; border-radius: 8px; padding: 8px 15px; color: #666;
+            }
+            QPushButton:hover { background-color: #eee; }
+        """)
+        self.btn_logout.clicked.connect(self.logout_requested.emit)
+        header_layout.addWidget(self.btn_logout)
+
+        # 메인 액션 버튼 (출퇴근 전용)
+        self.btn_action = QtWidgets.QPushButton("작업 시작")
+        self.btn_action.setFixedHeight(60)
+        self.btn_action.setCursor(QtCore.Qt.PointingHandCursor)
+
+        # 중간 컨트롤 바
+        ctrl_layout = QtWidgets.QHBoxLayout()
+        self.filter = DateRangeBar(label="조회기간")
         self.filter.applied.connect(lambda *_: self.refresh())
 
-        self.btn_action = QtWidgets.QPushButton("작업시작요청")
-        self.btn_action.setMinimumHeight(40)
-        self.btn_action.setStyleSheet("font-weight: bold; font-size: 14px;")
-        self.btn_action.clicked.connect(self.on_work_action)
-
-        self.btn_calc = QtWidgets.QPushButton("내 급여 조회")
-        self.btn_calc.setStyleSheet("background-color: #fff3e0; color: #e65100; font-weight: bold;")
+        self.btn_calc = QtWidgets.QPushButton("급여 조회")
+        self.btn_calc.setStyleSheet("""
+            QPushButton {
+                background-color: #fff3e0; color: #e65100; font-weight: bold;
+                border-radius: 8px; padding: 5px 15px; border: 1px solid #ffe0b2;
+            }
+            QPushButton:hover { background-color: #ffe0b2; }
+        """)
         self.btn_calc.clicked.connect(self.calculate_my_salary)
 
         self.btn_refresh = QtWidgets.QPushButton("새로고침")
         self.btn_refresh.clicked.connect(self.refresh)
 
-        self.btn_logout = QtWidgets.QPushButton("로그아웃")
-        self.btn_logout.clicked.connect(self.logout_requested.emit)
+        ctrl_layout.addWidget(self.filter)
+        ctrl_layout.addStretch()
+        ctrl_layout.addWidget(self.btn_calc)
+        ctrl_layout.addSpacing(10)
+        ctrl_layout.addWidget(self.btn_refresh)
 
-        top_layout = QtWidgets.QHBoxLayout()
-        top_layout.addWidget(self.btn_action)
-        top_layout.addSpacing(10)
-        top_layout.addWidget(self.btn_calc)
-        top_layout.addSpacing(10)
-        top_layout.addWidget(self.btn_refresh)
-        top_layout.addStretch(1)
-        top_layout.addWidget(self.btn_logout)
-
-        # ----------------------------------------------------
-        # 2. 근무 기록 테이블
-        # ----------------------------------------------------
+        # 테이블 스타일은 widgets.py에서 이미 정의됨
         self.work_table = Table([
             "ID", "일자", "작업시작(요청)", "퇴근(요청)", "상태",
             "확정 시작", "확정 종료", "관리자 승인/비고"
         ])
-        self.work_table.setColumnWidth(0, 0)  # ID 숨김
+        self.work_table.setColumnWidth(0, 0)
 
-        # ----------------------------------------------------
-        # 3. 이의 제기
-        # ----------------------------------------------------
-        self.filter_disputes = DateRangeBar(label="이의제기 기간")
-        self.filter_disputes.applied.connect(lambda *_: self.refresh_my_disputes())
+        # 전체 배치
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(25, 25, 25, 25)
+        layout.setSpacing(15)
 
-        self.cb_dispute_filter = QtWidgets.QComboBox()
-        self.cb_dispute_filter.addItem("진행 중 (검토/미처리)", "ACTIVE")
-        self.cb_dispute_filter.addItem("종료 (완료/기각)", "CLOSED")
-        self.cb_dispute_filter.currentIndexChanged.connect(lambda *_: self.refresh_my_disputes())
-
-        self.btn_disp_refresh = QtWidgets.QPushButton("조회")
-        self.btn_disp_refresh.clicked.connect(self.refresh_my_disputes)
-
-        self.btn_open_chat = QtWidgets.QPushButton("선택 건 이의제기/채팅 열기")
-        self.btn_open_chat.setMinimumHeight(35)
-        self.btn_open_chat.setStyleSheet("background-color: #fef01b; color: #3c1e1e; font-weight: bold;")
-        self.btn_open_chat.clicked.connect(self.open_dispute_chat)
-
-        self.dispute_table = Table([
-            "이의ID", "근무일자", "이의유형", "진행상태", "최근 메시지", "최근 시각"
-        ])
-        self.dispute_table.setColumnWidth(0, 0)  # ID 숨김
-
-        QtCore.QTimer.singleShot(0, self._wire_double_click)
-
-        disp_filter_layout = QtWidgets.QHBoxLayout()
-        disp_filter_layout.addWidget(self.filter_disputes)
-        disp_filter_layout.addWidget(self.cb_dispute_filter)
-        disp_filter_layout.addWidget(self.btn_disp_refresh)
-        disp_filter_layout.addStretch(1)
-
-        layout = QtWidgets.QVBoxLayout()
-        layout.addWidget(header)
-        layout.addLayout(top_layout)
-
-        layout.addWidget(QtWidgets.QLabel("<b>[나의 근무 기록]</b> - 승인이 완료되어야 실제 근무로 인정됩니다."))
-        layout.addWidget(self.filter)
+        layout.addWidget(header_card)
+        layout.addWidget(self.btn_action)
+        layout.addLayout(ctrl_layout)
         layout.addWidget(self.work_table)
 
-        layout.addSpacing(20)
+        # 하단 이의제기 영역 (요약)
+        layout.addSpacing(10)
         layout.addWidget(QtWidgets.QLabel("<b>[이의 제기 내역]</b>"))
-        layout.addLayout(disp_filter_layout)
-        layout.addWidget(self.dispute_table)
-        layout.addWidget(self.btn_open_chat)
 
-        self.setLayout(layout)
+        disp_ctrl = QtWidgets.QHBoxLayout()
+        self.filter_disputes = DateRangeBar(label="기간")
+        self.filter_disputes.applied.connect(lambda *_: self.refresh_my_disputes())
+        self.cb_dispute_filter = QtWidgets.QComboBox()
+        self.cb_dispute_filter.addItem("진행 중", "ACTIVE")
+        self.cb_dispute_filter.addItem("종료", "CLOSED")
+
+        disp_ctrl.addWidget(self.filter_disputes)
+        disp_ctrl.addWidget(self.cb_dispute_filter)
+        disp_ctrl.addStretch()
+
+        layout.addLayout(disp_ctrl)
+        self.dispute_table = Table(["이의ID", "일자", "유형", "상태", "메시지", "시각"])
+        self.dispute_table.setColumnWidth(0, 0)
+        layout.addWidget(self.dispute_table)
+
+        self.btn_open_chat = QtWidgets.QPushButton("선택 건 대화방 열기")
+        self.btn_open_chat.setFixedHeight(40)
+        self.btn_open_chat.setStyleSheet(
+            "background-color: #fef01b; color: #3c1e1e; font-weight: bold; border-radius: 8px;")
+        self.btn_open_chat.clicked.connect(self.open_dispute_chat)
+        layout.addWidget(self.btn_open_chat)
 
         self.refresh()
         self.refresh_my_disputes()
         self._update_action_button()
+        QtCore.QTimer.singleShot(0, self._wire_double_click)
 
     def _update_action_button(self):
         today_log = self.db.get_today_work_log(self.session.user_id)
 
-        # 1. 기록이 없거나, 있더라도 '반려(REJECTED)'된 상태라면 -> [작업시작요청] 가능
+        # 버튼 공통 기본 스타일
+        style_base = "border-radius: 15px; font-size: 18px; font-weight: bold; color: white; border: none"
+
         if not today_log or today_log["status"] == "REJECTED":
-            self.btn_action.setText("작업시작요청")
-            self.btn_action.setStyleSheet(
-                "background-color: #4CAF50; color: white; font-weight: bold; font-size: 14px;")
+            self.btn_action.setText("오늘의 작업 시작 요청")
+            self.btn_action.setStyleSheet(f"{style_base}; background-color: #6d4c41")
             self.btn_action.setProperty("mode", "IN")
             self.btn_action.setEnabled(True)
 
-        # 2. 승인 대기중 (PENDING) -> 대기 상태
         elif today_log["status"] == "PENDING":
-            self.btn_action.setText("승인 대기중")
-            self.btn_action.setStyleSheet("background-color: #FF9800; color: white; font-weight: bold;")
+            self.btn_action.setText("출근 승인 대기 중...")
+            self.btn_action.setStyleSheet(f"{style_base}; background-color: #d7ccc8; color: #8d6e63")
             self.btn_action.setProperty("mode", "WAIT")
             self.btn_action.setEnabled(False)
 
-        # 3. 근무중 (WORKING) -> 퇴근 요청 가능
         elif today_log["status"] == "WORKING":
-            self.btn_action.setText("퇴근요청")
-            self.btn_action.setStyleSheet(
-                "background-color: #f44336; color: white; font-weight: bold; font-size: 14px;")
+            self.btn_action.setText("오늘의 작업 종료 (퇴근 요청)")
+            self.btn_action.setStyleSheet(f"{style_base}; background-color: #a1887f")
             self.btn_action.setProperty("mode", "OUT")
             self.btn_action.setEnabled(True)
 
-        # 4. 퇴근 완료(APPROVED) 등 -> 종료
         else:
-            self.btn_action.setText("금일 작업 종료")
-            self.btn_action.setStyleSheet("background-color: #9e9e9e; color: white;")
+            self.btn_action.setText("오늘의 업무가 모두 종료되었습니다")
+            self.btn_action.setStyleSheet(f"{style_base}; background-color: #eee; color: #bbb")
             self.btn_action.setProperty("mode", "DONE")
             self.btn_action.setEnabled(False)
+
+
 
     def on_work_action(self):
         mode = self.btn_action.property("mode")

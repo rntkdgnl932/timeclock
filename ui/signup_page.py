@@ -26,122 +26,187 @@ class SignupPage(QtWidgets.QWidget):
     # ---------------- UI ----------------
 
     def _build_ui(self):
+        # 배경 스타일 설정
+        self.setObjectName("signupPage")
+        self.setStyleSheet("QWidget#signupPage { background-color: #fcfaf5; }")
+
+        main_layout = QtWidgets.QVBoxLayout(self)
+        main_layout.setAlignment(QtCore.Qt.AlignCenter)
+
+        # 가입 카드 구성
+        self.card = QtWidgets.QFrame()
+        self.card.setFixedWidth(520)
+        self.card.setStyleSheet("""
+            QFrame {
+                background-color: white;
+                border-radius: 25px;
+                border: 1px solid #eee;
+            }
+        """)
+
+        # 카드 그림자 효과
+        shadow = QtWidgets.QGraphicsDropShadowEffect()
+        shadow.setBlurRadius(30)
+        shadow.setColor(QtGui.QColor(0, 0, 0, 20))
+        shadow.setOffset(0, 10)
+        self.card.setGraphicsEffect(shadow)
+
+        card_layout = QtWidgets.QVBoxLayout(self.card)
+        card_layout.setContentsMargins(40, 40, 40, 40)
+        card_layout.setSpacing(12)
+
+        # 상단 HobbyBrown 로고
+        logo_label = QtWidgets.QLabel("HobbyBrown")
+        logo_label.setAlignment(QtCore.Qt.AlignCenter)
+        logo_label.setStyleSheet("font-family: 'Arial Rounded MT Bold'; font-size: 28px; color: #5d4037;")
+        card_layout.addWidget(logo_label)
+
         title = QtWidgets.QLabel("직원 가입 신청")
-        f = title.font()
-        f.setPointSize(14)
-        f.setBold(True)
-        title.setFont(f)
+        title.setAlignment(QtCore.Qt.AlignCenter)
+        title.setStyleSheet("font-size: 15px; font-weight: bold; color: #888; margin-bottom: 10px;")
+        card_layout.addWidget(title)
+
+        # 입력 필드 공통 스타일
+        input_style = """
+            QLineEdit {
+                background-color: #f9f9f9;
+                border: 1px solid #e0e0e0;
+                border-radius: 8px;
+                padding: 10px;
+                font-size: 14px;
+            }
+            QLineEdit:focus {
+                border: 1px solid #8d6e63;
+                background-color: #fff;
+            }
+        """
 
         form = QtWidgets.QFormLayout()
+        form.setSpacing(12)
+        form.setLabelAlignment(QtCore.Qt.AlignLeft)
 
-        # ---------- ID + 중복확인 ----------
+        # 아이디 입력 및 중복확인
         self.ed_id = QtWidgets.QLineEdit()
+        self.ed_id.setStyleSheet(input_style)
         self.btn_check_id = QtWidgets.QPushButton("중복확인")
+        self.btn_check_id.setCursor(QtCore.Qt.PointingHandCursor)
+        self.btn_check_id.setStyleSheet("""
+            QPushButton {
+                background-color: #f5f5f5; border: 1px solid #ddd; border-radius: 8px;
+                padding: 8px 15px; color: #666; font-weight: bold;
+            }
+            QPushButton:hover { background-color: #eee; }
+        """)
         self.btn_check_id.clicked.connect(self.check_id)
 
         id_row = QtWidgets.QHBoxLayout()
         id_row.addWidget(self.ed_id)
         id_row.addWidget(self.btn_check_id)
-        form.addRow("아이디(ID) *", id_row)
+        form.addRow("아이디 *", id_row)
 
-        # ---------- PW ----------
+        # 비밀번호 입력
         self.ed_pw = QtWidgets.QLineEdit()
         self.ed_pw.setEchoMode(QtWidgets.QLineEdit.Password)
+        self.ed_pw.setStyleSheet(input_style)
         form.addRow("비밀번호 *", self.ed_pw)
 
         self.ed_pw2 = QtWidgets.QLineEdit()
         self.ed_pw2.setEchoMode(QtWidgets.QLineEdit.Password)
+        self.ed_pw2.setStyleSheet(input_style)
         form.addRow("비밀번호 확인 *", self.ed_pw2)
 
-        # ---------- 성함(실명) ----------
+        # 성함 입력
         self.ed_name = QtWidgets.QLineEdit()
         self.ed_name.setPlaceholderText("실명을 입력하세요")
+        self.ed_name.setStyleSheet(input_style)
         form.addRow("성함 *", self.ed_name)
 
-        # ---------- 전화번호 3칸 ----------
+        # 전화번호 입력 (3칸)
+        phone_row = QtWidgets.QHBoxLayout()
         self.ed_phone1 = QtWidgets.QLineEdit()
         self.ed_phone2 = QtWidgets.QLineEdit()
         self.ed_phone3 = QtWidgets.QLineEdit()
-
+        for ed in (self.ed_phone1, self.ed_phone2, self.ed_phone3):
+            ed.setStyleSheet(input_style)
+            ed.setAlignment(QtCore.Qt.AlignCenter)
+            ed.setValidator(QtGui.QIntValidator())
         self.ed_phone1.setMaxLength(3)
         self.ed_phone2.setMaxLength(4)
         self.ed_phone3.setMaxLength(4)
 
-        for ed in (self.ed_phone1, self.ed_phone2, self.ed_phone3):
-            ed.setFixedWidth(60)
-            # noinspection PyUnresolvedReferences
-            # 🌟 수정됨: QtGui.QIntValidator() 사용
-            ed.setValidator(QtGui.QIntValidator())
-
-        phone_row = QtWidgets.QHBoxLayout()
         phone_row.addWidget(self.ed_phone1)
         phone_row.addWidget(QtWidgets.QLabel("-"))
         phone_row.addWidget(self.ed_phone2)
         phone_row.addWidget(QtWidgets.QLabel("-"))
         phone_row.addWidget(self.ed_phone3)
-        phone_row.addStretch(1)
-
         form.addRow("전화번호 *", phone_row)
 
-        # ---------- 생년월일 3칸 ----------
+        # 생년월일 입력 (3칸)
+        birth_row = QtWidgets.QHBoxLayout()
         self.ed_birth_y = QtWidgets.QLineEdit()
         self.ed_birth_m = QtWidgets.QLineEdit()
         self.ed_birth_d = QtWidgets.QLineEdit()
-
+        for ed in (self.ed_birth_y, self.ed_birth_m, self.ed_birth_d):
+            ed.setStyleSheet(input_style)
+            ed.setAlignment(QtCore.Qt.AlignCenter)
+            ed.setValidator(QtGui.QIntValidator())
         self.ed_birth_y.setPlaceholderText("YYYY")
         self.ed_birth_m.setPlaceholderText("MM")
         self.ed_birth_d.setPlaceholderText("DD")
-
         self.ed_birth_y.setMaxLength(4)
         self.ed_birth_m.setMaxLength(2)
         self.ed_birth_d.setMaxLength(2)
 
-        for ed in (self.ed_birth_y, self.ed_birth_m, self.ed_birth_d):
-            ed.setFixedWidth(60)
-            # noinspection PyUnresolvedReferences
-            # 🌟 수정됨: QtGui.QIntValidator() 사용
-            ed.setValidator(QtGui.QIntValidator())
-
-        birth_row = QtWidgets.QHBoxLayout()
         birth_row.addWidget(self.ed_birth_y)
         birth_row.addWidget(QtWidgets.QLabel("-"))
         birth_row.addWidget(self.ed_birth_m)
         birth_row.addWidget(QtWidgets.QLabel("-"))
         birth_row.addWidget(self.ed_birth_d)
-        birth_row.addStretch(1)
-
         form.addRow("생년월일 *", birth_row)
 
-        # ---------- 선택 입력 ----------
+        # 선택 입력 정보
         self.ed_email = QtWidgets.QLineEdit()
+        self.ed_email.setStyleSheet(input_style)
         form.addRow("이메일", self.ed_email)
 
         self.ed_bank = QtWidgets.QLineEdit()
+        self.ed_bank.setStyleSheet(input_style)
         form.addRow("계좌정보", self.ed_bank)
 
         self.ed_addr = QtWidgets.QLineEdit()
+        self.ed_addr.setStyleSheet(input_style)
         form.addRow("주소", self.ed_addr)
 
-        # ---------- 버튼 ----------
-        btn_apply = QtWidgets.QPushButton("가입신청")
-        btn_cancel = QtWidgets.QPushButton("취소")
+        card_layout.addLayout(form)
 
-        btn_apply.clicked.connect(self.submit)
-        btn_cancel.clicked.connect(self.signup_done.emit)
+        # 하단 액션 버튼
+        btn_action_layout = QtWidgets.QVBoxLayout()
+        btn_action_layout.setSpacing(10)
+        btn_action_layout.setContentsMargins(0, 15, 0, 0)
 
-        btn_row = QtWidgets.QHBoxLayout()
-        btn_row.addStretch(1)
-        btn_row.addWidget(btn_apply)
-        btn_row.addWidget(btn_cancel)
+        self.btn_apply = QtWidgets.QPushButton("가입 신청하기")
+        self.btn_apply.setFixedHeight(50)
+        self.btn_apply.setCursor(QtCore.Qt.PointingHandCursor)
+        self.btn_apply.setStyleSheet("""
+            QPushButton {
+                background-color: #6d4c41; color: white; border-radius: 12px;
+                font-size: 16px; font-weight: bold;
+            }
+            QPushButton:hover { background-color: #5d4037; }
+        """)
+        self.btn_apply.clicked.connect(self.submit)
 
-        layout = QtWidgets.QVBoxLayout()
-        layout.addWidget(title)
-        layout.addSpacing(10)
-        layout.addLayout(form)
-        layout.addSpacing(10)
-        layout.addLayout(btn_row)
+        self.btn_cancel = QtWidgets.QPushButton("취소 후 돌아가기")
+        self.btn_cancel.setCursor(QtCore.Qt.PointingHandCursor)
+        self.btn_cancel.setStyleSheet(
+            "color: #888; border: none; background: none; font-size: 13px; text-decoration: underline;")
+        self.btn_cancel.clicked.connect(self.signup_done.emit)
 
-        self.setLayout(layout)
+        btn_action_layout.addWidget(self.btn_apply)
+        btn_action_layout.addWidget(self.btn_cancel)
+        card_layout.addLayout(btn_action_layout)
+
+        main_layout.addWidget(self.card)
 
     # ---------------- Logic ----------------
 
