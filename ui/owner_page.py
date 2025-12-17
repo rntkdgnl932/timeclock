@@ -216,120 +216,15 @@ class OwnerPage(QtWidgets.QWidget):
             Message.warn(self, "알림", "이미 완료된 건입니다.")
             return
 
-        # -----------------------------------------------------------
-        # 1. 팝업창(Dialog) 준비
-        # -----------------------------------------------------------
-        dialog = QtWidgets.QDialog(self)
-        dialog.setWindowTitle("작업 승인 및 시간 확정")
-        dialog.setMinimumWidth(450)
-        layout = QtWidgets.QFormLayout(dialog)
+        # ★★★ 여기가 핵심입니다 ★★★
+        # 기존에는 여기서 직접 창을 만들었지만, 이제는 밑에 만들어둔
+        # 'WorkLogApproveDialog' (새 부품)을 불러옵니다.
+        dialog = WorkLogApproveDialog(self, target_row, mode)
 
-        # 시간 입력 위젯
-        edit_start = QtWidgets.QDateTimeEdit()
-        edit_start.setDisplayFormat("yyyy-MM-dd HH:mm:ss")
-        edit_start.setCalendarPopup(True)
-
-        edit_end = QtWidgets.QDateTimeEdit()
-        edit_end.setDisplayFormat("yyyy-MM-dd HH:mm:ss")
-        edit_end.setCalendarPopup(True)
-
-        # ★ [수정] now_str() 대신 datetime 직접 사용
-        current_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        s_str = target_row.get("start_time") or current_time_str
-        e_str = target_row.get("end_time")
-
-        start_dt = datetime.strptime(s_str, "%Y-%m-%d %H:%M:%S")
-        edit_start.setDateTime(start_dt)
-
-        # 종료 시간 설정
-        if mode == "END":
-            if e_str:
-                end_dt = datetime.strptime(e_str, "%Y-%m-%d %H:%M:%S")
-            else:
-                end_dt = datetime.now()
-            edit_end.setDateTime(end_dt)
-        else:
-            end_dt = datetime.now()
-            edit_end.setDateTime(end_dt)
-            edit_end.setEnabled(False)
-
-        layout.addRow("확정 시작 시간:", edit_start)
-        if mode == "END":
-            layout.addRow("확정 종료 시간:", edit_end)
-
-        # 휴게시간 리스트 구성
-        combo_break = QtWidgets.QComboBox()
-
-        if mode == "END":
-            # 근무 시간 계산 (시간 단위)
-            duration_hours = (end_dt - start_dt).total_seconds() / 3600.0
-
-            break_options = []
-
-            # 1. 기본 옵션
-            break_options.append("자동 계산 (기록 안 함)")
-            break_options.append("직접 입력 (비고란에 작성)")
-            break_options.append("-----------------------")
-
-            # 2. 조건별 리스트 생성
-            if duration_hours >= 8:
-                break_options.append("휴게 1시간 (12:00 ~ 13:00)")
-                break_options.append("휴게 1시간 (13:00 ~ 14:00)")
-                break_options.append("휴게 1시간 (11:30 ~ 12:30)")
-                break_options.append("휴게 1시간 (12:30 ~ 13:30)")
-                break_options.append("-----------------------")
-                break_options.append("휴게 30분 (12:00 ~ 12:30)")
-                break_options.append("휴게 30분 (12:30 ~ 13:00)")
-
-            elif duration_hours >= 4:
-                break_options.append("휴게 30분 (12:00 ~ 12:30)")
-                break_options.append("휴게 30분 (12:30 ~ 13:00)")
-                break_options.append("휴게 30분 (13:00 ~ 13:30)")
-                break_options.append("휴게 30분 (13:30 ~ 14:00)")
-                break_options.append("휴게 30분 (15:00 ~ 15:30)")
-                break_options.append("휴게 30분 (16:00 ~ 16:30)")
-            else:
-                break_options.insert(0, "휴게 시간 없음 (4시간 미만)")
-
-            combo_break.addItems(break_options)
-            layout.addRow("휴게 시간 기록:", combo_break)
-
-        # 비고(코멘트)
-        edit_comment = QtWidgets.QTextEdit()
-        edit_comment.setPlaceholderText("특이사항 또는 '직접 입력' 시 휴게시간을 적으세요.")
-        edit_comment.setMaximumHeight(60)
-        if target_row.get("owner_comment"):
-            edit_comment.setText(target_row["owner_comment"])
-
-        layout.addRow("관리자 메모:", edit_comment)
-
-        # 버튼
-        btns = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
-        btns.accepted.connect(dialog.accept)
-        btns.rejected.connect(dialog.reject)
-        layout.addRow(btns)
-
-        # -----------------------------------------------------------
-        # 2. 실행 및 처리
-        # -----------------------------------------------------------
+        # 다이얼로그가 'OK'로 닫혔을 때 (로직 통과 후)
         if dialog.exec_() == QtWidgets.QDialog.Accepted:
-            app_start = edit_start.dateTime().toString("yyyy-MM-dd HH:mm:ss")
-            app_end = None
-            final_comment = edit_comment.toPlainText().strip()
-
-            if mode == "END":
-                app_end = edit_end.dateTime().toString("yyyy-MM-dd HH:mm:ss")
-
-                selected_txt = combo_break.currentText()
-
-                if "---" not in selected_txt and "자동 계산" not in selected_txt:
-                    if "직접 입력" in selected_txt:
-                        if not final_comment:
-                            final_comment = "[휴게시간 직접입력]"
-                    else:
-                        prefix = f"[{selected_txt}]"
-                        if prefix not in final_comment:
-                            final_comment = f"{prefix} {final_comment}".strip()
+            # 새 클래스에서 정리된 데이터를 가져옴
+            app_start, app_end, final_comment = dialog.get_data()
 
             try:
                 self.db.approve_work_log(
@@ -340,7 +235,6 @@ class OwnerPage(QtWidgets.QWidget):
                     final_comment
                 )
 
-                # ★ backup_manager가 import 되어 있는지 확인 필요 (보통 상단에 있음)
                 if 'backup_manager' in globals():
                     backup_manager.run_backup("approve")
 
@@ -1043,25 +937,33 @@ class WorkLogApproveDialog(QtWidgets.QDialog):
         self.data = row_data or {}
         self.mode = mode
 
+        # 제목 설정
         if self.mode == "START":
             self.setWindowTitle("작업 시작 승인 (시간 확정)")
         else:
             self.setWindowTitle("퇴근 승인 (시간 확정)")
 
-        self.resize(450, 250)
+        self.resize(400, 200)
 
         layout = QtWidgets.QVBoxLayout()
 
-        info_text = (
-            f"일자: {self.data.get('work_date')}\n"
-            f"근로자: {self.data.get('worker_username')}\n"
-        )
+        # [1] 상단 안내
+        if self.mode == "END":
+            info_text = (
+                f"근로자: {self.data.get('worker_username')}\n"
+                f"※ [확인] 클릭 시, 근무 시간에 따라 휴게시간 부여 여부를 묻고\n"
+                f"   퇴근 시간을 자동으로 연장합니다."
+            )
+        else:
+            info_text = f"근로자: {self.data.get('worker_username')}\n시작 시간을 확정해주세요."
+
         lbl_info = QtWidgets.QLabel(info_text)
-        lbl_info.setStyleSheet("background-color: #f0f0f0; padding: 10px; border-radius: 5px;")
+        lbl_info.setStyleSheet("background-color: #f0f0f0; padding: 10px; border-radius: 5px; color: #333;")
         layout.addWidget(lbl_info)
 
         form = QtWidgets.QFormLayout()
 
+        # [2] 날짜/시간 에디터
         self.dte_start = QtWidgets.QDateTimeEdit(QtCore.QDateTime.currentDateTime())
         self.dte_start.setDisplayFormat("yyyy-MM-dd HH:mm:ss")
         self.dte_start.setCalendarPopup(True)
@@ -1070,6 +972,7 @@ class WorkLogApproveDialog(QtWidgets.QDialog):
         self.dte_end.setDisplayFormat("yyyy-MM-dd HH:mm:ss")
         self.dte_end.setCalendarPopup(True)
 
+        # 초기값 주입
         s_time_str = self.data.get("approved_start") or self.data.get("start_time")
         e_time_str = self.data.get("approved_end") or self.data.get("end_time")
 
@@ -1081,27 +984,24 @@ class WorkLogApproveDialog(QtWidgets.QDialog):
         else:
             self.dte_end.setDateTime(QtCore.QDateTime.currentDateTime())
 
-        if self.mode == "START":
-            # 시작 승인 시 퇴근시간은 수정 불가
-            self.dte_end.setEnabled(False)
-            self.dte_end.setStyleSheet("color: #aaa; background-color: #eee;")
-            self.dte_start.setStyleSheet("font-weight: bold; background-color: #e0f2f1;")
-        else:
-            # 퇴근 승인 시 시작시간은 수정 불가
-            self.dte_start.setEnabled(False)
-            self.dte_start.setStyleSheet("color: #aaa; background-color: #eee;")
-            self.dte_end.setStyleSheet("font-weight: bold; background-color: #ffebee;")
+        # [3] 잠금 처리
+        disabled_style = "background-color: #e0e0e0; color: #666; border: 1px solid #ccc;"
+        active_style = "background-color: #ffffff; color: #000; font-weight: bold;"
 
+        if self.mode == "START":
+            self.dte_end.setDisabled(True)
+            self.dte_end.setStyleSheet(disabled_style)
+            self.dte_start.setStyleSheet(active_style)
+        else:
+            self.dte_start.setDisabled(True)
+            self.dte_start.setStyleSheet(disabled_style)
+            self.dte_end.setStyleSheet(active_style)
+
+        # [4] 비고 (콤보박스 없음)
         self.cb_comment = QtWidgets.QComboBox()
         self.cb_comment.setEditable(True)
-        standard_reasons = [
-            "정상 승인 (특이사항 없음)",
-            "지각 (실제 출근 시각 반영)",
-            "조퇴 (실제 퇴근 시각 반영)",
-            "연장 근무 승인",
-            "근로자 요청에 의한 시간 정정",
-            "기타 (직접 입력)"
-        ]
+        self.cb_comment.setPlaceholderText("특이사항이 있다면 입력하세요.")
+        standard_reasons = ["", "정상 승인", "지각 처리", "조퇴 처리", "업무 연장", "기타"]
         self.cb_comment.addItems(standard_reasons)
 
         old_comment = self.data.get("owner_comment")
@@ -1110,18 +1010,27 @@ class WorkLogApproveDialog(QtWidgets.QDialog):
 
         form.addRow("확정 시작시각", self.dte_start)
         form.addRow("확정 종료시각", self.dte_end)
-        form.addRow("비고(사유)", self.cb_comment)
+        form.addRow("관리자 메모", self.cb_comment)
 
         layout.addLayout(form)
 
+        # [5] 버튼
         btns = QtWidgets.QHBoxLayout()
-        btn_label = "작업 시작 승인" if self.mode == "START" else "퇴근 완료 승인"
+        btn_label = "작업 시작 승인" if self.mode == "START" else "퇴근 및 시간 확정"
 
         self.btn_ok = QtWidgets.QPushButton(btn_label)
-        self.btn_ok.setStyleSheet("font-weight: bold; color: white; background-color: #003366; padding: 8px;")
+        self.btn_ok.setCursor(QtCore.Qt.PointingHandCursor)
+        self.btn_ok.setStyleSheet("""
+            QPushButton {
+                font-weight: bold; color: white; background-color: #003366; 
+                padding: 10px; border-radius: 4px;
+            }
+            QPushButton:hover { background-color: #004080; }
+        """)
         self.btn_ok.clicked.connect(self.on_ok_clicked)
 
         self.btn_cancel = QtWidgets.QPushButton("취소")
+        self.btn_cancel.setCursor(QtCore.Qt.PointingHandCursor)
         self.btn_cancel.clicked.connect(self.reject)
 
         btns.addStretch(1)
@@ -1132,56 +1041,107 @@ class WorkLogApproveDialog(QtWidgets.QDialog):
         self.setLayout(layout)
 
     def on_ok_clicked(self):
-        # 퇴근 승인 모드일 때만 휴게시간 체크
-        if self.mode == "END" and self.dte_end.isEnabled():
+        if self.mode == "END":
             s_dt = self.dte_start.dateTime()
             e_dt = self.dte_end.dateTime()
+
             secs = s_dt.secsTo(e_dt)
             hours = secs / 3600.0
 
             added_min = 0
+            break_label = ""
+
             if hours >= 8:
                 added_min = 60
+                break_label = "1시간"
             elif hours >= 4:
                 added_min = 30
+                break_label = "30분"
 
             if added_min > 0:
-                msg = f"근무시간이 {int(hours)}시간 이상입니다.\n법정 휴게시간({added_min}분)을 부여하고 퇴근시간을 연장하시겠습니까?"
+                msg = (f"현재 근무시간: 약 {hours:.1f}시간\n\n"
+                       f"법정 휴게시간 [{break_label}]을 부여하셨습니까?\n"
+                       f"('예'를 누르면 퇴근 시간이 {break_label} 연장됩니다)")
+
                 ans = QtWidgets.QMessageBox.question(self, "휴게시간 확인", msg,
                                                      QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
+
                 if ans == QtWidgets.QMessageBox.Yes:
+                    # (1) 퇴근 시간 연장
                     new_e_dt = e_dt.addSecs(added_min * 60)
                     self.dte_end.setDateTime(new_e_dt)
 
-                    slots = []
+                    # (2) 스마트 필터링 (00분, 30분 단위 정렬)
+                    time_slots = []
+
+                    # 시작 시간을 다음 30분 단위로 올림(Ceiling)
+                    # 예: 09:22 -> 09:30, 09:40 -> 10:00
                     curr = s_dt
-                    while curr < new_e_dt:
-                        nxt = curr.addSecs(30 * 60)
-                        if nxt > new_e_dt: break
+                    mm = curr.time().minute()
+                    ss = curr.time().second()
+
+                    # 정각이나 30분이 아니면 앞으로 당김
+                    if not (mm == 0 and ss == 0) and not (mm == 30 and ss == 0):
+                        if mm < 30:
+                            # 30분으로 이동
+                            add_sec = (30 - mm) * 60 - ss
+                        else:
+                            # 다음 시간 00분으로 이동
+                            add_sec = (60 - mm) * 60 - ss
+                        curr = curr.addSecs(add_sec)
+
+                    required_gap = added_min * 60
+
+                    # 루프: 근무 시간 내에서 30분 간격으로 생성
+                    while curr.secsTo(new_e_dt) >= required_gap:
+                        nxt = curr.addSecs(required_gap)
+
+                        # 리스트에 추가 (깔끔한 00/30분 단위)
                         slot_str = f"{curr.toString('HH:mm')} ~ {nxt.toString('HH:mm')}"
-                        slots.append(slot_str)
-                        curr = nxt
+                        time_slots.append(slot_str)
+
+                        # 다음 보기는 30분 뒤
+                        curr = curr.addSecs(30 * 60)
+
+                    time_slots.append("직접 입력")
 
                     item, ok = QtWidgets.QInputDialog.getItem(
-                        self, "휴게시간 선택",
-                        f"부여한 휴게시간({added_min}분)을 선택하거나 입력하세요:",
-                        slots, 0, True
+                        self,
+                        "휴게시간대 선택",
+                        f"부여한 휴게시간({break_label}) 선택 (30분 단위 자동정렬):",
+                        time_slots,
+                        0,
+                        False
                     )
 
                     if ok and item:
-                        current_txt = self.cb_comment.currentText()
-                        new_txt = f"{current_txt} | 휴게시간: {item}"
-                        self.cb_comment.setCurrentText(new_txt)
-                        QtWidgets.QMessageBox.information(self, "완료", f"퇴근시간이 {added_min}분 연장되고 휴게시간이 기록되었습니다.")
+                        final_break_str = item
+                        if item == "직접 입력":
+                            text, txt_ok = QtWidgets.QInputDialog.getText(self, "직접 입력", "휴게시간을 입력하세요")
+                            if txt_ok and text:
+                                final_break_str = text
+                            else:
+                                final_break_str = ""
+
+                        if final_break_str:
+                            current_txt = self.cb_comment.currentText().strip()
+                            add_txt = f"[휴게: {final_break_str}]"
+                            if current_txt:
+                                self.cb_comment.setCurrentText(f"{current_txt} / {add_txt}")
+                            else:
+                                self.cb_comment.setCurrentText(add_txt)
+
+                    QtWidgets.QMessageBox.information(self, "적용 완료", f"퇴근시간이 {break_label} 연장되었습니다.")
 
         self.accept()
 
     def get_data(self):
         s = self.dte_start.dateTime().toString("yyyy-MM-dd HH:mm:ss")
+        e = None
         if self.mode == "END":
             e = self.dte_end.dateTime().toString("yyyy-MM-dd HH:mm:ss")
-        else:
-            e = None
 
         c = self.cb_comment.currentText().strip()
         return s, e, c
+
+
