@@ -1449,7 +1449,7 @@ class OwnerPage(QtWidgets.QWidget):
         w.setLayout(layout)
         return w
 
-    def run_git_update_ex(self):
+    def run_git_update(self):
         import git
         import os
         my_repo = git.Repo()
