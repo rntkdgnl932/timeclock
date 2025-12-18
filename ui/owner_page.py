@@ -1454,12 +1454,13 @@ class OwnerPage(QtWidgets.QWidget):
         if not Message.confirm(self, "업데이트", "최신 버전을 다운로드하고 프로그램을 재시작하시겠습니까?"):
             return
 
-        # 2. 업데이트 작업 (성공했던 GitPython 방식)
+        # 2. 업데이트 작업 (사용자님이 주신 코드 로직 적용)
         def job_fn(progress_callback):
-            import git
+            import git  # GitPython 라이브러리 사용
 
             progress_callback({"msg": "업데이트 다운로드 중 (Git Pull)..."})
 
+            # 👇 말씀하신 핵심 코드 그대로 적용
             my_repo = git.Repo()
             my_repo.remotes.origin.pull()
 
@@ -1468,15 +1469,18 @@ class OwnerPage(QtWidgets.QWidget):
         # 3. 완료 후 재시작
         def on_done(ok, res, err):
             if ok:
+                # 업데이트 성공 시 바로 재시작
                 import time
                 import sys
                 import os
 
-                # 성공 메시지 없이 바로 재시작하거나, 짧게 대기
                 time.sleep(1)
                 os.execl(sys.executable, sys.executable, *sys.argv)
             else:
+                # 실패 시 에러 메시지는 async_helper 창에 남습니다.
                 pass
+
+                # 4. 실행 (UI 멈춤 방지를 위해 스레드로 실행)
 
         run_job_with_progress_async(
             self,
