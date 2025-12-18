@@ -23,3 +23,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+
+# python -m PyInstaller --noconfirm --clean --name timeclock_app --icon "icon.ico" --add-data "icon.ico;." --hidden-import PyQt5 --hidden-import git main.py
