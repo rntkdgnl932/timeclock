@@ -55,7 +55,7 @@ class DB:
             """
         )
 
-        # 1-1. users 테이블 컬럼 확장 (오류 방지를 위해 풀어서 작성)
+        # 1-1. users 테이블 컬럼 확장
         try:
             cur.execute("ALTER TABLE users ADD COLUMN name TEXT")
         except Exception:
@@ -134,6 +134,29 @@ class DB:
             """
         )
 
+        # 🔴 [FIX] work_logs 테이블 누락 컬럼 추가 (이 부분이 없어서 KeyError 발생함)
+        try:
+            cur.execute("ALTER TABLE work_logs ADD COLUMN approved_start TEXT")
+        except Exception:
+            pass
+        try:
+            cur.execute("ALTER TABLE work_logs ADD COLUMN approved_end TEXT")
+        except Exception:
+            pass
+        try:
+            cur.execute("ALTER TABLE work_logs ADD COLUMN owner_comment TEXT")
+        except Exception:
+            pass
+        try:
+            cur.execute("ALTER TABLE work_logs ADD COLUMN approver_id INTEGER")
+        except Exception:
+            pass
+        try:
+            cur.execute("ALTER TABLE work_logs ADD COLUMN updated_at TEXT")
+        except Exception:
+            pass
+
+
         # 3. disputes 테이블 생성 (work_log_id 포함)
         cur.execute(
             """
@@ -154,7 +177,7 @@ class DB:
             """
         )
 
-        # 🔴 [핵심 수정] disputes 테이블에 work_log_id가 없으면 강제로 추가
+        # disputes 테이블에 work_log_id가 없으면 강제로 추가
         try:
             cur.execute("ALTER TABLE disputes ADD COLUMN work_log_id INTEGER")
         except Exception:
