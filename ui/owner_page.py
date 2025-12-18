@@ -1449,7 +1449,16 @@ class OwnerPage(QtWidgets.QWidget):
         w.setLayout(layout)
         return w
 
-    def run_git_update(self):
+    def run_git_update_ex(self):
+        import git
+        import os
+        my_repo = git.Repo()
+        my_repo.remotes.origin.pull()
+        # 실행 후 재시작 부분
+        os.execl(sys.executable, sys.executable, *sys.argv)
+        
+
+    def run_git_update_ex(self):
         # 1. 실행 전 확인
         if not Message.confirm(self, "업데이트", "서버 버전으로 강제 업데이트하시겠습니까?\n(로컬 상태는 무시하고 덮어씌웁니다.)"):
             return
