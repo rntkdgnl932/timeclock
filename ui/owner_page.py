@@ -1380,50 +1380,66 @@ class OwnerPage(QtWidgets.QWidget):
         dlg.exec_()
 
     # ----------------------------------------------------------------------
-    # [신규 기능] 시스템 업데이트 탭 관련 함수들
+    # [시스템 업데이트 탭] UI 및 기능
     # ----------------------------------------------------------------------
     def _build_update_tab(self):
         layout = QtWidgets.QVBoxLayout()
         layout.setSpacing(20)
         layout.setContentsMargins(50, 50, 50, 50)
+
+        # 🟢 레이아웃 전체를 가운데 정렬
         layout.setAlignment(QtCore.Qt.AlignCenter)
 
-        # 아이콘 및 설명
+        # 아이콘
         lbl_icon = QtWidgets.QLabel("🚀")
-        lbl_icon.setStyleSheet("font-size: 60px;")
+        lbl_icon.setStyleSheet("font-size: 60px; background: transparent;")
         lbl_icon.setAlignment(QtCore.Qt.AlignCenter)
         layout.addWidget(lbl_icon)
 
+        # 제목
         lbl_title = QtWidgets.QLabel("최신 버전 업데이트")
-        lbl_title.setStyleSheet("font-size: 24px; font-weight: bold; color: #333;")
+        lbl_title.setStyleSheet("font-size: 24px; font-weight: bold; color: #333; background: transparent;")
         lbl_title.setAlignment(QtCore.Qt.AlignCenter)
         layout.addWidget(lbl_title)
 
+        # 설명
         lbl_desc = QtWidgets.QLabel(
             "서버(GitHub)에 올라온 최신 기능과 버그 수정 사항을 다운로드합니다.\n"
             "업데이트가 완료되면 프로그램이 자동으로 재시작됩니다."
         )
-        lbl_desc.setStyleSheet("font-size: 14px; color: #666; line-height: 1.5;")
+        lbl_desc.setStyleSheet("font-size: 14px; color: #666; line-height: 1.5; background: transparent;")
         lbl_desc.setAlignment(QtCore.Qt.AlignCenter)
         layout.addWidget(lbl_desc)
 
-        # 업데이트 버튼
+        # 🟢 [수정] 업데이트 버튼 (가운데 정렬 속성 명시)
         self.btn_update = QtWidgets.QPushButton("지금 업데이트 실행 (Git Pull)")
         self.btn_update.setCursor(QtCore.Qt.PointingHandCursor)
-        self.btn_update.setFixedSize(250, 50)
+        self.btn_update.setFixedSize(280, 55)  # 크기 조금 더 키움
         self.btn_update.setStyleSheet("""
             QPushButton {
-                background-color: #2196F3; color: white; border-radius: 25px;
-                font-size: 16px; font-weight: bold;
+                background-color: #2196F3; 
+                color: white; 
+                border-radius: 27px;
+                font-size: 16px; 
+                font-weight: bold;
+                border: 1px solid #1976D2;
             }
-            QPushButton:hover { background-color: #1976D2; }
+            QPushButton:hover { 
+                background-color: #1976D2; 
+                border: 1px solid #1565C0;
+            }
+            QPushButton:pressed {
+                background-color: #0D47A1;
+            }
         """)
         self.btn_update.clicked.connect(self.run_git_update)
-        layout.addWidget(self.btn_update)
 
-        # 저장소 주소 표시
+        # addWidget 할 때 정렬 옵션(Qt.AlignCenter)을 한 번 더 줘서 확실하게 가운데로 보냄
+        layout.addWidget(self.btn_update, 0, QtCore.Qt.AlignCenter)
+
+        # 저장소 주소
         lbl_repo = QtWidgets.QLabel("Repository: https://github.com/rntkdgnl932/timeclock.git")
-        lbl_repo.setStyleSheet("font-size: 11px; color: #999; margin-top: 20px;")
+        lbl_repo.setStyleSheet("font-size: 11px; color: #999; margin-top: 20px; background: transparent;")
         lbl_repo.setAlignment(QtCore.Qt.AlignCenter)
         layout.addWidget(lbl_repo)
 
@@ -1438,13 +1454,12 @@ class OwnerPage(QtWidgets.QWidget):
         if not Message.confirm(self, "업데이트", "최신 버전을 다운로드하고 프로그램을 재시작하시겠습니까?"):
             return
 
-        # 2. 업데이트 작업 (사용자님이 주신 코드 로직 적용)
+        # 2. 업데이트 작업 (성공했던 GitPython 방식)
         def job_fn(progress_callback):
-            import git  # GitPython 라이브러리 사용
+            import git
 
             progress_callback({"msg": "업데이트 다운로드 중 (Git Pull)..."})
 
-            # 👇 말씀하신 핵심 코드 그대로 적용
             my_repo = git.Repo()
             my_repo.remotes.origin.pull()
 
@@ -1453,18 +1468,15 @@ class OwnerPage(QtWidgets.QWidget):
         # 3. 완료 후 재시작
         def on_done(ok, res, err):
             if ok:
-                # 업데이트 성공 시 바로 재시작
                 import time
                 import sys
                 import os
 
+                # 성공 메시지 없이 바로 재시작하거나, 짧게 대기
                 time.sleep(1)
                 os.execl(sys.executable, sys.executable, *sys.argv)
             else:
-                # 실패 시 에러 메시지는 async_helper 창에 남습니다.
                 pass
-
-                # 4. 실행 (UI 멈춤 방지를 위해 스레드로 실행)
 
         run_job_with_progress_async(
             self,
@@ -1472,6 +1484,8 @@ class OwnerPage(QtWidgets.QWidget):
             job_fn,
             on_done=on_done
         )
+
+
 
     def _restart_program(self):
         """현재 파이썬 프로그램을 재시작합니다."""
