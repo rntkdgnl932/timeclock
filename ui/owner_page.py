@@ -1451,25 +1451,43 @@ class OwnerPage(QtWidgets.QWidget):
 
     def run_git_update(self):
         # 1. 실행 전 확인
-        if not Message.confirm(self, "업데이트", "최신 버전을 다운로드하고 프로그램을 재시작하시겠습니까?"):
+        if not Message.confirm(self, "업데이트", "서버 버전으로 강제 업데이트하시겠습니까?\n(로컬 상태는 무시하고 덮어씌웁니다.)"):
             return
 
-        # 2. 업데이트 작업 (사용자님이 주신 코드 로직 적용)
+        # 2. 업데이트 작업 (닥치고 강제 동기화)
         def job_fn(progress_callback):
-            import git  # GitPython 라이브러리 사용
+            import git
+            import os
 
-            progress_callback({"msg": "업데이트 다운로드 중 (Git Pull)..."})
+            repo = git.Repo(os.getcwd())
 
-            # 👇 말씀하신 핵심 코드 그대로 적용
-            my_repo = git.Repo()
-            my_repo.remotes.origin.pull()
+            # (1) 자물쇠(.git/index.lock) 있으면 부수기
+            try:
+                lock_path = os.path.join(repo.git_dir, "index.lock")
+                if os.path.exists(lock_path):
+                    os.remove(lock_path)
+            except Exception:
+                pass
+
+            # (2) 서버 데이터 다운로드 (Fetch) - 병합은 안 함
+            progress_callback({"msg": "서버 데이터 가져오는 중..."})
+            repo.remotes.origin.fetch()
+
+            # (3) [핵심] 내 컴퓨터 상태 싹 무시하고 서버 상태로 '리셋'
+            progress_callback({"msg": "최신 버전으로 강제 덮어쓰기..."})
+
+            # 현재 브랜치 이름 확인 (보통 main)
+            current_branch = repo.active_branch.name
+
+            # ❗ 여기가 핵심입니다: pull 대신 reset --hard 사용
+            # "origin(서버)의 main 브랜치랑 똑같이 만들어라"
+            repo.git.reset('--hard', f'origin/{current_branch}')
 
             return "업데이트 성공"
 
         # 3. 완료 후 재시작
         def on_done(ok, res, err):
             if ok:
-                # 업데이트 성공 시 바로 재시작
                 import time
                 import sys
                 import os
@@ -1477,14 +1495,13 @@ class OwnerPage(QtWidgets.QWidget):
                 time.sleep(1)
                 os.execl(sys.executable, sys.executable, *sys.argv)
             else:
-                # 실패 시 에러 메시지는 async_helper 창에 남습니다.
                 pass
 
-                # 4. 실행 (UI 멈춤 방지를 위해 스레드로 실행)
+                # 4. 실행
 
         run_job_with_progress_async(
             self,
-            "시스템 업데이트",
+            "시스템 업데이트 (강제 리셋)",
             job_fn,
             on_done=on_done
         )
