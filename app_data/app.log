@@ -2193,3 +2193,8 @@ TypeError: 'QFrame' object is not subscriptable
 2025-12-18 11:00:35,233 [INFO] Logged in: worker (worker)
 2025-12-18 11:00:51,754 [INFO] Logout: worker
 2025-12-18 11:00:55,072 [INFO] Logged in: worker (worker)
+2025-12-18 11:05:41,202 [INFO] file_cache is only supported with oauth2client<4.0.0
+2025-12-18 11:05:51,879 [INFO] Logged in: worker (worker)
+2025-12-18 11:05:55,690 [INFO] file_cache is only supported with oauth2client<4.0.0
+2025-12-18 11:31:28,174 [INFO] file_cache is only supported with oauth2client<4.0.0
+2025-12-18 11:36:04,822 [INFO] file_cache is only supported with oauth2client<4.0.0

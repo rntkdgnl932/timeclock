@@ -60,9 +60,18 @@ def write_backup_id(backup_id: str):
 # ---------------------------
 # local backup / restore
 # ---------------------------
-def run_backup(reason="auto"):
-    """DB 백업 수행 (BACKUP_DIR/{backup_id}/filename)"""
+def run_backup(reason="auto", progress_callback=None):
+    """DB 백업 수행 (progress_callback을 통해 로그 전달 가능)"""
+
+    # 내부 헬퍼: callback이 있으면 UI로, 없으면 print로 출력
+    def log(msg):
+        if progress_callback:
+            progress_callback({"msg": msg})
+        else:
+            print(f"[Backup] {msg}")
+
     try:
+        log("로컬 백업 디렉토리 확인 중...")
         if not BACKUP_DIR.exists():
             BACKUP_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -75,16 +84,25 @@ def run_backup(reason="auto"):
         target_path = target_dir / filename
 
         # 로컬 백업
+        log(f"로컬 파일 복사 중... ({filename})")
         shutil.copy2(DB_PATH, target_path)
-        msg = f"백업 완료: {backup_id}/{filename}"
-        print(f"[Backup] {msg}")
+
+        msg = f"백업 완료: {filename}"
 
         # 구글 드라이브 백업
         if HAS_GOOGLE_DRIVE:
             try:
+                log("구글 드라이브 업로드 준비 중...")
+                # upload_to_gdrive 내부에는 callback 연결이 없으므로, 여기서 메시지를 띄우고 실행
+                log("구글 드라이브에 업로드 중입니다. (잠시만 기다려주세요...)")
+
                 upload_to_gdrive(target_path, filename, backup_id=backup_id)
+
+                log("구글 드라이브 업로드 성공!")
                 msg += " (+Google Drive)"
             except Exception as e:
+                err_msg = f"구글 드라이브 오류: {e}"
+                log(err_msg)
                 print(f"[Google Drive Error] {e}")
 
         return True, msg

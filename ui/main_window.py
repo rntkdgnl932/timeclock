@@ -11,6 +11,8 @@ from ui.worker_page import WorkerPage
 from ui.owner_page import OwnerPage
 from ui.signup_page import SignupPage
 from ui.dialogs import ChangePasswordDialog
+from timeclock import backup_manager
+from ui.async_helper import run_job_with_progress_async
 
 
 
@@ -40,6 +42,22 @@ class MainWindow(QtWidgets.QMainWindow):
         self._signup_page = None
 
         self._create_menu()
+
+        QtCore.QTimer.singleShot(200, self.run_startup_backup)
+
+    def run_startup_backup(self):
+        """프로그램 시작 시 자동 백업 (비동기 + 진행바)"""
+
+        def job_fn(progress_callback):
+            # 프로그램 시작 백업 실행
+            return backup_manager.run_backup("program_start", progress_callback)
+
+        # 진행바 띄우기
+        run_job_with_progress_async(
+            self,
+            "프로그램 시작 데이터 백업",
+            job_fn
+        )
 
     def _create_menu(self):
         menubar = self.menuBar()

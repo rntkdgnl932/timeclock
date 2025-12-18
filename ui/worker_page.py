@@ -4,6 +4,7 @@ from PyQt5 import QtWidgets, QtCore
 from datetime import datetime
 from timeclock.salary import SalaryCalculator
 from timeclock import backup_manager
+from ui.async_helper import run_job_with_progress_async
 
 from timeclock.utils import Message
 from timeclock.settings import WORK_STATUS
@@ -176,53 +177,103 @@ class WorkerPage(QtWidgets.QWidget):
             self.btn_action.setProperty("mode", "DONE")
             self.btn_action.setEnabled(False)
 
-
-
     def on_work_action(self):
         mode = self.btn_action.property("mode")
-        try:
-            if mode == "IN":
-                # 커스텀 알림창 생성
-                msg_box = QtWidgets.QMessageBox(self)
-                msg_box.setWindowTitle("작업 시작 확인")
-                msg_box.setIcon(QtWidgets.QMessageBox.Warning)
-                msg_box.setText("반드시 작업 시작시 작업 시작 요청을 해야합니다.\n\n작업 준비 시간은 실제 근무시간에 포함되지 않습니다.")
 
-                # 버튼 추가 (이해했습니다 / 준비하러갈게요)
-                btn_yes = msg_box.addButton("이해했습니다", QtWidgets.QMessageBox.YesRole)
-                btn_no = msg_box.addButton("준비하러갈게요", QtWidgets.QMessageBox.NoRole)
+        # [1] 출근 요청 (IN)
+        if mode == "IN":
+            # 커스텀 알림창 생성
+            msg_box = QtWidgets.QMessageBox(self)
+            msg_box.setWindowTitle("작업 시작 확인")
+            msg_box.setIcon(QtWidgets.QMessageBox.Warning)
+            msg_box.setText("반드시 작업 시작시 작업 시작 요청을 해야합니다.\n\n작업 준비 시간은 실제 근무시간에 포함되지 않습니다.")
 
-                msg_box.exec_()
+            # 버튼 추가 (이해했습니다 / 준비하러갈게요)
+            btn_yes = msg_box.addButton("이해했습니다", QtWidgets.QMessageBox.YesRole)
+            btn_no = msg_box.addButton("준비하러갈게요", QtWidgets.QMessageBox.NoRole)
 
-                if msg_box.clickedButton() == btn_yes:
-                    # DB에 시작 요청 기록 (PENDING 상태)
+            msg_box.exec_()
+
+            if msg_box.clickedButton() == btn_yes:
+                # 1) DB에 시작 요청 기록 (먼저 처리)
+                try:
                     self.db.start_work(self.session.user_id)
-                    backup_manager.run_backup("request_in")
-                    Message.info(self, "요청 완료", "관리자에게 승인 요청을 보냈습니다.")
-                else:
-                    # 취소 시 아무 동작 안함
+                except Exception as e:
+                    Message.err(self, "오류", str(e))
                     return
 
-            elif mode == "OUT":
-                # 퇴근 요청 (추가 확인 없이 바로, 혹은 간단한 확인 후)
-                if Message.confirm(self, "퇴근 요청", "작업을 모두 마치고 퇴근 승인을 요청하시겠습니까?"):
-                    self.db.end_work(self.session.user_id)
-                    backup_manager.run_backup("request_out")
+                # 2) 비동기 백업 실행 (진행창 표시)
+                def job_fn(progress_callback):
+                    # 백그라운드에서 실행될 백업 함수
+                    return backup_manager.run_backup("request_in", progress_callback)
 
-                    # 3초 후 자동 닫히는 알림창
+                def on_done(ok, res, err):
+                    # 백업 완료 후 실행될 UI 로직
+                    if ok:
+                        Message.info(self, "요청 완료", "관리자에게 승인 요청을 보냈습니다.\n(데이터 백업 완료)")
+                    else:
+                        Message.err(self, "백업 실패", f"요청은 되었으나 백업 실패: {err}")
+
+                    self.refresh()
+                    self._update_action_button()
+
+                # 진행창 띄우기
+                run_job_with_progress_async(
+                    self,
+                    "출근 요청 데이터 백업 중...",
+                    job_fn,
+                    on_done=on_done
+                )
+            else:
+                # 취소 시 아무 동작 안함
+                return
+
+        # [2] 퇴근 요청 (OUT)
+        elif mode == "OUT":
+            # 퇴근 요청 확인
+            if Message.confirm(self, "퇴근 요청", "작업을 모두 마치고 퇴근 승인을 요청하시겠습니까?"):
+                # 1) DB에 퇴근 기록
+                try:
+                    self.db.end_work(self.session.user_id)
+                except Exception as e:
+                    Message.err(self, "오류", str(e))
+                    return
+
+                # 2) 비동기 백업 실행
+                def job_fn(progress_callback):
+                    return backup_manager.run_backup("request_out", progress_callback)
+
+                def on_done(ok, res, err):
+                    # 백업 완료 후 '수고하셨습니다' 알림창 표시
                     auto_close_dlg = QtWidgets.QMessageBox(self)
                     auto_close_dlg.setWindowTitle("퇴근")
-                    auto_close_dlg.setText("수고하셨습니다.")
-                    auto_close_dlg.setStandardButtons(QtWidgets.QMessageBox.NoButton)  # 버튼 없음
+
+                    if ok:
+                        auto_close_dlg.setText("수고하셨습니다. (백업 완료)")
+                    else:
+                        auto_close_dlg.setText(f"수고하셨습니다. (백업 실패: {err})")
+
+                    auto_close_dlg.setStandardButtons(QtWidgets.QMessageBox.NoButton)
 
                     # 3초(3000ms) 뒤에 자동으로 닫힘
                     QtCore.QTimer.singleShot(3000, auto_close_dlg.accept)
                     auto_close_dlg.exec_()
 
+                    self.refresh()
+                    self._update_action_button()
+
+                # 진행창 띄우기
+                run_job_with_progress_async(
+                    self,
+                    "퇴근 요청 데이터 백업 중...",
+                    job_fn,
+                    on_done=on_done
+                )
+
+        # [3] 그 외 상태 (이미 완료됨 등) -> 화면 갱신만
+        else:
             self.refresh()
             self._update_action_button()
-        except Exception as e:
-            Message.err(self, "오류", str(e))
 
     def refresh(self):
         d1, d2 = self.filter.get_range()
