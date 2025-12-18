@@ -7,6 +7,8 @@ from datetime import datetime
 import os
 from pathlib import Path
 from timeclock.settings import DATA_DIR
+import sys
+import subprocess
 
 from timeclock.excel_maker import generate_payslip, create_default_template
 from ui.dialogs import ConfirmPasswordDialog, ProfileEditDialog
@@ -34,9 +36,7 @@ class OwnerPage(QtWidgets.QWidget):
 
         self._btn_min_h = 34
 
-        # ----------------------------------------------------------
-        # Theme / base style (Owner mode)
-        # ----------------------------------------------------------
+        # 테마 적용
         self._apply_owner_theme()
 
         # ----------------------------------------------------------
@@ -72,7 +72,6 @@ class OwnerPage(QtWidgets.QWidget):
         self._set_btn_variant(self.btn_change_pw, "ghost")
         self._set_btn_variant(self.btn_logout, "danger_outline")
 
-        # 🔴 [수정] disconnect() 라인 삭제함 (에러 원인 제거)
         self.btn_change_pw.clicked.connect(self.open_personal_info)
         self.btn_logout.clicked.connect(self.logout_requested.emit)
 
@@ -80,7 +79,7 @@ class OwnerPage(QtWidgets.QWidget):
         header_layout.addWidget(self.btn_logout)
 
         # ----------------------------------------------------------
-        # KPI cards row (pending counts)
+        # KPI cards row
         # ----------------------------------------------------------
         kpi_row = QtWidgets.QHBoxLayout()
         kpi_row.setContentsMargins(0, 0, 0, 0)
@@ -106,9 +105,12 @@ class OwnerPage(QtWidgets.QWidget):
         self.tabs.addTab(self._build_member_tab(), "직원 관리")
         self.tabs.addTab(self._build_restore_tab(), "백업/복구")
 
+        # ✅ [추가된 부분] 시스템 업데이트 탭
+        self.tabs.addTab(self._build_update_tab(), "시스템 업데이트")
+
         self._tune_owner_tabbar()
 
-        # container card around tabs
+        # Tabs Container
         tabs_card = QtWidgets.QFrame()
         tabs_card.setObjectName("OwnerTabsCard")
         tabs_card_layout = QtWidgets.QVBoxLayout(tabs_card)
@@ -1376,6 +1378,111 @@ class OwnerPage(QtWidgets.QWidget):
         dlg = PersonalInfoDialog(self.db, self.session.user_id, self)
         dlg.exec_()
 
+    # ----------------------------------------------------------------------
+    # [신규 기능] 시스템 업데이트 탭 관련 함수들
+    # ----------------------------------------------------------------------
+    def _build_update_tab(self):
+        layout = QtWidgets.QVBoxLayout()
+        layout.setSpacing(20)
+        layout.setContentsMargins(50, 50, 50, 50)
+        layout.setAlignment(QtCore.Qt.AlignCenter)
+
+        # 아이콘 및 설명
+        lbl_icon = QtWidgets.QLabel("🚀")
+        lbl_icon.setStyleSheet("font-size: 60px;")
+        lbl_icon.setAlignment(QtCore.Qt.AlignCenter)
+        layout.addWidget(lbl_icon)
+
+        lbl_title = QtWidgets.QLabel("최신 버전 업데이트")
+        lbl_title.setStyleSheet("font-size: 24px; font-weight: bold; color: #333;")
+        lbl_title.setAlignment(QtCore.Qt.AlignCenter)
+        layout.addWidget(lbl_title)
+
+        lbl_desc = QtWidgets.QLabel(
+            "서버(GitHub)에 올라온 최신 기능과 버그 수정 사항을 다운로드합니다.\n"
+            "업데이트가 완료되면 프로그램이 자동으로 재시작됩니다."
+        )
+        lbl_desc.setStyleSheet("font-size: 14px; color: #666; line-height: 1.5;")
+        lbl_desc.setAlignment(QtCore.Qt.AlignCenter)
+        layout.addWidget(lbl_desc)
+
+        # 업데이트 버튼
+        self.btn_update = QtWidgets.QPushButton("지금 업데이트 실행 (Git Pull)")
+        self.btn_update.setCursor(QtCore.Qt.PointingHandCursor)
+        self.btn_update.setFixedSize(250, 50)
+        self.btn_update.setStyleSheet("""
+            QPushButton {
+                background-color: #2196F3; color: white; border-radius: 25px;
+                font-size: 16px; font-weight: bold;
+            }
+            QPushButton:hover { background-color: #1976D2; }
+        """)
+        self.btn_update.clicked.connect(self.run_git_update)
+        layout.addWidget(self.btn_update)
+
+        # 저장소 주소 표시
+        lbl_repo = QtWidgets.QLabel("Repository: https://github.com/rntkdgnl932/timeclock.git")
+        lbl_repo.setStyleSheet("font-size: 11px; color: #999; margin-top: 20px;")
+        lbl_repo.setAlignment(QtCore.Qt.AlignCenter)
+        layout.addWidget(lbl_repo)
+
+        layout.addStretch(1)
+
+        w = QtWidgets.QWidget()
+        w.setLayout(layout)
+        return w
+
+    def run_git_update(self):
+        if not Message.confirm(self, "업데이트", "최신 버전을 다운로드하고 프로그램을 재시작하시겠습니까?\n(저장되지 않은 작업은 사라질 수 있습니다.)"):
+            return
+
+        # 1. 작업 정의 (Git Pull 실행)
+        def job_fn(progress_callback):
+            progress_callback({"msg": "Git 설정 확인 중..."})
+
+            # .git 폴더가 없으면 초기화 시도 (혹시 모를 상황 대비)
+            if not os.path.exists(".git"):
+                progress_callback({"msg": "Git 저장소 초기화 중..."})
+                subprocess.run(["git", "init"], check=True)
+                subprocess.run(["git", "remote", "add", "origin", "https://github.com/rntkdgnl932/timeclock.git"],
+                               check=False)
+
+            progress_callback({"msg": "최신 변경사항 가져오는 중 (Fetch)..."})
+            subprocess.run(["git", "fetch", "--all"], capture_output=True)
+
+            progress_callback({"msg": "코드 업데이트 중 (Pull)..."})
+            # 강제 덮어쓰기보다는 일반 pull 시도. 충돌 시 에러 발생.
+            result = subprocess.run(["git", "pull"], capture_output=True, text=True, encoding='utf-8')
+
+            if result.returncode != 0:
+                raise Exception(f"업데이트 실패:\n{result.stderr}")
+
+            return f"업데이트 성공:\n{result.stdout}"
+
+        # 2. 완료 후 재시작
+        def on_done(ok, res, err):
+            if ok:
+                Message.info(self, "업데이트 완료", "최신 버전을 적용하기 위해 프로그램을 재시작합니다.")
+                self._restart_program()
+            else:
+                # 실패 시 로그는 창에 남음
+                pass
+
+        # 3. 실행
+        run_job_with_progress_async(
+            self,
+            "시스템 업데이트",
+            job_fn,
+            on_done=on_done
+        )
+
+    def _restart_program(self):
+        """현재 파이썬 프로그램을 재시작합니다."""
+        try:
+            python = sys.executable
+            os.execl(python, python, *sys.argv)
+        except Exception as e:
+            Message.err(self, "재시작 실패", f"자동 재시작에 실패했습니다. 수동으로 다시 실행해주세요.\n{e}")
 
 class WorkLogApproveDialog(QtWidgets.QDialog):
     def __init__(self, parent=None, row_data=None, mode="START"):
