@@ -72,7 +72,7 @@ class OwnerPage(QtWidgets.QWidget):
         self._set_btn_variant(self.btn_change_pw, "ghost")
         self._set_btn_variant(self.btn_logout, "danger_outline")
 
-        self.btn_change_pw.clicked.disconnect()
+        # 🔴 [수정] disconnect() 라인 삭제함 (에러 원인 제거)
         self.btn_change_pw.clicked.connect(self.open_personal_info)
         self.btn_logout.clicked.connect(self.logout_requested.emit)
 

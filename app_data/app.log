@@ -2203,3 +2203,16 @@ TypeError: 'QFrame' object is not subscriptable
 2025-12-18 11:49:53,112 [INFO] Logged in: test01 (worker)
 2025-12-18 11:49:56,517 [INFO] file_cache is only supported with oauth2client<4.0.0
 2025-12-18 11:50:11,716 [INFO] Logout: test01
+2025-12-18 11:54:05,566 [INFO] file_cache is only supported with oauth2client<4.0.0
+2025-12-18 11:54:20,742 [INFO] Logged in: test01 (worker)
+2025-12-18 11:54:36,462 [INFO] Logout: test01
+2025-12-18 11:55:17,800 [INFO] Logged in: worker (worker)
+2025-12-18 11:56:53,505 [INFO] Logout: worker
+2025-12-18 11:57:07,066 [INFO] Logged in: beautysujin (worker)
+2025-12-18 11:57:07,067 [ERROR] Failed to create page after login
+Traceback (most recent call last):
+  File "C:\my_games\timeclock\ui\main_window.py", line 226, in on_logged_in
+    self._owner_page = OwnerPage(self.db, session)
+  File "C:\my_games\timeclock\ui\owner_page.py", line 75, in __init__
+    self.btn_change_pw.clicked.disconnect()
+TypeError: disconnect() failed between 'clicked' and all its connections
