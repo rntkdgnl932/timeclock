@@ -1440,7 +1440,7 @@ class OwnerPage(QtWidgets.QWidget):
         def job_fn(progress_callback):
             progress_callback({"msg": "현재 변경사항 임시 보관 중 (Stash)..."})
 
-            # [핵심] 내 수정사항(버전 표시 등)을 잠시 안전한 곳으로 치워둡니다.
+            # 내 수정사항을 잠시 치워둡니다.
             subprocess.run(["git", "stash"], capture_output=True)
 
             progress_callback({"msg": "Git 설정 확인 중..."})
@@ -1455,27 +1455,34 @@ class OwnerPage(QtWidgets.QWidget):
 
             progress_callback({"msg": "업데이트 적용 중 (Pull)..."})
             # 서버 코드를 당겨옵니다.
-            result = subprocess.run(["git", "pull"], capture_output=True, text=True, encoding='utf-8')
+            pull_res = subprocess.run(["git", "pull"], capture_output=True, text=True, encoding='utf-8')
 
-            if result.returncode != 0:
+            if pull_res.returncode != 0:
                 # 실패하면 치워뒀던거라도 다시 원상복구 시도
                 subprocess.run(["git", "stash", "pop"], capture_output=True)
-                raise Exception(f"업데이트 실패:\n{result.stderr}")
+                raise Exception(f"업데이트 실패:\n{pull_res.stderr}")
 
-            # 업데이트 성공 후, 아까 치워뒀던 내 기능(버전 표시 등)을 다시 합칩니다.
+            # 업데이트 성공 후, 아까 치워뒀던 내 기능을 다시 합칩니다.
             progress_callback({"msg": "내 변경사항 복구 중..."})
-            subprocess.run(["git", "stash", "pop"], capture_output=True)
+            pop_res = subprocess.run(["git", "stash", "pop"], capture_output=True, text=True, encoding='utf-8')
 
-            return f"업데이트 성공:\n{result.stdout}"
+            # 🔴 [핵심] 복구 중 충돌이 났는지 확인
+            if pop_res.returncode != 0 and "CONFLICT" in pop_res.stdout:
+                return f"⚠️ 업데이트는 완료되었으나, 설정 복구 중 '충돌'이 발생했습니다.\n재시작 전에 코드를 확인해주세요.\n\n{pop_res.stdout}"
 
-        # 2. 완료 후 재시작
+            return f"업데이트 성공:\n{pull_res.stdout}"
+
+        # 2. 완료 후 처리
         def on_done(ok, res, err):
             if ok:
-                Message.info(self, "업데이트 완료", "최신 버전을 적용하기 위해 프로그램을 재시작합니다.")
-                self._restart_program()
+                # 결과 메시지에 '충돌'이나 'Warning'이 있으면 재시작하지 않음
+                if "충돌" in str(res) or "CONFLICT" in str(res):
+                    Message.warn(self, "주의 (재시작 취소)", f"{res}")
+                else:
+                    Message.info(self, "업데이트 완료", "최신 버전을 적용하기 위해 프로그램을 재시작합니다.")
+                    self._restart_program()
             else:
-                # 실패 시 로그는 창에 남음
-                pass
+                pass  # 에러는 async_helper 창에 남음
 
         # 3. 실행
         run_job_with_progress_async(
@@ -1484,6 +1491,15 @@ class OwnerPage(QtWidgets.QWidget):
             job_fn,
             on_done=on_done
         )
+
+    def _restart_program(self):
+        """현재 파이썬 프로그램을 재시작합니다."""
+        try:
+            # 🔴 import sys가 상단에 있는지 꼭 확인하세요!
+            python = sys.executable
+            os.execl(python, python, *sys.argv)
+        except Exception as e:
+            Message.err(self, "재시작 실패", f"자동 재시작에 실패했습니다. 수동으로 다시 실행해주세요.\n{e}")
 
     def _restart_program(self):
         """현재 파이썬 프로그램을 재시작합니다."""
