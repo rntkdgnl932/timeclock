@@ -9,6 +9,7 @@ from pathlib import Path
 from timeclock.settings import DATA_DIR
 import sys
 import subprocess
+import git
 
 from timeclock.excel_maker import generate_payslip, create_default_template
 from ui.dialogs import ConfirmPasswordDialog, ProfileEditDialog
@@ -1433,61 +1434,43 @@ class OwnerPage(QtWidgets.QWidget):
         return w
 
     def run_git_update(self):
-        if not Message.confirm(self, "업데이트", "최신 버전을 다운로드하고 프로그램을 재시작하시겠습니까?\n(현재 적용된 변경사항은 잠시 보관됩니다.)"):
+        if not Message.confirm(self, "업데이트", "최신 버전을 다운로드하고 프로그램을 재시작하시겠습니까?\n(주의: 로컬 변경사항은 초기화됩니다.)"):
             return
 
-        # 1. 작업 정의 (Git Stash -> Pull -> Pop)
+        # 1. 작업 정의 (GitPython 사용)
         def job_fn(progress_callback):
-            progress_callback({"msg": "현재 변경사항 임시 보관 중 (Stash)..."})
+            import git  # 혹시 몰라 안에서도 import
 
-            # 내 수정사항을 잠시 치워둡니다.
-            subprocess.run(["git", "stash"], capture_output=True)
+            # 현재 폴더를 저장소로 인식
+            repo = git.Repo(os.getcwd())
 
-            progress_callback({"msg": "Git 설정 확인 중..."})
-            if not os.path.exists(".git"):
-                progress_callback({"msg": "Git 저장소 초기화 중..."})
-                subprocess.run(["git", "init"], check=True)
-                subprocess.run(["git", "remote", "add", "origin", "https://github.com/rntkdgnl932/timeclock.git"],
-                               check=False)
+            progress_callback({"msg": "변경사항 강제 초기화 중..."})
+            # 충돌 방지를 위해 로컬 변경사항을 싹 날리고 서버 상태와 맞춤
+            repo.git.reset('--hard')
 
-            progress_callback({"msg": "최신 코드 가져오는 중 (Fetch)..."})
-            subprocess.run(["git", "fetch", "--all"], capture_output=True)
+            progress_callback({"msg": "최신 코드 당겨오는 중 (Pull)..."})
+            # origin/main (또는 현재 브랜치) 당겨오기
+            repo.remotes.origin.pull()
 
-            progress_callback({"msg": "업데이트 적용 중 (Pull)..."})
-            # 서버 코드를 당겨옵니다.
-            pull_res = subprocess.run(["git", "pull"], capture_output=True, text=True, encoding='utf-8')
+            return "업데이트 성공! 재시작합니다."
 
-            if pull_res.returncode != 0:
-                # 실패하면 치워뒀던거라도 다시 원상복구 시도
-                subprocess.run(["git", "stash", "pop"], capture_output=True)
-                raise Exception(f"업데이트 실패:\n{pull_res.stderr}")
-
-            # 업데이트 성공 후, 아까 치워뒀던 내 기능을 다시 합칩니다.
-            progress_callback({"msg": "내 변경사항 복구 중..."})
-            pop_res = subprocess.run(["git", "stash", "pop"], capture_output=True, text=True, encoding='utf-8')
-
-            # 🔴 [핵심] 복구 중 충돌이 났는지 확인
-            if pop_res.returncode != 0 and "CONFLICT" in pop_res.stdout:
-                return f"⚠️ 업데이트는 완료되었으나, 설정 복구 중 '충돌'이 발생했습니다.\n재시작 전에 코드를 확인해주세요.\n\n{pop_res.stdout}"
-
-            return f"업데이트 성공:\n{pull_res.stdout}"
-
-        # 2. 완료 후 처리
+        # 2. 완료 후 재시작 (사용자님이 제안하신 os.execl 사용)
         def on_done(ok, res, err):
             if ok:
-                # 결과 메시지에 '충돌'이나 'Warning'이 있으면 재시작하지 않음
-                if "충돌" in str(res) or "CONFLICT" in str(res):
-                    Message.warn(self, "주의 (재시작 취소)", f"{res}")
-                else:
-                    Message.info(self, "업데이트 완료", "최신 버전을 적용하기 위해 프로그램을 재시작합니다.")
-                    self._restart_program()
+                # 사용자가 메시지를 읽을 시간을 0.5초 정도 줌 (선택사항)
+                Message.info(self, "완료", "최신 버전으로 업데이트되었습니다.\n확인을 누르면 프로그램이 재시작됩니다.")
+
+                # 🚀 프로그램 재시작 (사용자님 제안 코드)
+                time.sleep(1)
+                os.execl(sys.executable, sys.executable, *sys.argv)
             else:
-                pass  # 에러는 async_helper 창에 남음
+                # 에러 발생 시 로그는 async_helper 창에 남음
+                pass
 
         # 3. 실행
         run_job_with_progress_async(
             self,
-            "시스템 업데이트",
+            "시스템 업데이트 (GitPython)",
             job_fn,
             on_done=on_done
         )
