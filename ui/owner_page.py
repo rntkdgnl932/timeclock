@@ -1434,58 +1434,41 @@ class OwnerPage(QtWidgets.QWidget):
         return w
 
     def run_git_update(self):
-        # 1. 라이브러리 체크
-        try:
-            import git
-        except ImportError:
-            Message.err(self, "오류", "GitPython이 설치되지 않았습니다.\n터미널에 'pip install GitPython'을 입력하세요.")
+        # 1. 실행 전 확인
+        if not Message.confirm(self, "업데이트", "최신 버전을 다운로드하고 프로그램을 재시작하시겠습니까?"):
             return
 
-        if not Message.confirm(self, "업데이트", "최신 버전을 다운로드하고 프로그램을 재시작하시겠습니까?\n(주의: 로컬 변경사항은 초기화됩니다.)"):
-            return
-
-        # 2. 업데이트 작업 (Lock 파일 자동 삭제 + 강제 초기화 + Pull)
+        # 2. 업데이트 작업 (사용자님이 주신 코드 로직 적용)
         def job_fn(progress_callback):
-            import git
-            import os
+            import git  # GitPython 라이브러리 사용
 
-            # 현재 작업 경로
-            cwd = os.getcwd()
-            repo = git.Repo(cwd)
+            progress_callback({"msg": "업데이트 다운로드 중 (Git Pull)..."})
 
-            # 🔴 [핵심 수정] 꼬인 Git 자물쇠(.git/index.lock)가 있으면 강제로 삭제
-            lock_path = os.path.join(cwd, ".git", "index.lock")
-            if os.path.exists(lock_path):
-                progress_callback({"msg": "잠긴 Git 파일(index.lock) 강제 삭제 중..."})
-                try:
-                    os.remove(lock_path)
-                except Exception as e:
-                    # 삭제 실패 시 로그만 남기고 진행 시도 (권한 문제 등)
-                    print(f"Lock file delete failed: {e}")
+            # 👇 말씀하신 핵심 코드 그대로 적용
+            my_repo = git.Repo()
+            my_repo.remotes.origin.pull()
 
-            progress_callback({"msg": "변경사항 강제 초기화 중..."})
-            # 충돌 방지를 위해 로컬 변경사항을 싹 날리고 서버 상태와 맞춤
-            repo.git.reset('--hard')
-
-            progress_callback({"msg": "최신 코드 당겨오는 중 (Pull)..."})
-            # origin/main (또는 현재 브랜치) 당겨오기
-            repo.remotes.origin.pull()
-
-            return "업데이트 성공! 재시작합니다."
+            return "업데이트 성공"
 
         # 3. 완료 후 재시작
         def on_done(ok, res, err):
             if ok:
-                Message.info(self, "완료", "최신 버전으로 업데이트되었습니다.\n확인을 누르면 프로그램이 재시작됩니다.")
+                # 업데이트 성공 시 바로 재시작
+                import time
+                import sys
+                import os
+
                 time.sleep(1)
                 os.execl(sys.executable, sys.executable, *sys.argv)
             else:
-                # 에러 발생 시 로그는 async_helper 창에 남음
+                # 실패 시 에러 메시지는 async_helper 창에 남습니다.
                 pass
+
+                # 4. 실행 (UI 멈춤 방지를 위해 스레드로 실행)
 
         run_job_with_progress_async(
             self,
-            "시스템 업데이트 (GitPython)",
+            "시스템 업데이트",
             job_fn,
             on_done=on_done
         )
