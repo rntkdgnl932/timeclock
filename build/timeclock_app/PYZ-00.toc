@@ -2476,6 +2476,7 @@
   ('timeclock.utils',
    'C:\\my_games\\timeclock\\timeclock\\utils.py',
    'PYMODULE'),
+  ('timeclock_app', 'C:\\my_games\\timeclock\\timeclock_app.py', 'PYMODULE'),
   ('token',
    'C:\\Users\\구대표\\AppData\\Local\\Programs\\Python\\Python310\\lib\\token.py',
    'PYMODULE'),
