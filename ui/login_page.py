@@ -91,7 +91,7 @@ class LoginPage(QtWidgets.QWidget):
         version_text = self._get_version_text()
         if version_text:
             self.version_label = QtWidgets.QLabel(version_text)
-            self.version_label.setAlignment(QtCore.Qt.AlignRight)   # AlignCenter  /  AlignRight
+            self.version_label.setAlignment(QtCore.Qt.AlignCenter)   # AlignCenter  /  AlignRight
             # 아주 작고 연한 회색 글씨로 설정
             self.version_label.setStyleSheet("color: #b0bec5; font-size: 11px; margin-bottom: 5px;")
             card_layout.addWidget(self.version_label)
