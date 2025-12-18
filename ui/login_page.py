@@ -1,6 +1,7 @@
 # ui/login_page.py
 # -*- coding: utf-8 -*-
 import logging
+import os  # [추가] 파일 읽기를 위해 필요
 from dataclasses import dataclass
 from PyQt5 import QtWidgets, QtCore, QtGui
 
@@ -73,7 +74,7 @@ class LoginPage(QtWidgets.QWidget):
             logo_font = QtGui.QFont("Malgun Gothic", 40, QtGui.QFont.Bold)
 
         self.logo_label.setFont(logo_font)
-        self.logo_label.setStyleSheet("color: #5d4037; margin-bottom: 10px;")  # 진한 브라운
+        self.logo_label.setStyleSheet("color: #5d4037; margin-bottom: 0px;")  # 여백 조절
 
         # 로고 은은한 그림자
         logo_shadow = QtWidgets.QGraphicsDropShadowEffect()
@@ -83,6 +84,18 @@ class LoginPage(QtWidgets.QWidget):
         self.logo_label.setGraphicsEffect(logo_shadow)
 
         card_layout.addWidget(self.logo_label)
+
+        # ------------------------------------------------------------------
+        # 🆕 [추가] 버전 정보 표시 (version.txt 읽기)
+        # ------------------------------------------------------------------
+        version_text = self._get_version_text()
+        if version_text:
+            self.version_label = QtWidgets.QLabel(version_text)
+            self.version_label.setAlignment(QtCore.Qt.AlignCenter)
+            # 아주 작고 연한 회색 글씨로 설정
+            self.version_label.setStyleSheet("color: #b0bec5; font-size: 11px; margin-bottom: 5px;")
+            card_layout.addWidget(self.version_label)
+        # ------------------------------------------------------------------
 
         sub_title = QtWidgets.QLabel("근로시간 관리 시스템")
         sub_title.setAlignment(QtCore.Qt.AlignCenter)
@@ -113,7 +126,7 @@ class LoginPage(QtWidgets.QWidget):
         self.le_pass.setEchoMode(QtWidgets.QLineEdit.Password)
         self.le_pass.setStyleSheet(input_style)
 
-        # 🟢 [수정 1] 엔터키 입력 시 로그인 시도
+        # 엔터키 입력 시 로그인 시도
         self.le_user.returnPressed.connect(self.on_login)
         self.le_pass.returnPressed.connect(self.on_login)
 
@@ -165,7 +178,24 @@ class LoginPage(QtWidgets.QWidget):
 
         main_layout.addWidget(self.card)
 
-    # 🟢 [수정 2] 화면이 보여질 때(ShowEvent) 입력창 초기화
+    # 🆕 [추가] version.txt 읽어오는 함수
+    def _get_version_text(self):
+        try:
+            # 1. 우선 C:\my_games\timeclock\version.txt 경로 확인
+            target_path = r"C:\my_games\timeclock\version.txt"
+
+            # 2. 만약 없다면 현재 실행 파일 위치의 version.txt 확인 (개발 환경 대비)
+            if not os.path.exists(target_path):
+                target_path = "version.txt"
+
+            if os.path.exists(target_path):
+                with open(target_path, "r", encoding="utf-8") as f:
+                    ver = f.read().strip()
+                    return f"Ver {ver}"  # 예: Ver 1.0.2
+        except Exception:
+            pass
+        return ""  # 파일이 없거나 에러나면 아무것도 표시 안 함
+
     def showEvent(self, event):
         # 아이디, 비번 칸을 모두 비우고 아이디 칸에 포커스
         self.le_user.clear()
