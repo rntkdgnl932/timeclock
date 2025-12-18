@@ -74,7 +74,7 @@
  [],
  False,
  False,
- 1765961068,
+ 1766029033,
  [('run.exe',
    'C:\\my_games\\timeclock\\.venv\\lib\\site-packages\\PyInstaller\\bootloader\\Windows-64bit-intel\\run.exe',
    'EXECUTABLE')],
