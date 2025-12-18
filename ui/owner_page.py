@@ -1456,7 +1456,7 @@ class OwnerPage(QtWidgets.QWidget):
         my_repo.remotes.origin.pull()
         # 실행 후 재시작 부분
         os.execl(sys.executable, sys.executable, *sys.argv)
-        
+
 
     def run_git_update_ex(self):
         # 1. 실행 전 확인
