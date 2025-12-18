@@ -2216,3 +2216,11 @@ Traceback (most recent call last):
   File "C:\my_games\timeclock\ui\owner_page.py", line 75, in __init__
     self.btn_change_pw.clicked.disconnect()
 TypeError: disconnect() failed between 'clicked' and all its connections
+2025-12-18 12:00:21,746 [INFO] access_token is expired. Now: 2025-12-18 03:00:21.746110, token_expiry: 2025-12-18 03:00:14
+2025-12-18 12:00:21,747 [INFO] Refreshing access_token
+2025-12-18 12:00:21,983 [INFO] file_cache is only supported with oauth2client<4.0.0
+2025-12-18 12:00:33,775 [INFO] Logged in: test01 (worker)
+2025-12-18 12:00:35,134 [INFO] Logout: test01
+2025-12-18 12:00:43,617 [INFO] Logged in: beautysujin (worker)
+2025-12-18 12:01:26,382 [INFO] file_cache is only supported with oauth2client<4.0.0
+2025-12-18 12:01:47,434 [INFO] file_cache is only supported with oauth2client<4.0.0

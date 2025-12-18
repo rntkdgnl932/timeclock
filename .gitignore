@@ -6,7 +6,6 @@
 __pycache__/
 
 # 빌드 산출물
-build/
 dist/
 .env
 app_data/
