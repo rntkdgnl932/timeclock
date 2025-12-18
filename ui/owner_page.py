@@ -1433,29 +1433,38 @@ class OwnerPage(QtWidgets.QWidget):
         return w
 
     def run_git_update(self):
-        if not Message.confirm(self, "업데이트", "최신 버전을 다운로드하고 프로그램을 재시작하시겠습니까?\n(저장되지 않은 작업은 사라질 수 있습니다.)"):
+        if not Message.confirm(self, "업데이트", "최신 버전을 다운로드하고 프로그램을 재시작하시겠습니까?\n(현재 적용된 변경사항은 잠시 보관됩니다.)"):
             return
 
-        # 1. 작업 정의 (Git Pull 실행)
+        # 1. 작업 정의 (Git Stash -> Pull -> Pop)
         def job_fn(progress_callback):
-            progress_callback({"msg": "Git 설정 확인 중..."})
+            progress_callback({"msg": "현재 변경사항 임시 보관 중 (Stash)..."})
 
-            # .git 폴더가 없으면 초기화 시도 (혹시 모를 상황 대비)
+            # [핵심] 내 수정사항(버전 표시 등)을 잠시 안전한 곳으로 치워둡니다.
+            subprocess.run(["git", "stash"], capture_output=True)
+
+            progress_callback({"msg": "Git 설정 확인 중..."})
             if not os.path.exists(".git"):
                 progress_callback({"msg": "Git 저장소 초기화 중..."})
                 subprocess.run(["git", "init"], check=True)
                 subprocess.run(["git", "remote", "add", "origin", "https://github.com/rntkdgnl932/timeclock.git"],
                                check=False)
 
-            progress_callback({"msg": "최신 변경사항 가져오는 중 (Fetch)..."})
+            progress_callback({"msg": "최신 코드 가져오는 중 (Fetch)..."})
             subprocess.run(["git", "fetch", "--all"], capture_output=True)
 
-            progress_callback({"msg": "코드 업데이트 중 (Pull)..."})
-            # 강제 덮어쓰기보다는 일반 pull 시도. 충돌 시 에러 발생.
+            progress_callback({"msg": "업데이트 적용 중 (Pull)..."})
+            # 서버 코드를 당겨옵니다.
             result = subprocess.run(["git", "pull"], capture_output=True, text=True, encoding='utf-8')
 
             if result.returncode != 0:
+                # 실패하면 치워뒀던거라도 다시 원상복구 시도
+                subprocess.run(["git", "stash", "pop"], capture_output=True)
                 raise Exception(f"업데이트 실패:\n{result.stderr}")
+
+            # 업데이트 성공 후, 아까 치워뒀던 내 기능(버전 표시 등)을 다시 합칩니다.
+            progress_callback({"msg": "내 변경사항 복구 중..."})
+            subprocess.run(["git", "stash", "pop"], capture_output=True)
 
             return f"업데이트 성공:\n{result.stdout}"
 
