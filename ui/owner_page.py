@@ -1434,15 +1434,34 @@ class OwnerPage(QtWidgets.QWidget):
         return w
 
     def run_git_update(self):
+        # 1. 라이브러리 체크
+        try:
+            import git
+        except ImportError:
+            Message.err(self, "오류", "GitPython이 설치되지 않았습니다.\n터미널에 'pip install GitPython'을 입력하세요.")
+            return
+
         if not Message.confirm(self, "업데이트", "최신 버전을 다운로드하고 프로그램을 재시작하시겠습니까?\n(주의: 로컬 변경사항은 초기화됩니다.)"):
             return
 
-        # 1. 작업 정의 (GitPython 사용)
+        # 2. 업데이트 작업 (Lock 파일 자동 삭제 + 강제 초기화 + Pull)
         def job_fn(progress_callback):
-            import git  # 혹시 몰라 안에서도 import
+            import git
+            import os
 
-            # 현재 폴더를 저장소로 인식
-            repo = git.Repo(os.getcwd())
+            # 현재 작업 경로
+            cwd = os.getcwd()
+            repo = git.Repo(cwd)
+
+            # 🔴 [핵심 수정] 꼬인 Git 자물쇠(.git/index.lock)가 있으면 강제로 삭제
+            lock_path = os.path.join(cwd, ".git", "index.lock")
+            if os.path.exists(lock_path):
+                progress_callback({"msg": "잠긴 Git 파일(index.lock) 강제 삭제 중..."})
+                try:
+                    os.remove(lock_path)
+                except Exception as e:
+                    # 삭제 실패 시 로그만 남기고 진행 시도 (권한 문제 등)
+                    print(f"Lock file delete failed: {e}")
 
             progress_callback({"msg": "변경사항 강제 초기화 중..."})
             # 충돌 방지를 위해 로컬 변경사항을 싹 날리고 서버 상태와 맞춤
@@ -1454,20 +1473,16 @@ class OwnerPage(QtWidgets.QWidget):
 
             return "업데이트 성공! 재시작합니다."
 
-        # 2. 완료 후 재시작 (사용자님이 제안하신 os.execl 사용)
+        # 3. 완료 후 재시작
         def on_done(ok, res, err):
             if ok:
-                # 사용자가 메시지를 읽을 시간을 0.5초 정도 줌 (선택사항)
                 Message.info(self, "완료", "최신 버전으로 업데이트되었습니다.\n확인을 누르면 프로그램이 재시작됩니다.")
-
-                # 🚀 프로그램 재시작 (사용자님 제안 코드)
                 time.sleep(1)
                 os.execl(sys.executable, sys.executable, *sys.argv)
             else:
                 # 에러 발생 시 로그는 async_helper 창에 남음
                 pass
 
-        # 3. 실행
         run_job_with_progress_async(
             self,
             "시스템 업데이트 (GitPython)",
