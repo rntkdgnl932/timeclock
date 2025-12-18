@@ -109,13 +109,25 @@ class MainWindow(QtWidgets.QMainWindow):
     def do_backup(self):
         if not self._require_owner():
             return
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        out_path = BACKUP_DIR / f"timeclock_backup_{ts}.db"
-        try:
-            self.db.backup_db_copy(out_path)
-            Message.info(self, "백업 완료", f"DB 백업 완료:\n{out_path}")
-        except Exception as e:
-            Message.err(self, "오류", f"백업 중 오류: {e}")
+
+        # 1. 비동기 백업 함수 정의
+        def job_fn(progress_callback):
+            # "manual_owner"라는 태그로 백업 수행
+            return backup_manager.run_backup("manual_owner", progress_callback)
+
+        # 2. 완료 후 처리 (성공/실패 메시지 대신 자동 닫힘 처리됨)
+        def on_done(ok, res, err):
+            # 실패했을 때만 여기서 추가 메시지를 띄우거나,
+            # 성공 시에는 async_helper가 알아서 "완료" 후 닫아줌
+            pass
+
+        # 3. 진행창 실행
+        run_job_with_progress_async(
+            self,
+            "관리자 수동 DB 백업",
+            job_fn,
+            on_done=on_done
+        )
 
     def do_export_this_month(self):
         if not self._require_owner():

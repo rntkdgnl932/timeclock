@@ -10,6 +10,7 @@ from timeclock.settings import DATA_DIR
 
 from timeclock.excel_maker import generate_payslip, create_default_template
 from ui.dialogs import ConfirmPasswordDialog, ProfileEditDialog
+from ui.async_helper import run_job_with_progress_async
 
 from timeclock.utils import Message
 from ui.widgets import DateRangeBar, Table
@@ -524,21 +525,16 @@ class OwnerPage(QtWidgets.QWidget):
         target_row = dict(self._work_rows[row_idx])
         log_id = target_row["id"]
 
-        # 이미 승인 완료된 건인지 체크
         if target_row["status"] == "APPROVED" and mode == "START":
             Message.warn(self, "알림", "이미 완료된 건입니다.")
             return
 
-        # ★★★ 여기가 핵심입니다 ★★★
-        # 기존에는 여기서 직접 창을 만들었지만, 이제는 밑에 만들어둔
-        # 'WorkLogApproveDialog' (새 부품)을 불러옵니다.
         dialog = WorkLogApproveDialog(self, target_row, mode)
 
-        # 다이얼로그가 'OK'로 닫혔을 때 (로직 통과 후)
         if dialog.exec_() == QtWidgets.QDialog.Accepted:
-            # 새 클래스에서 정리된 데이터를 가져옴
             app_start, app_end, final_comment = dialog.get_data()
 
+            # 1) DB 업데이트 (즉시 처리)
             try:
                 self.db.approve_work_log(
                     log_id,
@@ -547,14 +543,31 @@ class OwnerPage(QtWidgets.QWidget):
                     app_end,
                     final_comment
                 )
-
-                if 'backup_manager' in globals():
-                    backup_manager.run_backup("approve")
-
-                Message.info(self, "완료", "작업 승인 및 기록이 저장되었습니다.")
-                self.refresh_work_logs()
             except Exception as e:
                 Message.err(self, "오류", f"승인 실패: {e}")
+                return
+
+            # 2) 백업 수행 (비동기 진행바)
+            def job_fn(progress_callback):
+                if 'backup_manager' in globals():
+                    return backup_manager.run_backup("approve", progress_callback)
+                return True, "백업 매니저 없음"
+
+            def on_done(ok, res, err):
+                # 백업까지 다 끝나면 메시지 띄우고 목록 갱신
+                # (성공 시 메시지는 async_helper가 '완료' 표시 후 자동 닫힘 처리하므로
+                #  추가 메시지가 필요하면 여기서 띄웁니다.)
+                if ok:
+                    # Message.info(self, "완료", "승인 처리가 완료되었습니다.") # 너무 팝업이 많으면 생략 가능
+                    pass
+                self.refresh_work_logs()
+
+            run_job_with_progress_async(
+                self,
+                "승인 데이터 백업 중...",
+                job_fn,
+                on_done=on_done
+            )
 
     # [추가] 작업 시작 반려(삭제) 기능
     def reject_start_request(self):
@@ -565,7 +578,6 @@ class OwnerPage(QtWidgets.QWidget):
 
         target_row = dict(self._work_rows[row_idx])
 
-        # 이미 근무중이거나 완료된 건은 경고
         if target_row["status"] in ["WORKING", "APPROVED"]:
             if not Message.confirm(self, "경고", "이미 승인된 작업입니다. 반려 처리하시겠습니까?\n(기록은 남지만 근무 시간에서는 제외됩니다.)"):
                 return
@@ -573,15 +585,30 @@ class OwnerPage(QtWidgets.QWidget):
             if not Message.confirm(self, "반려 확인", "해당 작업 요청을 반려하시겠습니까?\n근로자는 다시 요청을 보낼 수 있게 되며,\n이 기록은 '반려' 상태로 남습니다."):
                 return
 
+        # 1) DB 반려 처리 (즉시)
         try:
-            # ★ 삭제(delete) 대신 반려(reject) 함수 호출
             self.db.reject_work_log(target_row["id"])
-
-            backup_manager.run_backup("reject_log")
-            Message.info(self, "완료", "작업 요청이 반려되었습니다.\n근로자는 다시 요청할 수 있습니다.")
-            self.refresh_work_logs()
         except Exception as e:
             Message.err(self, "오류", f"반려 처리 실패: {e}")
+            return
+
+        # 2) 백업 수행 (비동기)
+        def job_fn(progress_callback):
+            return backup_manager.run_backup("reject_log", progress_callback)
+
+        def on_done(ok, res, err):
+            # 완료 후 목록 갱신
+            if ok:
+                # Message.info(self, "완료", "반려되었습니다.") # 필요 시 주석 해제
+                pass
+            self.refresh_work_logs()
+
+        run_job_with_progress_async(
+            self,
+            "반려 데이터 백업 중...",
+            job_fn,
+            on_done=on_done
+        )
 
     # ==========================================================
     # 2. 회원(급여) 관리 탭
@@ -1277,13 +1304,25 @@ class OwnerPage(QtWidgets.QWidget):
     def manual_backup(self):
         res = QtWidgets.QMessageBox.question(self, "저장", "현재 데이터를 백업하시겠습니까?",
                                              QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
-        if res == QtWidgets.QMessageBox.Yes:
-            ok, msg = backup_manager.run_backup("manual")
-            if ok:
-                Message.info(self, "성공", f"백업 완료!\n({msg})")
-            else:
-                Message.err(self, "실패", msg)
+        if res != QtWidgets.QMessageBox.Yes:
+            return
+
+        # 비동기 백업 실행
+        def job_fn(progress_callback):
+            return backup_manager.run_backup("manual", progress_callback)
+
+        def on_done(ok, res, err):
+            # 백업이 끝나면 목록을 새로고침
             self.refresh_backup_list()
+            # async_helper가 성공 시 자동으로 "완료" 후 닫히므로
+            # 별도 팝업은 띄우지 않아도 깔끔합니다.
+
+        run_job_with_progress_async(
+            self,
+            "수동 백업 진행 중...",
+            job_fn,
+            on_done=on_done
+        )
 
     def run_restore(self):
         row = self.table_backup.currentRow()
