@@ -8,7 +8,9 @@ from timeclock import backup_manager
 from timeclock.utils import Message
 from timeclock.settings import WORK_STATUS
 from ui.widgets import DateRangeBar, Table
-from ui.dialogs import DisputeTimelineDialog, DateRangeDialog
+from ui.dialogs import DisputeTimelineDialog, DateRangeDialog, ConfirmPasswordDialog, ProfileEditDialog
+from ui.dialogs import PersonalInfoDialog
+
 
 
 class WorkerPage(QtWidgets.QWidget):
@@ -47,12 +49,29 @@ class WorkerPage(QtWidgets.QWidget):
             QPushButton:hover { background-color: #eee; }
         """)
         self.btn_logout.clicked.connect(self.logout_requested.emit)
+
+
+        self.btn_profile = QtWidgets.QPushButton("개인정보 변경")
+        self.btn_profile.setCursor(QtCore.Qt.PointingHandCursor)
+        self.btn_profile.setStyleSheet("""
+            QPushButton {
+                background-color: #f5f5f5; border-radius: 8px; padding: 8px 15px;
+                border: 1px solid #ddd; font-size: 13px;
+            }
+            QPushButton:hover { background-color: #eee; }
+        """)
+        self.btn_profile.clicked.connect(self.open_personal_info)
+
+        header_layout.addWidget(self.btn_profile)
+        header_layout.addSpacing(8)
         header_layout.addWidget(self.btn_logout)
 
         # 메인 액션 버튼 (출퇴근 전용)
         self.btn_action = QtWidgets.QPushButton("작업 시작")
         self.btn_action.setFixedHeight(60)
         self.btn_action.setCursor(QtCore.Qt.PointingHandCursor)
+
+        self.btn_action.clicked.connect(self.on_work_action)
 
         # 중간 컨트롤 바
         ctrl_layout = QtWidgets.QHBoxLayout()
@@ -382,3 +401,38 @@ class WorkerPage(QtWidgets.QWidget):
         )
 
         QtWidgets.QMessageBox.information(self, "예상 급여 내역", msg)
+
+    def open_profile_settings(self):
+        """개인정보 변경: 현재 비밀번호 재확인 → 개인정보 수정 UI."""
+        dlg = ConfirmPasswordDialog(self, title="개인정보 변경", message="개인정보 변경을 위해 현재 비밀번호를 다시 입력해 주세요.")
+        if dlg.exec_() != QtWidgets.QDialog.Accepted:
+            return
+
+        pw = dlg.password()
+        try:
+            ok = self.db.verify_user_password(self.session.user_id, pw)
+        except Exception:
+            ok = False
+
+        if not ok:
+            Message.warn(self, "실패", "비밀번호가 올바르지 않습니다.")
+            return
+
+        edit = ProfileEditDialog(self.db, self.session.user_id, parent=self)
+        edit.exec_()
+
+    def open_personal_info(self):
+        dlg = PersonalInfoDialog(self.db, self.session.user_id, self)
+        dlg.exec_()
+
+
+
+
+
+
+
+
+
+
+
+

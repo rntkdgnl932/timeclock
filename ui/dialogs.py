@@ -3,6 +3,9 @@
 from PyQt5 import QtWidgets, QtCore
 
 
+from timeclock.utils import Message
+
+
 class ChangePasswordDialog(QtWidgets.QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -233,15 +236,15 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
             parts = ts.split(" ")
             if len(parts) < 2:
                 return ts
-            t = parts[1]
-            return t[:5] if len(t) >= 5 else t
+            tpart = parts[1]
+            return tpart[:5] if len(tpart) >= 5 else tpart
 
-        def date_chip(d: str) -> str:
-            d = esc(d)
+        def date_chip(xd: str) -> str:
+            xd = esc(xd)
             return f"""
             <div align="center" style="margin:10px 0 14px 0;">
               <span style="background:#D7E2EC; color:#333; padding:3px 10px; border-radius:12px; font-size:12px; font-weight:bold;">
-                {d}
+                {xd}
               </span>
             </div>
             """
@@ -256,9 +259,9 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
             </div>
             """
 
-        def bubble_html(text: str, t: str, bg: str, align: str) -> str:
+        def bubble_html(text: str, ttime_str: str, bg: str, align: str) -> str:
             text = esc(text).strip()
-            t = esc(t)
+            ttime_str = esc(ttime_str)
             if not text:
                 return ""
 
@@ -286,7 +289,7 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
                     <td align="right" valign="top">
                       {bubble_div}
                       <table width="100%" cellspacing="0" cellpadding="0">
-                        <tr><td align="{time_align}" style="{time_td_style}">{t}</td></tr>
+                        <tr><td align="{time_align}" style="{time_td_style}">{ttime_str}</td></tr>
                       </table>
                     </td>
                   </tr>
@@ -299,7 +302,7 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
                     <td align="left" valign="top">
                       {bubble_div}
                       <table width="100%" cellspacing="0" cellpadding="0">
-                        <tr><td align="{time_align}" style="{time_td_style}">{t}</td></tr>
+                        <tr><td align="{time_align}" style="{time_td_style}">{ttime_str}</td></tr>
                       </table>
                     </td>
                     <td width="{SPACER_W}"></td>
@@ -308,9 +311,11 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
                 """
 
         html = []
-        html.append(f"""
-        <html><body style="background:{KAKAO_BG}; font-family:'Malgun Gothic','Segoe UI',sans-serif; margin:0; padding:12px 12px 18px 12px;">
-        """)
+        html.append(
+            f"""
+            <html><body style="background:{KAKAO_BG}; font-family:'Malgun Gothic','Segoe UI',sans-serif; margin:0; padding:12px 12px 18px 12px;">
+            """
+        )
 
         last_date = None
 
@@ -329,16 +334,17 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
                 last_date = d
 
             is_me = (who == self.my_role)
-            t = time_only(at)
+            time_str = time_only(at)
 
             if is_me:
-                html.append(bubble_html(comment, t, MY_BUBBLE, "right"))
+                html.append(bubble_html(comment, time_str, MY_BUBBLE, "right"))
             else:
                 # 상대는 이름을 위에 표시(원하면 제거 가능)
                 if username:
                     html.append(
-                        f'<div style="font-size:12px; font-weight:bold; color:#1f2a33; margin:0 0 4px 2px;">{esc(username)}</div>')
-                html.append(bubble_html(comment, t, OTHER_BUBBLE, "left"))
+                        f'<div style="font-size:12px; font-weight:bold; color:#1f2a33; margin:0 0 4px 2px;">{esc(username)}</div>'
+                    )
+                html.append(bubble_html(comment, time_str, OTHER_BUBBLE, "left"))
 
         if self.current_status == "RESOLVED":
             html.append(sys_chip("처리 완료된 이의제기입니다."))
@@ -411,4 +417,365 @@ class DateRangeDialog(QtWidgets.QDialog):
         e = self.de_end.date().toString("yyyy-MM-dd")
         return s, e
 
+
+class ConfirmPasswordDialog(QtWidgets.QDialog):
+    """개인정보 변경 진입 전, 현재 비밀번호 재확인."""
+    def __init__(self, parent=None, title: str = "비밀번호 확인", message: str = "현재 비밀번호를 입력해 주세요."):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setModal(True)
+        self.resize(380, 170)
+
+        self._pw = ""
+
+        v = QtWidgets.QVBoxLayout(self)
+        v.setContentsMargins(18, 16, 18, 16)
+        v.setSpacing(10)
+
+        lb = QtWidgets.QLabel(message)
+        lb.setWordWrap(True)
+        lb.setStyleSheet("font-size:13px; color:#333;")
+        v.addWidget(lb)
+
+        self.le_pw = QtWidgets.QLineEdit()
+        self.le_pw.setEchoMode(QtWidgets.QLineEdit.Password)
+        self.le_pw.setPlaceholderText("현재 비밀번호")
+        self.le_pw.setStyleSheet(
+            "QLineEdit{border:1px solid #ddd; border-radius:10px; padding:10px 12px; font-size:13px;}"
+            "QLineEdit:focus{border-color:#7aa7ff;}"
+        )
+        v.addWidget(self.le_pw)
+
+        btns = QtWidgets.QHBoxLayout()
+        btns.addStretch()
+
+        self.btn_cancel = QtWidgets.QPushButton("취소")
+        self.btn_ok = QtWidgets.QPushButton("확인")
+        for b in (self.btn_cancel, self.btn_ok):
+            # noinspection PyUnresolvedReferences
+            b.setCursor(QtCore.Qt.PointingHandCursor)
+            b.setMinimumHeight(34)
+            b.setStyleSheet(
+                "QPushButton{border:1px solid #ddd; border-radius:10px; padding:7px 14px; background:#fafafa;}"
+                "QPushButton:hover{background:#f0f0f0;}"
+            )
+        self.btn_ok.setStyleSheet(
+            "QPushButton{border:1px solid #ffe066; border-radius:10px; padding:7px 14px; background:#FEE500; font-weight:bold;}"
+            "QPushButton:hover{background:#ffe45c;}"
+        )
+
+        self.btn_cancel.clicked.connect(self.reject)
+        self.btn_ok.clicked.connect(self._accept)
+
+        btns.addWidget(self.btn_cancel)
+        btns.addWidget(self.btn_ok)
+        v.addLayout(btns)
+
+        self.le_pw.returnPressed.connect(self._accept)
+
+    def _accept(self):
+        self._pw = self.le_pw.text().strip()
+        if not self._pw:
+            QtWidgets.QMessageBox.warning(self, "확인", "비밀번호를 입력해 주세요.")
+            return
+        self.accept()
+
+    def password(self) -> str:
+        return self._pw
+
+
+class ProfileEditDialog(QtWidgets.QDialog):
+    """아이디 제외 개인 정보 변경(기본: 이름/연락처/생년월일)."""
+    saved = QtCore.pyqtSignal()
+
+    def __init__(self, db, user_id: int, parent=None):
+        super().__init__(parent)
+        self.db = db
+        self.user_id = user_id
+
+        self.setWindowTitle("개인정보 변경")
+        self.setModal(True)
+        self.resize(460, 360)
+
+        u = None
+        try:
+            u = self.db.get_user_by_id(user_id)
+        except Exception:
+            u = None
+
+        v = QtWidgets.QVBoxLayout(self)
+        v.setContentsMargins(18, 16, 18, 16)
+        v.setSpacing(12)
+
+        title = QtWidgets.QLabel("개인정보 변경")
+        title.setStyleSheet("font-size:18px; font-weight:800; color:#222;")
+        v.addWidget(title)
+
+        sub = QtWidgets.QLabel("아이디는 변경할 수 없습니다. 변경 후 저장을 눌러주세요.")
+        sub.setStyleSheet("font-size:12px; color:#666;")
+        v.addWidget(sub)
+
+        form = QtWidgets.QFormLayout()
+        # noinspection PyUnresolvedReferences
+        form.setLabelAlignment(QtCore.Qt.AlignLeft)
+        # noinspection PyUnresolvedReferences
+        form.setFormAlignment(QtCore.Qt.AlignTop)
+        form.setHorizontalSpacing(12)
+        form.setVerticalSpacing(10)
+
+        def mk_le(placeholder: str):
+            le = QtWidgets.QLineEdit()
+            le.setPlaceholderText(placeholder)
+            le.setStyleSheet(
+                "QLineEdit{border:1px solid #ddd; border-radius:12px; padding:10px 12px; font-size:13px;}"
+                "QLineEdit:focus{border-color:#7aa7ff;}"
+            )
+            return le
+
+        self.le_username = mk_le("아이디")
+        self.le_username.setReadOnly(True)
+        self.le_username.setStyleSheet(
+            "QLineEdit{border:1px solid #e6e6e6; border-radius:12px; padding:10px 12px; font-size:13px; background:#f7f7f7; color:#777;}"
+        )
+
+        self.le_name = mk_le("예: 홍길동")
+        self.le_phone = mk_le("예: 010-1234-5678")
+        self.le_birth = mk_le("예: 1990-01-31 (YYYY-MM-DD)")
+
+        if u:
+            self.le_username.setText(str(u.get("username", "") or ""))
+            self.le_name.setText(str(u.get("name", "") or ""))
+            self.le_phone.setText(str(u.get("phone", "") or ""))
+            self.le_birth.setText(str(u.get("birthdate", "") or ""))
+
+        form.addRow("아이디", self.le_username)
+        form.addRow("이름", self.le_name)
+        form.addRow("연락처", self.le_phone)
+        form.addRow("생년월일", self.le_birth)
+
+        v.addLayout(form)
+        v.addStretch()
+
+        btns = QtWidgets.QHBoxLayout()
+        btns.addStretch()
+
+        self.btn_cancel = QtWidgets.QPushButton("닫기")
+        self.btn_save = QtWidgets.QPushButton("저장")
+
+        for b in (self.btn_cancel, self.btn_save):
+            # noinspection PyUnresolvedReferences
+            b.setCursor(QtCore.Qt.PointingHandCursor)
+            b.setMinimumHeight(38)
+            b.setStyleSheet(
+                "QPushButton{border:1px solid #ddd; border-radius:12px; padding:8px 16px; background:#fafafa;}"
+                "QPushButton:hover{background:#f0f0f0;}"
+            )
+        self.btn_save.setStyleSheet(
+            "QPushButton{border:1px solid #ffe066; border-radius:12px; padding:8px 16px; background:#FEE500; font-weight:800;}"
+            "QPushButton:hover{background:#ffe45c;}"
+        )
+
+        self.btn_cancel.clicked.connect(self.reject)
+        self.btn_save.clicked.connect(self._save)
+
+        btns.addWidget(self.btn_cancel)
+        btns.addWidget(self.btn_save)
+        v.addLayout(btns)
+
+    def _save(self):
+        name = self.le_name.text().strip()
+        phone = self.le_phone.text().strip()
+        birth = self.le_birth.text().strip()
+
+        if birth and not QtCore.QRegExp(r"^\d{4}-\d{2}-\d{2}$").exactMatch(birth):
+            QtWidgets.QMessageBox.warning(self, "형식 오류", "생년월일은 YYYY-MM-DD 형식으로 입력해 주세요.")
+            return
+
+        try:
+            self.db.update_user_profile(self.user_id, name=name, phone=phone, birthdate=birth)
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "오류", f"저장 실패: {e}")
+            return
+
+        QtWidgets.QMessageBox.information(self, "완료", "개인정보가 저장되었습니다.")
+        self.saved.emit()
+        self.accept()
+
+
+
+
+class PersonalInfoDialog(QtWidgets.QDialog):
+    """
+    개인정보 변경 다이얼로그
+    - 현재 비밀번호 재확인 필수
+    - username(id)는 수정 불가
+    - (옵션) 한 화면에서 비밀번호 변경도 가능: 새 비밀번호 입력 시에만 변경 처리
+    """
+
+    def __init__(self, db, user_id: int, parent=None):
+        super().__init__(parent)
+        self.db = db
+        self.user_id = int(user_id)
+
+        self.setWindowTitle("개인정보 변경")
+        self.setModal(True)
+        self.resize(520, 520)
+
+        prof = self.db.get_user_profile(self.user_id) or {}
+        self._orig = prof
+
+        root = QtWidgets.QVBoxLayout(self)
+        root.setContentsMargins(18, 18, 18, 18)
+        root.setSpacing(12)
+
+        title = QtWidgets.QLabel("개인정보 변경")
+        title.setStyleSheet("font-size:18px; font-weight:800;")
+        root.addWidget(title)
+
+        desc = QtWidgets.QLabel("보안을 위해 현재 비밀번호를 먼저 확인합니다.")
+        desc.setStyleSheet("color:#666;")
+        root.addWidget(desc)
+
+        # ---- 현재 비밀번호 확인 ----
+        pw_box = QtWidgets.QGroupBox("현재 비밀번호 확인 (필수)")
+        pw_lay = QtWidgets.QFormLayout(pw_box)
+        # noinspection PyUnresolvedReferences
+        pw_lay.setLabelAlignment(QtCore.Qt.AlignLeft)
+        # noinspection PyUnresolvedReferences
+        pw_lay.setFormAlignment(QtCore.Qt.AlignTop)
+        pw_lay.setHorizontalSpacing(12)
+        pw_lay.setVerticalSpacing(10)
+
+        self.ed_cur_pw = QtWidgets.QLineEdit()
+        self.ed_cur_pw.setEchoMode(QtWidgets.QLineEdit.Password)
+        self.ed_cur_pw.setPlaceholderText("현재 비밀번호를 입력하세요")
+        self.ed_cur_pw.setMinimumHeight(34)
+        pw_lay.addRow("현재 비밀번호", self.ed_cur_pw)
+
+        root.addWidget(pw_box)
+
+        # ---- 개인정보 ----
+        info_box = QtWidgets.QGroupBox("개인정보")
+        form = QtWidgets.QFormLayout(info_box)
+        form.setHorizontalSpacing(12)
+        form.setVerticalSpacing(10)
+
+        self.ed_username = QtWidgets.QLineEdit(prof.get("username", "") or "")
+        self.ed_username.setReadOnly(True)
+        self.ed_username.setMinimumHeight(34)
+        self.ed_username.setStyleSheet("background:#f3f3f3; color:#666;")
+        form.addRow("아이디(ID)", self.ed_username)
+
+        self.ed_name = QtWidgets.QLineEdit(prof.get("name", "") or "")
+        self.ed_name.setMinimumHeight(34)
+        form.addRow("성명", self.ed_name)
+
+        self.ed_phone = QtWidgets.QLineEdit(prof.get("phone", "") or "")
+        self.ed_phone.setMinimumHeight(34)
+        self.ed_phone.setPlaceholderText("숫자만 또는 010-0000-0000")
+        form.addRow("전화번호", self.ed_phone)
+
+        self.ed_birth = QtWidgets.QLineEdit(prof.get("birthdate", "") or "")
+        self.ed_birth.setMinimumHeight(34)
+        self.ed_birth.setPlaceholderText("YYYY-MM-DD")
+        form.addRow("생년월일", self.ed_birth)
+
+        self.ed_email = QtWidgets.QLineEdit(prof.get("email", "") or "")
+        self.ed_email.setMinimumHeight(34)
+        form.addRow("이메일", self.ed_email)
+
+        self.ed_account = QtWidgets.QLineEdit(prof.get("account", "") or "")
+        self.ed_account.setMinimumHeight(34)
+        form.addRow("계좌정보", self.ed_account)
+
+        self.ed_address = QtWidgets.QLineEdit(prof.get("address", "") or "")
+        self.ed_address.setMinimumHeight(34)
+        form.addRow("주소", self.ed_address)
+
+        root.addWidget(info_box)
+
+        # ---- (확장) 비밀번호 변경(선택) ----
+        pw2_box = QtWidgets.QGroupBox("비밀번호 변경 (선택)")
+        pw2 = QtWidgets.QFormLayout(pw2_box)
+        pw2.setHorizontalSpacing(12)
+        pw2.setVerticalSpacing(10)
+
+        self.ed_new_pw = QtWidgets.QLineEdit()
+        self.ed_new_pw.setEchoMode(QtWidgets.QLineEdit.Password)
+        self.ed_new_pw.setMinimumHeight(34)
+        self.ed_new_pw.setPlaceholderText("새 비밀번호(입력 시 변경)")
+        pw2.addRow("새 비밀번호", self.ed_new_pw)
+
+        self.ed_new_pw2 = QtWidgets.QLineEdit()
+        self.ed_new_pw2.setEchoMode(QtWidgets.QLineEdit.Password)
+        self.ed_new_pw2.setMinimumHeight(34)
+        self.ed_new_pw2.setPlaceholderText("새 비밀번호 확인")
+        pw2.addRow("새 비밀번호 확인", self.ed_new_pw2)
+
+        root.addWidget(pw2_box)
+
+        # ---- 버튼 ----
+        btns = QtWidgets.QHBoxLayout()
+        btns.addStretch(1)
+
+        self.btn_cancel = QtWidgets.QPushButton("취소")
+        self.btn_cancel.setMinimumHeight(36)
+        self.btn_cancel.clicked.connect(self.reject)
+
+        self.btn_save = QtWidgets.QPushButton("저장")
+        self.btn_save.setMinimumHeight(36)
+        self.btn_save.clicked.connect(self._on_save)
+
+        btns.addWidget(self.btn_cancel)
+        btns.addWidget(self.btn_save)
+        root.addLayout(btns)
+
+    def _on_save(self):
+        cur_pw = (self.ed_cur_pw.text() or "").strip()
+        if not cur_pw:
+            Message.err(self, "확인", "현재 비밀번호를 입력해주세요.")
+            return
+
+        if not self.db.verify_user_password(self.user_id, cur_pw):
+            Message.err(self, "확인", "현재 비밀번호가 올바르지 않습니다.")
+            return
+
+        # 비밀번호 변경(선택)
+        new_pw = (self.ed_new_pw.text() or "")
+        new_pw2 = (self.ed_new_pw2.text() or "")
+        if new_pw or new_pw2:
+            if len(new_pw) < 6:
+                Message.err(self, "비밀번호 변경", "새 비밀번호는 6자 이상이어야 합니다.")
+                return
+            if new_pw != new_pw2:
+                Message.err(self, "비밀번호 변경", "새 비밀번호가 서로 일치하지 않습니다.")
+                return
+
+        # 개인정보 저장
+        name = (self.ed_name.text() or "").strip()
+        phone = (self.ed_phone.text() or "").strip()
+        birth = (self.ed_birth.text() or "").strip()
+        email = (self.ed_email.text() or "").strip()
+        account = (self.ed_account.text() or "").strip()
+        address = (self.ed_address.text() or "").strip()
+
+        try:
+            self.db.update_user_profile(
+                self.user_id,
+                name=name or None,
+                phone=phone or None,
+                birthdate=birth or None,
+                email=email or None,
+                account=account or None,
+                address=address or None,
+            )
+            if new_pw:
+                self.db.change_password(self.user_id, new_pw)
+
+        except Exception as e:
+            Message.err(self, "저장 실패", str(e))
+            return
+
+        Message.info(self, "완료", "개인정보가 저장되었습니다.")
+        self.accept()
 

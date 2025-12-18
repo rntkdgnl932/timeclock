@@ -10,6 +10,7 @@ build/
 dist/
 .env
 app_data/
+app_data/app.log
 pay_result/
 
 # .gitignore 파일 내용

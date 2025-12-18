@@ -60,6 +60,22 @@ class DB:
             cur.execute("ALTER TABLE users ADD COLUMN name TEXT")
         except Exception:
             pass
+
+        try:
+            cur.execute("ALTER TABLE users ADD COLUMN must_change_pw INTEGER NOT NULL DEFAULT 0")
+        except Exception:
+            pass
+
+        try:
+            cur.execute("ALTER TABLE users ADD COLUMN hourly_wage INTEGER DEFAULT 9860")
+        except Exception:
+            pass
+
+        try:
+            cur.execute("ALTER TABLE users ADD COLUMN birthdate TEXT")
+        except Exception:
+            pass
+
         try:
             cur.execute("ALTER TABLE users ADD COLUMN phone TEXT")
         except Exception:
@@ -70,17 +86,29 @@ class DB:
         except Exception:
             pass
 
-        # 기존 owner 계정은 대표로 보정(없거나 빈 값인 경우)
+        # ✅ 추가: 개인정보 확장 컬럼
         try:
-            cur.execute(
-                "UPDATE users SET job_title='대표' "
-                "WHERE role='owner' AND (job_title IS NULL OR TRIM(job_title)='')"
-            )
+            cur.execute("ALTER TABLE users ADD COLUMN email TEXT")
+        except Exception:
+            pass
+        try:
+            cur.execute("ALTER TABLE users ADD COLUMN account TEXT")
+        except Exception:
+            pass
+        try:
+            cur.execute("ALTER TABLE users ADD COLUMN address TEXT")
         except Exception:
             pass
 
+        # 기존 owner 계정은 대표로 보정(없거나 빈 값인 경우)
         try:
-            cur.execute("ALTER TABLE users ADD COLUMN birthdate TEXT")
+            cur.execute(
+                """
+                UPDATE users
+                SET job_title='대표'
+                WHERE username='owner' AND (job_title IS NULL OR TRIM(job_title)='')
+                """
+            )
         except Exception:
             pass
 
@@ -93,52 +121,39 @@ class DB:
                 work_date TEXT NOT NULL,
                 start_time TEXT,
                 end_time TEXT,
-                status TEXT DEFAULT 'WORKING',
-                approved_start TEXT,
-                approved_end TEXT,
-                owner_comment TEXT,
+                break_minutes INTEGER DEFAULT 0,
+                memo TEXT,
+                status TEXT NOT NULL DEFAULT 'PENDING',
                 created_at TEXT NOT NULL,
-                approver_id INTEGER,    -- [신규] 승인자 ID
-                updated_at TEXT,        -- [신규] 수정 일시
-                FOREIGN KEY (user_id) REFERENCES users(id)
+                approved_at TEXT,
+                approved_by INTEGER,
+                reject_reason TEXT,
+                FOREIGN KEY(user_id) REFERENCES users(id),
+                FOREIGN KEY(approved_by) REFERENCES users(id)
             )
             """
         )
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_work_logs_user_date ON work_logs(user_id, work_date)")
-
-        # ★ [핵심 수정] 오류 발생 원인 해결 (기존 DB에 컬럼 추가)
-        try:
-            cur.execute("ALTER TABLE work_logs ADD COLUMN approver_id INTEGER")
-        except Exception:
-            pass
-
-        try:
-            cur.execute("ALTER TABLE work_logs ADD COLUMN updated_at TEXT")
-        except Exception:
-            pass
 
         # 3. disputes (이의 제기)
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS disputes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                work_log_id INTEGER NOT NULL,
-                user_id INTEGER NOT NULL, 
+                user_id INTEGER NOT NULL,
+                work_date TEXT NOT NULL,
                 dispute_type TEXT NOT NULL,
-                comment TEXT,
+                status TEXT NOT NULL DEFAULT 'IN_REVIEW',
                 created_at TEXT NOT NULL,
-                status TEXT NOT NULL DEFAULT 'PENDING',
-                resolved_at TEXT,
-                resolved_by INTEGER,
-                resolution_comment TEXT,
-                FOREIGN KEY (work_log_id) REFERENCES work_logs(id),
-                FOREIGN KEY (user_id) REFERENCES users(id),
-                FOREIGN KEY (resolved_by) REFERENCES users(id)
+                decided_at TEXT,
+                decided_by INTEGER,
+                decision_comment TEXT,
+                FOREIGN KEY(user_id) REFERENCES users(id),
+                FOREIGN KEY(decided_by) REFERENCES users(id)
             )
             """
         )
 
-        # 4. dispute_messages (대화 내역)
+        # 4. dispute_messages (이의 제기 대화 로그)
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS dispute_messages (
@@ -176,8 +191,20 @@ class DB:
             cur.execute("ALTER TABLE signup_requests ADD COLUMN name TEXT")
         except Exception:
             pass
+        try:
+            cur.execute("ALTER TABLE signup_requests ADD COLUMN email TEXT")
+        except Exception:
+            pass
+        try:
+            cur.execute("ALTER TABLE signup_requests ADD COLUMN account TEXT")
+        except Exception:
+            pass
+        try:
+            cur.execute("ALTER TABLE signup_requests ADD COLUMN address TEXT")
+        except Exception:
+            pass
 
-        # 6. audit_logs (감사 로그)
+        # 6. audit_logs
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS audit_logs (
@@ -192,6 +219,7 @@ class DB:
             );
             """
         )
+
         self.conn.commit()
 
     def _ensure_defaults(self):
@@ -225,6 +253,62 @@ class DB:
     def change_password(self, user_id, new_password):
         pw_hash = pbkdf2_hash_password(new_password)
         self.conn.execute("UPDATE users SET pw_hash=?, must_change_pw=0 WHERE id=?", (pw_hash, user_id))
+        self.conn.commit()
+
+    def verify_user_password(self, user_id: int, password: str) -> bool:
+        row = self.conn.execute("SELECT pw_hash FROM users WHERE id=?", (user_id,)).fetchone()
+        if not row:
+            return False
+        return pbkdf2_verify_password(password or "", row["pw_hash"])
+
+    def get_user_profile(self, user_id: int) -> dict | None:
+        # users에 컬럼이 항상 존재한다는 보장이 없으므로 PRAGMA로 안전 조회
+        cols = {r[1] for r in self.conn.execute("PRAGMA table_info(users)").fetchall()}
+
+        want = ["id", "username", "name", "phone", "birthdate", "email", "account", "address"]
+        use = [c for c in want if c in cols]
+        if not use:
+            return None
+
+        sql = "SELECT " + ", ".join(use) + " FROM users WHERE id=?"
+        row = self.conn.execute(sql, (user_id,)).fetchone()
+        return dict(row) if row else None
+
+    def update_user_profile(
+            self,
+            user_id: int,
+            *,
+            name=None,
+            phone=None,
+            birthdate=None,
+            email=None,
+            account=None,
+            address=None,
+    ) -> None:
+        cols = {r[1] for r in self.conn.execute("PRAGMA table_info(users)").fetchall()}
+
+        updates = []
+        params = []
+
+        def add(col, val):
+            if col in cols:
+                updates.append(f"{col}=?")
+                params.append(val)
+
+        # 아이디(username)는 절대 업데이트하지 않음
+        add("name", name)
+        add("phone", phone)
+        add("birthdate", birthdate)
+        add("email", email)
+        add("account", account)
+        add("address", address)
+
+        if not updates:
+            return
+
+        params.append(int(user_id))
+        sql = "UPDATE users SET " + ", ".join(updates) + " WHERE id=?"
+        self.conn.execute(sql, tuple(params))
         self.conn.commit()
 
     def list_workers(self, keyword=None, status_filter="ACTIVE"):
@@ -651,5 +735,10 @@ class DB:
 
         return {"work": cnt_work, "dispute": cnt_dispute, "signup": cnt_signup}
 
+
+
+    def get_user_by_id(self, user_id: int):
+        row = self.conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+        return dict(row) if row else None
 
 

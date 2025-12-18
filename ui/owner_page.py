@@ -9,12 +9,14 @@ from pathlib import Path
 from timeclock.settings import DATA_DIR
 
 from timeclock.excel_maker import generate_payslip, create_default_template
+from ui.dialogs import ConfirmPasswordDialog, ProfileEditDialog
 
 from timeclock.utils import Message
 from ui.widgets import DateRangeBar, Table
 from timeclock.settings import WORK_STATUS, SIGNUP_STATUS
 from ui.dialogs import ChangePasswordDialog, DisputeTimelineDialog, DateRangeDialog
 from timeclock.salary import SalaryCalculator
+from ui.dialogs import PersonalInfoDialog
 
 
 class OwnerPage(QtWidgets.QWidget):
@@ -63,13 +65,14 @@ class OwnerPage(QtWidgets.QWidget):
         header_layout.addLayout(title_box)
         header_layout.addStretch(1)
 
-        self.btn_change_pw = QtWidgets.QPushButton("비밀번호 변경")
+        self.btn_change_pw = QtWidgets.QPushButton("개인정보 변경")
         self.btn_logout = QtWidgets.QPushButton("로그아웃")
 
         self._set_btn_variant(self.btn_change_pw, "ghost")
         self._set_btn_variant(self.btn_logout, "danger_outline")
 
-        self.btn_change_pw.clicked.connect(self.change_password)
+        self.btn_change_pw.clicked.disconnect()
+        self.btn_change_pw.clicked.connect(self.open_personal_info)
         self.btn_logout.clicked.connect(self.logout_requested.emit)
 
         header_layout.addWidget(self.btn_change_pw)
@@ -1310,6 +1313,29 @@ class OwnerPage(QtWidgets.QWidget):
             else:
                 Message.err(self, "오류", result_msg)
             self.refresh_backup_list()
+
+    def open_profile_settings(self):
+        """개인정보 변경: 현재 비밀번호 재확인 → 개인정보 수정 UI."""
+        dlg = ConfirmPasswordDialog(self, title="개인정보 변경", message="개인정보 변경을 위해 현재 비밀번호를 다시 입력해 주세요.")
+        if dlg.exec_() != QtWidgets.QDialog.Accepted:
+            return
+
+        pw = dlg.password()
+        try:
+            ok = self.db.verify_user_password(self.session.user_id, pw)
+        except Exception:
+            ok = False
+
+        if not ok:
+            QtWidgets.QMessageBox.warning(self, "실패", "비밀번호가 올바르지 않습니다.")
+            return
+
+        edit = ProfileEditDialog(self.db, self.session.user_id, parent=self)
+        edit.exec_()
+
+    def open_personal_info(self):
+        dlg = PersonalInfoDialog(self.db, self.session.user_id, self)
+        dlg.exec_()
 
 
 class WorkLogApproveDialog(QtWidgets.QDialog):
