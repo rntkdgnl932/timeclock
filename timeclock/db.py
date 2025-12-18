@@ -37,7 +37,7 @@ class DB:
     def _migrate(self):
         cur = self.conn.cursor()
 
-        # 1. users 테이블
+        # 1. users 테이블 생성
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS users (
@@ -55,7 +55,7 @@ class DB:
             """
         )
 
-        # 기존 DB 호환용 (컬럼 추가)
+        # 1-1. users 테이블 컬럼 확장 (오류 방지를 위해 풀어서 작성)
         try:
             cur.execute("ALTER TABLE users ADD COLUMN name TEXT")
         except Exception:
@@ -86,7 +86,7 @@ class DB:
         except Exception:
             pass
 
-        # ✅ 추가: 개인정보 확장 컬럼
+        # 개인정보 확장 컬럼
         try:
             cur.execute("ALTER TABLE users ADD COLUMN email TEXT")
         except Exception:
@@ -100,7 +100,7 @@ class DB:
         except Exception:
             pass
 
-        # 기존 owner 계정은 대표로 보정(없거나 빈 값인 경우)
+        # 기존 owner 계정 직급 보정
         try:
             cur.execute(
                 """
@@ -112,7 +112,7 @@ class DB:
         except Exception:
             pass
 
-        # 2. work_logs (출퇴근 통합 테이블)
+        # 2. work_logs 테이블 생성
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS work_logs (
@@ -134,11 +134,12 @@ class DB:
             """
         )
 
-        # 3. disputes (이의 제기)
+        # 3. disputes 테이블 생성 (work_log_id 포함)
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS disputes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                work_log_id INTEGER,
                 user_id INTEGER NOT NULL,
                 work_date TEXT NOT NULL,
                 dispute_type TEXT NOT NULL,
@@ -153,7 +154,13 @@ class DB:
             """
         )
 
-        # 4. dispute_messages (이의 제기 대화 로그)
+        # 🔴 [핵심 수정] disputes 테이블에 work_log_id가 없으면 강제로 추가
+        try:
+            cur.execute("ALTER TABLE disputes ADD COLUMN work_log_id INTEGER")
+        except Exception:
+            pass
+
+        # 4. dispute_messages 테이블 생성
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS dispute_messages (
@@ -169,7 +176,7 @@ class DB:
             """
         )
 
-        # 5. signup_requests (가입 신청)
+        # 5. signup_requests 테이블 생성
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS signup_requests (
@@ -187,6 +194,7 @@ class DB:
             )
             """
         )
+        # signup_requests 확장 컬럼
         try:
             cur.execute("ALTER TABLE signup_requests ADD COLUMN name TEXT")
         except Exception:
@@ -204,7 +212,7 @@ class DB:
         except Exception:
             pass
 
-        # 6. audit_logs
+        # 6. audit_logs 테이블 생성
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS audit_logs (
