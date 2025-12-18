@@ -4,7 +4,6 @@ import logging
 from dataclasses import dataclass
 from PyQt5 import QtWidgets, QtCore, QtGui
 
-# [기존 설정 및 유틸 참조 유지]
 from timeclock.settings import (
     APP_NAME,
     DEFAULT_OWNER_USER, DEFAULT_OWNER_PASS,
@@ -114,6 +113,10 @@ class LoginPage(QtWidgets.QWidget):
         self.le_pass.setEchoMode(QtWidgets.QLineEdit.Password)
         self.le_pass.setStyleSheet(input_style)
 
+        # 🟢 [수정 1] 엔터키 입력 시 로그인 시도
+        self.le_user.returnPressed.connect(self.on_login)
+        self.le_pass.returnPressed.connect(self.on_login)
+
         card_layout.addWidget(self.le_user)
         card_layout.addWidget(self.le_pass)
 
@@ -139,7 +142,7 @@ class LoginPage(QtWidgets.QWidget):
         self.btn_login.clicked.connect(self.on_login)
         card_layout.addWidget(self.btn_login)
 
-        # [6] 하단 보조 버튼들 (회원가입 및 테스트 계정)
+        # [6] 하단 보조 버튼들 (회원가입)
         bottom_layout = QtWidgets.QHBoxLayout()
 
         link_style = "color: #888; border: none; background: none; font-size: 13px;"
@@ -160,23 +163,16 @@ class LoginPage(QtWidgets.QWidget):
         line.setStyleSheet("background-color: #f0f0f0;")
         card_layout.addWidget(line)
 
-        # # 테스트 계정 퀵 버튼
-        # test_layout = QtWidgets.QHBoxLayout()
-        # self.btn_test_owner = QtWidgets.QPushButton("사장님 체험")
-        # self.btn_test_worker = QtWidgets.QPushButton("알바생 체험")
-        #
-        # for b in [self.btn_test_owner, self.btn_test_worker]:
-        #     b.setCursor(QtCore.Qt.PointingHandCursor)
-        #     b.setStyleSheet("color: #bbb; border: 1px solid #eee; border-radius: 10px; padding: 5px; font-size: 11px;")
-        #     test_layout.addWidget(b)
-        #
-        # self.btn_test_owner.clicked.connect(self.fill_owner)
-        # self.btn_test_worker.clicked.connect(self.fill_worker)
-        # card_layout.addLayout(test_layout)
-
         main_layout.addWidget(self.card)
 
-    # 기능 로직 유지
+    # 🟢 [수정 2] 화면이 보여질 때(ShowEvent) 입력창 초기화
+    def showEvent(self, event):
+        # 아이디, 비번 칸을 모두 비우고 아이디 칸에 포커스
+        self.le_user.clear()
+        self.le_pass.clear()
+        self.le_user.setFocus()
+        super().showEvent(event)
+
     def fill_owner(self):
         self.le_user.setText(DEFAULT_OWNER_USER)
         self.le_pass.setText(DEFAULT_OWNER_PASS)
