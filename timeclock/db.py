@@ -231,6 +231,7 @@ class DB:
                 decided_at TEXT,
                 decided_by INTEGER,
                 decision_comment TEXT,
+                comment TEXT,
                 FOREIGN KEY(user_id) REFERENCES users(id),
                 FOREIGN KEY(decided_by) REFERENCES users(id)
             )
@@ -240,6 +241,11 @@ class DB:
         # disputes 테이블에 work_log_id가 없으면 강제로 추가
         try:
             cur.execute("ALTER TABLE disputes ADD COLUMN work_log_id INTEGER")
+        except Exception:
+            pass
+
+        try:
+            cur.execute("ALTER TABLE disputes ADD COLUMN comment TEXT")
         except Exception:
             pass
 
