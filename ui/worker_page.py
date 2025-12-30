@@ -198,36 +198,51 @@ class WorkerPage(QtWidgets.QWidget):
 
             if msg_box.clickedButton() == btn_yes:
 
-                # 🔴 [수정 핵심] 다운로드 전 DB 연결 끊기 (파일 잠금 해제)
+                # 1. [동기화] 다운로드 시도 (파일 잠금 방지를 위해 close -> download -> reconnect)
                 self.db.close_connection()
                 try:
                     sync_manager.download_latest_db()
                 except Exception as e:
                     print(f"[Sync Error] {e}")
                 finally:
-                    # 다운로드 성공/실패와 무관하게 반드시 재연결
                     self.db.reconnect()
 
-                # 2. DB에 시작 요청 기록
+                # 2. [DB 쓰기] 시작 요청 기록
                 try:
                     self.db.start_work(self.session.user_id)
                 except Exception as e:
                     Message.err(self, "오류", str(e))
                     return
 
-                # 3. 비동기 백업 + [Sync] 업로드
-                def job_fn(progress_callback):
-                    # 로컬 백업 먼저
-                    ok, msg = backup_manager.run_backup("request_in", progress_callback)
-                    # [Sync] 구글 드라이브 동기화 업로드
-                    sync_manager.upload_current_db()
-                    return ok, msg
+                # =========================================================================
+                # 🔴 [핵심 수정] 업로드 전에 DB 연결을 끊어서 파일에 강제로 저장시킴
+                # =========================================================================
+                print("💾 데이터 저장 중 (DB Close)...")
+                self.db.close_connection()
 
+                # 3. [백그라운드] 백업 및 업로드 (이제 파일에 내용이 꽉 차 있음)
+                def job_fn(progress_callback):
+                    # 로컬 백업
+                    ok_backup, msg_backup = backup_manager.run_backup("request_in", progress_callback)
+
+                    # 구글 드라이브 업로드
+                    progress_callback({"msg": "☁️ 서버에 요청 전송 중..."})
+                    ok_upload = sync_manager.upload_current_db()
+
+                    if not ok_upload:
+                        return False, "업로드 실패"
+                    return ok_backup, msg_backup
+
+                # 4. [완료 후] DB 재연결 및 화면 갱신
                 def on_done(ok, res, err):
+                    # 작업이 끝났으니 다시 연결
+                    print("🔌 DB 재연결...")
+                    self.db.reconnect()
+
                     if ok:
-                        Message.info(self, "요청 완료", "관리자에게 승인 요청을 보냈습니다.\n(서버 동기화 완료)")
+                        Message.info(self, "요청 완료", "관리자에게 승인 요청을 보냈습니다.\n(서버 전송 완료)")
                     else:
-                        Message.err(self, "백업 실패", f"요청은 되었으나 백업/동기화 실패: {err}")
+                        Message.err(self, "전송 실패", f"요청은 기록되었으나 서버 전송 실패: {err}\n나중에 다시 시도됩니다.")
 
                     self.refresh()
                     self._update_action_button()
@@ -235,7 +250,7 @@ class WorkerPage(QtWidgets.QWidget):
                 # 진행창 띄우기
                 run_job_with_progress_async(
                     self,
-                    "출근 요청 데이터 동기화 중...",
+                    "출근 요청 전송 중...",
                     job_fn,
                     on_done=on_done
                 )
@@ -246,7 +261,7 @@ class WorkerPage(QtWidgets.QWidget):
         elif mode == "OUT":
             if Message.confirm(self, "퇴근 요청", "작업을 모두 마치고 퇴근 승인을 요청하시겠습니까?"):
 
-                # 🔴 [수정 핵심] 퇴근 시에도 동일하게 적용
+                # 1. [동기화] 다운로드
                 self.db.close_connection()
                 try:
                     sync_manager.download_latest_db()
@@ -255,27 +270,42 @@ class WorkerPage(QtWidgets.QWidget):
                 finally:
                     self.db.reconnect()
 
-                # 2. DB에 퇴근 기록
+                # 2. [DB 쓰기] 퇴근 기록
                 try:
                     self.db.end_work(self.session.user_id)
                 except Exception as e:
                     Message.err(self, "오류", str(e))
                     return
 
-                # 3. 비동기 백업 + [Sync] 업로드
-                def job_fn(progress_callback):
-                    ok, msg = backup_manager.run_backup("request_out", progress_callback)
-                    sync_manager.upload_current_db()
-                    return ok, msg
+                # =========================================================================
+                # 🔴 [핵심 수정] 업로드 전에 DB 연결을 끊어서 파일에 강제로 저장시킴
+                # =========================================================================
+                print("💾 데이터 저장 중 (DB Close)...")
+                self.db.close_connection()
 
+                # 3. [백그라운드] 백업 및 업로드
+                def job_fn(progress_callback):
+                    ok_backup, msg_backup = backup_manager.run_backup("request_out", progress_callback)
+
+                    progress_callback({"msg": "☁️ 서버에 요청 전송 중..."})
+                    ok_upload = sync_manager.upload_current_db()
+
+                    if not ok_upload:
+                        return False, "업로드 실패"
+                    return ok_backup, msg_backup
+
+                # 4. [완료 후] DB 재연결
                 def on_done(ok, res, err):
+                    print("🔌 DB 재연결...")
+                    self.db.reconnect()
+
                     auto_close_dlg = QtWidgets.QMessageBox(self)
                     auto_close_dlg.setWindowTitle("퇴근")
 
                     if ok:
-                        auto_close_dlg.setText("수고하셨습니다. (서버 동기화 완료)")
+                        auto_close_dlg.setText("수고하셨습니다. (서버 전송 완료)")
                     else:
-                        auto_close_dlg.setText(f"수고하셨습니다. (동기화 실패: {err})")
+                        auto_close_dlg.setText(f"수고하셨습니다. (전송 실패: {err})")
 
                     auto_close_dlg.setStandardButtons(QtWidgets.QMessageBox.NoButton)
                     QtCore.QTimer.singleShot(3000, auto_close_dlg.accept)
@@ -286,12 +316,12 @@ class WorkerPage(QtWidgets.QWidget):
 
                 run_job_with_progress_async(
                     self,
-                    "퇴근 요청 데이터 동기화 중...",
+                    "퇴근 요청 전송 중...",
                     job_fn,
                     on_done=on_done
                 )
 
-        # [3] 그 외
+        # [3] 그 외 (이미 퇴근함 등)
         else:
             self.refresh()
             self._update_action_button()
