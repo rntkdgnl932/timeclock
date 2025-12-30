@@ -109,7 +109,8 @@ def _get_folder_id(drive, folder_name):
 
 def download_latest_db():
     """
-    구글 드라이브에서 최신 DB를 다운로드하여 로컬 DB를 덮어씁니다.
+    구글 드라이브에서 '가장 최신' DB를 다운로드하고,
+    중복된 옛날 파일이 있다면 정리합니다.
     """
     if not HAS_GOOGLE_DRIVE:
         return False, "PyDrive 미설치"
@@ -128,18 +129,31 @@ def download_latest_db():
         if not file_list:
             return True, "서버에 DB 없음 (초기 상태)"
 
-        # 최신 파일 1개 가져오기
-        gfile = file_list[0]
+        # [핵심 수정] modifiedDate 기준으로 정렬 (최신순)
+        # 구글 드라이브 API는 정렬을 보장하지 않으므로 수동 정렬 필수
+        file_list.sort(key=lambda x: x['modifiedDate'], reverse=True)
+
+        # 가장 최신 파일 가져오기
+        latest_file = file_list[0]
+
+        # [자동 청소] 만약 파일이 2개 이상이라면, 최신 파일 1개 빼고 나머지는 휴지통으로 보냄
+        if len(file_list) > 1:
+            logging.warning(f"[Sync] 중복 파일 {len(file_list)}개 발견. 최신본 제외하고 정리합니다.")
+            for old_file in file_list[1:]:
+                try:
+                    old_file.Trash()  # 휴지통 이동
+                except:
+                    pass
 
         # 다운로드 (임시 파일로 먼저 받음)
         temp_path = str(DB_PATH) + ".temp"
-        gfile.GetContentFile(temp_path)
+        latest_file.GetContentFile(temp_path)
 
         # 안전하게 교체
         if os.path.exists(temp_path):
             # 기존 DB가 있다면 덮어쓰기
             shutil.move(temp_path, str(DB_PATH))
-            logging.info("[Sync] 최신 DB 다운로드 완료")
+            logging.info(f"[Sync] 최신 DB 다운로드 완료 (Date: {latest_file['modifiedDate']})")
             return True, "동기화 완료"
 
     except Exception as e:
@@ -167,11 +181,24 @@ def upload_current_db():
         query = f"'{folder_id}' in parents and title = '{GDRIVE_DB_FILENAME}' and trashed = false"
         file_list = drive.ListFile({'q': query}).GetList()
 
+        # [핵심 수정] 업로드 시에도 최신순 정렬해서 '가장 최신 파일'을 업데이트 타겟으로 삼음
+        gfile = None
         if file_list:
-            gfile = file_list[0]  # 업데이트
-        else:
-            gfile = drive.CreateFile({'title': GDRIVE_DB_FILENAME, 'parents': [{'id': folder_id}]})  # 신규 생성
+            file_list.sort(key=lambda x: x['modifiedDate'], reverse=True)
+            gfile = file_list[0]  # 업데이트할 파일 (최신본)
 
+            # 나머지 중복 파일 정리
+            if len(file_list) > 1:
+                for old_f in file_list[1:]:
+                    try:
+                        old_f.Trash()
+                    except:
+                        pass
+        else:
+            # 없으면 신규 생성
+            gfile = drive.CreateFile({'title': GDRIVE_DB_FILENAME, 'parents': [{'id': folder_id}]})
+
+        # 내용 업로드
         gfile.SetContentFile(str(DB_PATH))
         gfile.Upload()
         logging.info("[Sync] DB 업로드 완료")
