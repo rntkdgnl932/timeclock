@@ -598,9 +598,14 @@ class DB:
 
             return dispute_id
 
+        # 1. work_log_id로 날짜를 먼저 알아냅니다.
+        wl = self.conn.execute("SELECT work_date FROM work_logs WHERE id=?", (work_log_id,)).fetchone()
+        w_date = wl["work_date"] if wl else now.split(" ")[0]
+
+        # 2. INSERT 할 때 work_date를 같이 넣어줍니다.
         cur = self.conn.execute(
-            "INSERT INTO disputes(work_log_id, user_id, dispute_type, comment, created_at, status) VALUES(?,?,?,?,?,?)",
-            (work_log_id, user_id, dispute_type, comment, now, "PENDING")
+            "INSERT INTO disputes(work_log_id, user_id, work_date, dispute_type, comment, created_at, status) VALUES(?,?,?,?,?,?,?)",
+            (work_log_id, user_id, w_date, dispute_type, comment, now, "PENDING")
         )
         dispute_id = cur.lastrowid
         self.add_dispute_message(dispute_id, user_id, "worker", comment, None)
