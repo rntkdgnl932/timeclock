@@ -726,10 +726,12 @@ class DB:
         ).fetchall()
 
     def resolve_dispute(self, dispute_id, owner_id, new_status, resolution_comment):
+        self.ensure_connection()
+
         now = now_str()
         resolution_comment = (resolution_comment or "").strip()
 
-        # disputes 컬럼 호환(구버전/신버전 혼재 대응)
+        # disputes 컬럼 호환(신/구 DB 혼재 방어)
         d_cols = {r[1] for r in self.conn.execute("PRAGMA table_info(disputes)").fetchall()}
 
         # 신스키마
@@ -745,6 +747,7 @@ class DB:
         sets = ["status=?"]
         params = [new_status]
 
+        # 신스키마 업데이트
         if decided_at_col:
             sets.append(f"{decided_at_col}=?")
             params.append(now)
@@ -755,7 +758,7 @@ class DB:
             sets.append(f"{decision_comment_col}=?")
             params.append(resolution_comment)
 
-        # 혼재 DB 방어: 구컬럼이 있으면 동일 값 반영
+        # 구스키마도 살아있다면 동일 값 반영
         if resolved_at_col:
             sets.append(f"{resolved_at_col}=?")
             params.append(now)
@@ -775,10 +778,12 @@ class DB:
         if resolution_comment:
             self.add_dispute_message(dispute_id, owner_id, "owner", resolution_comment, new_status)
 
-        # UI 쪽이 업로드를 담당하므로 여기서는 commit만
+        # 업로드는 UI가 담당하므로 여기서는 로컬 commit만
         self.conn.commit()
 
     def add_dispute_message(self, dispute_id, sender_user_id, sender_role, message, status_code=None):
+        self.ensure_connection()
+
         self.conn.execute(
             "INSERT INTO dispute_messages(dispute_id, sender_user_id, sender_role, message, status_code, created_at) VALUES(?,?,?,?,?,?)",
             (dispute_id, sender_user_id, sender_role, (message or "").strip(), status_code, now_str())
@@ -786,22 +791,16 @@ class DB:
         self.conn.commit()
 
     def get_dispute_timeline(self, dispute_id):
+        self.ensure_connection()
+
         req_row = self.conn.execute("SELECT work_log_id FROM disputes WHERE id=?", (dispute_id,)).fetchone()
         if not req_row:
             return []
         target_id = req_row["work_log_id"]
 
-        # disputes 컬럼 호환(구버전/신버전 혼재 대응)
-        d_cols = {r[1] for r in self.conn.execute("PRAGMA table_info(disputes)").fetchall()}
-        decided_at_col = "decided_at" if "decided_at" in d_cols else None
-        decision_comment_col = "decision_comment" if "decision_comment" in d_cols else None
-        resolved_at_col = "resolved_at" if "resolved_at" in d_cols else None
-        resolution_comment_col = "resolution_comment" if "resolution_comment" in d_cols else None
-
         events = []
         seen = set()
 
-        # 1) dispute_messages 기반 이벤트(정식 타임라인)
         msgs = self.conn.execute(
             """
             SELECT m.*, u.username AS sender_username
@@ -809,8 +808,7 @@ class DB:
             LEFT JOIN users u ON u.id = m.sender_user_id
             WHERE m.dispute_id IN (SELECT id FROM disputes WHERE work_log_id=?)
             ORDER BY m.id ASC
-            """,
-            (target_id,),
+            """, (target_id,)
         ).fetchall()
 
         for row in msgs:
@@ -820,28 +818,34 @@ class DB:
             role = row["sender_role"]
             if (role, txt) in seen:
                 continue
-            events.append(
-                {
-                    "who": role,
-                    "username": row["sender_username"] or ("Owner" if role == "owner" else "Worker"),
-                    "at": row["created_at"],
-                    "status_code": row["status_code"],
-                    "comment": txt,
-                    "sort_key": row["created_at"],
-                }
-            )
+            events.append({
+                "who": role,
+                "username": row["sender_username"] or ("Owner" if role == "owner" else "Worker"),
+                "at": row["created_at"],
+                "status_code": row["status_code"],
+                "comment": txt,
+                "sort_key": row["created_at"]
+            })
             seen.add((role, txt))
 
-        # 2) disputes 테이블에만 남아있던 레거시 코멘트(혹시 누락된 경우 보완)
+        # 아래 legacy 블록은 기존 파일에 이어지는 그대로 유지되어도 되지만,
+        # 현재 db.py의 legacy 구현이 컬럼명(resolution_comment 등)을 참조할 수 있어
+        # 이전 답변에서 제공한 “호환형 legacy 처리”로 교체하는 것이 가장 안전합니다.
         legacy = self.conn.execute(
             """
             SELECT d.*, u.username
             FROM disputes d
             JOIN users u ON u.id = d.user_id
             WHERE d.work_log_id=? ORDER BY d.id ASC
-            """,
-            (target_id,),
+            """, (target_id,)
         ).fetchall()
+
+        # disputes 컬럼 호환(신/구 혼재 방어)
+        d_cols = {r[1] for r in self.conn.execute("PRAGMA table_info(disputes)").fetchall()}
+        decided_at_col = "decided_at" if "decided_at" in d_cols else None
+        decision_comment_col = "decision_comment" if "decision_comment" in d_cols else None
+        resolved_at_col = "resolved_at" if "resolved_at" in d_cols else None
+        resolution_comment_col = "resolution_comment" if "resolution_comment" in d_cols else None
 
         for row in legacy:
             # worker 대표 코멘트(comment)
@@ -1018,3 +1022,21 @@ class DB:
         """DB 다시 연결 (파일 덮어쓴 후 필수)"""
         self.conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
+
+        # 재연결 후에도 초기 연결과 동일한 PRAGMA 유지
+        try:
+            self.conn.execute("PRAGMA foreign_keys = ON;")
+            self.conn.execute("PRAGMA journal_mode = WAL;")
+            self.conn.commit()
+        except Exception:
+            pass
+
+    def ensure_connection(self):
+        """
+        UI(사업주/근로자)에서 동기화 버튼을 누르면 close_connection()으로 conn이 None이 될 수 있다.
+        이때 대화방 등 다른 화면이 같은 DB 인스턴스를 공유하면 NoneType.execute가 터진다.
+        모든 DB 작업 직전에 이 함수로 연결을 보장한다.
+        """
+        if self.conn is None:
+            self.reconnect()
+
