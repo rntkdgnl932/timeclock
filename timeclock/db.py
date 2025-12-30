@@ -15,6 +15,20 @@ from timeclock.settings import (
     DEFAULT_WORKER_USER, DEFAULT_WORKER_PASS,
 )
 
+# [추가] 백그라운드 스레드 실행 함수 (파일 맨 끝에 붙여넣기)
+def run_sync_background(tag):
+    def _worker():
+        try:
+            backup_manager.run_backup(tag)
+            sync_manager.upload_current_db()
+            print(f"[Thread] '{tag}' 동기화 완료")
+        except Exception as e:
+            print(f"[Thread] 오류: {e}")
+
+    # 별도 스레드(일꾼) 생성해서 실행 (화면 안 멈춤)
+    t = threading.Thread(target=_worker)
+    t.daemon = True  # 프로그램 꺼지면 얘도 같이 꺼지게 설정
+    t.start()
 
 class DB:
     def __init__(self, db_path: Path):
@@ -342,9 +356,7 @@ class DB:
         sql = "UPDATE users SET " + ", ".join(updates) + " WHERE id=?"
         self.conn.execute(sql, tuple(params))
         self.conn.commit()
-
-        backup_manager.run_backup("admin_update_profile")
-        sync_manager.upload_current_db()
+        run_sync_background("admin_update_profile")
 
     def list_workers(self, keyword=None, status_filter="ACTIVE"):
         sql = "SELECT id, username, name, phone, birthdate, job_title, hourly_wage, created_at, is_active FROM users WHERE role='worker'"
@@ -370,9 +382,9 @@ class DB:
             (user_id,)
         )
         self.conn.commit()
-
-        backup_manager.run_backup("admin_resign_user")
-        sync_manager.upload_current_db()
+        run_sync_background("admin_resign_user")
+#         backup_manager.run_backup("admin_resign_user")run_sync_background("admin_update_profile")
+#         sync_manager.upload_current_db()
 
     def update_user_wage(self, user_id, new_wage):
         self.conn.execute(
@@ -380,9 +392,9 @@ class DB:
             (new_wage, user_id)
         )
         self.conn.commit()
-
-        backup_manager.run_backup("admin_update_wage")
-        sync_manager.upload_current_db()
+        run_sync_background("admin_update_wage")
+#         backup_manager.run_backup("admin_update_wage")run_sync_background("admin_update_profile")
+#         sync_manager.upload_current_db()
 
     def update_user_job_title(self, user_id: int, job_title: str):
         self.conn.execute(
@@ -390,9 +402,9 @@ class DB:
             (job_title, user_id)
         )
         self.conn.commit()
-
-        backup_manager.run_backup("admin_update_job")
-        sync_manager.upload_current_db()
+        run_sync_background("admin_update_job")
+#         backup_manager.run_backup("admin_update_job")run_sync_background("admin_update_profile")
+#         sync_manager.upload_current_db()
 
     # ----------------------------------------------------------------
     # Work Logs (출퇴근 로직)
@@ -426,9 +438,9 @@ class DB:
             (user_id, today, now, now)
         )
         self.conn.commit()
-
-        backup_manager.run_backup("request_in")
-        sync_manager.upload_current_db()
+        run_sync_background("request_in")
+#         backup_manager.run_backup("request_in")run_sync_background("admin_update_profile")
+#         sync_manager.upload_current_db()
 
     def end_work(self, user_id):
         row = self.conn.execute(
@@ -445,9 +457,9 @@ class DB:
             (now, row["id"])
         )
         self.conn.commit()
-
-        backup_manager.run_backup("request_out")
-        sync_manager.upload_current_db()
+        run_sync_background("request_out")
+#         backup_manager.run_backup("request_out")run_sync_background("admin_update_profile")
+#         sync_manager.upload_current_db()
 
     def reject_work_log(self, log_id):
         """
@@ -511,9 +523,9 @@ class DB:
                 """,
                 (app_start, app_end, comment, new_status, owner_id, now_str(), work_log_id)
             )
-
-            backup_manager.run_backup("approve")
-            sync_manager.upload_current_db()
+            run_sync_background("approve")
+#             backup_manager.run_backup("approve")run_sync_background("admin_update_profile")
+#             sync_manager.upload_current_db()
 
     # ----------------------------------------------------------------
     # Disputes (이의 제기)
@@ -542,9 +554,9 @@ class DB:
                               (dispute_type, dispute_id))
             self.add_dispute_message(dispute_id, user_id, "worker", comment, None)
             self.conn.commit()
-
-            backup_manager.run_backup("dispute_create")
-            sync_manager.upload_current_db()
+            run_sync_background("dispute_create")
+#             backup_manager.run_backup("dispute_create")run_sync_background("admin_update_profile")
+#             sync_manager.upload_current_db()
 
             return dispute_id
 
@@ -555,9 +567,9 @@ class DB:
         dispute_id = cur.lastrowid
         self.add_dispute_message(dispute_id, user_id, "worker", comment, None)
         self.conn.commit()
-
-        backup_manager.run_backup("dispute_create")
-        sync_manager.upload_current_db()
+        run_sync_background("dispute_create")
+#         backup_manager.run_backup("dispute_create")run_sync_background("admin_update_profile")
+#         sync_manager.upload_current_db()
 
         return dispute_id
 
@@ -621,9 +633,9 @@ class DB:
         )
         self.conn.commit()
         self.add_dispute_message(dispute_id, resolved_by_id, "owner", resolution_comment, status_code)
-
-        backup_manager.run_backup("dispute_resolved")
-        sync_manager.upload_current_db()
+        run_sync_background("dispute_resolved")
+#         backup_manager.run_backup("dispute_resolved")run_sync_background("admin_update_profile")
+#         sync_manager.upload_current_db()
 
     def add_dispute_message(self, dispute_id, sender_user_id, sender_role, message, status_code=None):
         self.conn.execute(
@@ -700,9 +712,9 @@ class DB:
                 (username, pw_hash, name, phone, birth, email, account, address,
                  datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
             )
-
-        backup_manager.run_backup("signup_request")
-        sync_manager.upload_current_db()
+        run_sync_background("signup_request")
+#         backup_manager.run_backup("signup_request")run_sync_background("admin_update_profile")
+#         sync_manager.upload_current_db()
 
     def is_username_available(self, username):
         u = self.conn.execute("SELECT 1 FROM users WHERE username=?", (username,)).fetchone()
@@ -731,9 +743,9 @@ class DB:
             self.conn.execute(
                 "UPDATE signup_requests SET status='APPROVED', decided_at=?, decided_by=?, decision_comment=? WHERE id=?",
                 (now_str(), owner_id, comment, request_id))
-
-        backup_manager.run_backup("signup_approve")
-        sync_manager.upload_current_db()
+        run_sync_background("signup_approve")
+#         backup_manager.run_backup("signup_approve")run_sync_background("admin_update_profile")
+#         sync_manager.upload_current_db()
 
     def reject_signup_request(self, request_id, owner_id, comment=""):
         self.conn.execute(

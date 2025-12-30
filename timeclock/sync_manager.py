@@ -95,62 +95,50 @@ def _get_folder_id(drive, folder_name):
 
 def download_latest_db():
     """
-    [핵심 수정 사항]
-    1. 구글 드라이브 파일 목록을 '수정일(modifiedDate)' 기준으로 내림차순 정렬
-    2. 무조건 가장 최신 파일(0번 인덱스)을 다운로드
-    3. 나머지 중복 파일은 휴지통으로 이동 (꼬임 방지)
+    앱 시작 시 클라우드 DB를 확인하고, 존재하면 무조건 다운로드하여 로컬을 덮어씁니다.
+    (로컬 DB 자동 갱신으로 인한 타임스탬프 꼬임 방지)
     """
     if not HAS_GOOGLE_DRIVE:
-        return False, "PyDrive 미설치"
+        return False, "구글 드라이브 모듈(PyDrive) 미설치"
 
     try:
         drive = _get_drive()
         if not drive:
-            return False, "구글 인증 실패"
+            return False, "구글 드라이브 인증 실패"
 
         folder_id = _get_folder_id(drive, GDRIVE_SYNC_FOLDER_NAME)
 
-        # 폴더 내 DB 파일 검색
+        # 클라우드 파일 검색
         query = f"'{folder_id}' in parents and title = '{GDRIVE_DB_FILENAME}' and trashed = false"
         file_list = drive.ListFile({'q': query}).GetList()
 
         if not file_list:
-            return True, "서버에 DB 없음 (초기 상태)"
+            return True, "클라우드에 DB 파일이 없습니다. (신규 시작)"
 
-        # ✅ [수정됨] 최신순 정렬 (이게 없어서 옛날 파일을 가져왔던 것임)
+        # 최신 파일 찾기 (여러 개일 경우 대비)
         file_list.sort(key=lambda x: x['modifiedDate'], reverse=True)
-
-        # 가장 최신 파일
         latest_file = file_list[0]
 
-        # ✅ [청소] 중복 파일 정리
-        if len(file_list) > 1:
-            logging.warning(f"[Sync] 중복 파일 {len(file_list)}개 발견. 정리 중...")
-            for old_file in file_list[1:]:
-                try:
-                    old_file.Trash()
-                except:
-                    pass
+        print(f"[Sync] 클라우드 DB 다운로드 시작... (ID: {latest_file['id']})")
 
-        # 다운로드 (임시 파일)
+        # 임시 파일로 다운로드
         temp_path = str(DB_PATH) + ".temp"
         latest_file.GetContentFile(temp_path)
 
-        # 덮어쓰기 시도
+        # 다운로드 성공 시 로컬 DB 덮어쓰기
         if os.path.exists(temp_path):
-            try:
-                shutil.move(temp_path, str(DB_PATH))
-                logging.info(f"[Sync] DB 업데이트 완료 (Date: {latest_file['modifiedDate']})")
-                return True, "동기화 완료"
-            except PermissionError:
-                # 윈도우 파일 잠금 문제 발생 시
-                return False, "파일이 사용 중입니다. 프로그램을 완전히 껐다가 켜주세요."
+            # (선택) 만약 기존 파일 백업이 필요하다면 아래 주석 해제
+            # if DB_PATH.exists():
+            #     shutil.copy2(DB_PATH, str(DB_PATH) + ".bak")
+
+            shutil.move(temp_path, DB_PATH)
+            return True, "클라우드 DB 다운로드 및 적용 완료"
+
+        return False, "임시 파일 다운로드 실패"
 
     except Exception as e:
-        logging.error(f"[Sync] 다운로드 실패: {e}")
-        return False, str(e)
-
-    return False, "알 수 없는 오류"
+        logging.error(f"[Sync] Download fail: {e}")
+        return False, f"다운로드 중 오류: {e}"
 
 
 def is_cloud_newer():
