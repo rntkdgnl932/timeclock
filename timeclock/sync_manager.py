@@ -204,10 +204,11 @@ def cloud_changed_since_last_sync() -> bool:
 
 def download_latest_db():
     """
-    [동작]
-    - 클라우드(timeclock_sync_data/timeclock.db)가 존재하면 최신 1개를 내려받아 DB_PATH에 덮어씀
-    - 내려받은 뒤, '클라우드 modifiedDate'를 로컬 마커(last_cloud_sync_ts.txt)에 저장
-    - 클라우드에 파일이 없으면(최초) 로컬 DB가 있으면 그대로 두고 False 반환
+    [수정됨] 윈도우 파일 잠금 문제를 해결하기 위해
+    1. 임시 파일(.temp)로 다운로드
+    2. 기존 DB 삭제
+    3. 임시 파일을 원본 이름으로 변경
+    하는 방식을 사용합니다.
     """
     if not HAS_GOOGLE_DRIVE:
         return False, "PyDrive 미설치"
@@ -223,15 +224,34 @@ def download_latest_db():
         if not gfile:
             return False, "클라우드 DB 없음"
 
-        # 다운로드
-        DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-        gfile.GetContentFile(str(DB_PATH))
+        # 🔴 [핵심 수정] 바로 덮어쓰지 않고 임시 파일로 다운로드
+        temp_path = str(DB_PATH) + ".temp"
+        gfile.GetContentFile(temp_path)
 
-        # ★ 중요: 마지막으로 받아온 클라우드 버전 기록
-        if remote_ts > 0:
-            _save_last_sync_ts(remote_ts)
+        if os.path.exists(temp_path):
+            # 기존 파일이 있으면 삭제 (파일 잠금 해제 후 삭제 시도)
+            if DB_PATH.exists():
+                try:
+                    os.remove(DB_PATH)
+                except Exception as e:
+                    # 삭제 실패 시(파일이 사용 중일 때) 임시 파일도 지우고 중단
+                    try:
+                        os.remove(temp_path)
+                    except:
+                        pass
+                    logging.error(f"[Sync] 기존 DB 삭제 실패: {e}")
+                    return False, f"실행 중인 DB 파일을 덮어쓸 수 없습니다. (잠금 상태): {e}"
 
-        return True, f"클라우드 최신 DB 다운로드 완료 ({datetime.datetime.fromtimestamp(remote_ts).isoformat() if remote_ts else 'unknown'})"
+            # 임시 파일을 원본 파일명으로 변경
+            shutil.move(temp_path, DB_PATH)
+
+            # ★ 중요: 마지막으로 받아온 클라우드 버전 기록 (User 코드 유지)
+            if remote_ts > 0:
+                _save_last_sync_ts(remote_ts)
+
+            return True, f"클라우드 최신 DB 다운로드 완료 ({datetime.datetime.fromtimestamp(remote_ts).isoformat() if remote_ts else 'unknown'})"
+
+        return False, "임시 파일 생성 실패"
 
     except Exception as e:
         logging.error(f"[Sync] 다운로드 실패: {e}")
