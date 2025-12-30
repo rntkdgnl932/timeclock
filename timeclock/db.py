@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 import datetime
 import csv
+import threading
+
 from timeclock import backup_manager
 from timeclock import sync_manager
 from timeclock.auth import pbkdf2_hash_password, pbkdf2_verify_password
@@ -17,18 +19,29 @@ from timeclock.settings import (
 
 # [추가] 백그라운드 스레드 실행 함수 (파일 맨 끝에 붙여넣기)
 def run_sync_background(tag):
+    """
+    DB 변경 직후 백그라운드로:
+    1) 로컬 백업
+    2) 구글드라이브 업로드
+
+    단, 클라우드 DB가 마지막 동기화 이후 변경되었으면(충돌 위험)
+    upload_current_db()가 False를 반환하며 업로드가 차단됩니다.
+    """
     def _worker():
         try:
             backup_manager.run_backup(tag)
-            sync_manager.upload_current_db()
-            print(f"[Thread] '{tag}' 동기화 완료")
+            ok = sync_manager.upload_current_db()
+            if ok:
+                print(f"[Thread] '{tag}' 동기화 완료")
+            else:
+                print(f"[Thread] '{tag}' 업로드 차단(클라우드 변경 감지). 재시작 후 최신 DB 다운로드 필요.")
         except Exception as e:
             print(f"[Thread] 오류: {e}")
 
-    # 별도 스레드(일꾼) 생성해서 실행 (화면 안 멈춤)
     t = threading.Thread(target=_worker)
-    t.daemon = True  # 프로그램 꺼지면 얘도 같이 꺼지게 설정
+    t.daemon = True
     t.start()
+
 
 class DB:
     def __init__(self, db_path: Path):

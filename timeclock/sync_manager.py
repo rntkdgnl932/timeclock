@@ -92,14 +92,125 @@ def _get_folder_id(drive, folder_name):
         folder.Upload()
         return folder['id']
 
+# --- [추가] 충돌 방지용 로컬 마커(마지막 클라우드 동기화 시각) 관리 ---
+
+def _sync_marker_path() -> Path:
+    # DB_PATH가 app_data/timeclock.db 라면, app_data/last_cloud_sync_ts.txt 로 저장
+    return DB_PATH.parent / "last_cloud_sync_ts.txt"
+
+
+def _load_last_sync_ts() -> int:
+    """
+    마지막으로 '클라우드 최신 DB를 받아온 시각(클라우드 modifiedDate)'을 epoch seconds로 저장/로드.
+    없으면 0.
+    """
+    p = _sync_marker_path()
+    try:
+        if not p.exists():
+            return 0
+        s = p.read_text(encoding="utf-8").strip()
+        if not s:
+            return 0
+        return int(s)
+    except Exception:
+        return 0
+
+
+def _save_last_sync_ts(ts: int) -> None:
+    try:
+        p = _sync_marker_path()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(str(int(ts)), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _parse_gdrive_modified_date(modified_date_str: str) -> int:
+    """
+    PyDrive의 modifiedDate는 대개 ISO8601(예: '2025-12-30T10:05:12.123Z') 형태.
+    이를 epoch seconds로 변환. 파싱 실패 시 0.
+    """
+    try:
+        s = (modified_date_str or "").strip()
+        if not s:
+            return 0
+
+        # 'Z' 처리
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+
+        # datetime.fromisoformat은 마이크로초/타임존 포함을 지원
+        dt = datetime.datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            # tz 없으면 UTC로 가정
+            dt = dt.replace(tzinfo=datetime.timezone.utc)
+        return int(dt.timestamp())
+    except Exception:
+        return 0
+
+
+def _get_cloud_db_file_and_ts(drive, folder_id: str):
+    """
+    클라우드의 timeclock.db 파일(최신 1개)과 modifiedDate(epoch seconds) 반환.
+    중복 파일은 Trash 처리.
+    """
+    query = f"'{folder_id}' in parents and title = '{GDRIVE_DB_FILENAME}' and trashed = false"
+    file_list = drive.ListFile({'q': query}).GetList()
+
+    if not file_list:
+        return None, 0
+
+    file_list.sort(key=lambda x: x.get('modifiedDate', ''), reverse=True)
+    gfile = file_list[0]
+
+    # 중복 정리
+    if len(file_list) > 1:
+        for old_f in file_list[1:]:
+            try:
+                old_f.Trash()
+            except Exception:
+                pass
+
+    remote_ts = _parse_gdrive_modified_date(gfile.get('modifiedDate', ''))
+    return gfile, remote_ts
+
+
+def cloud_changed_since_last_sync() -> bool:
+    """
+    '마지막으로 내가 받아온 클라우드 버전' 이후에 클라우드가 바뀌었는지 검사.
+    True면 업로드 금지(덮어쓰기 위험).
+    """
+    if not HAS_GOOGLE_DRIVE:
+        return False
+
+    try:
+        drive = _get_drive()
+        if not drive:
+            return False
+
+        folder_id = _get_folder_id(drive, GDRIVE_SYNC_FOLDER_NAME)
+        _, remote_ts = _get_cloud_db_file_and_ts(drive, folder_id)
+
+        last_ts = _load_last_sync_ts()
+        if last_ts <= 0:
+            # 마커가 없으면 "동기화 이력 불명" -> 안전하게 변경된 것으로 간주
+            return True
+
+        return remote_ts > last_ts
+    except Exception:
+        # 실패 시 업로드를 막아야 안전
+        return True
+
 
 def download_latest_db():
     """
-    앱 시작 시 클라우드 DB를 확인하고, 존재하면 무조건 다운로드하여 로컬을 덮어씁니다.
-    (로컬 DB 자동 갱신으로 인한 타임스탬프 꼬임 방지)
+    [동작]
+    - 클라우드(timeclock_sync_data/timeclock.db)가 존재하면 최신 1개를 내려받아 DB_PATH에 덮어씀
+    - 내려받은 뒤, '클라우드 modifiedDate'를 로컬 마커(last_cloud_sync_ts.txt)에 저장
+    - 클라우드에 파일이 없으면(최초) 로컬 DB가 있으면 그대로 두고 False 반환
     """
     if not HAS_GOOGLE_DRIVE:
-        return False, "구글 드라이브 모듈(PyDrive) 미설치"
+        return False, "PyDrive 미설치"
 
     try:
         drive = _get_drive()
@@ -107,105 +218,42 @@ def download_latest_db():
             return False, "구글 드라이브 인증 실패"
 
         folder_id = _get_folder_id(drive, GDRIVE_SYNC_FOLDER_NAME)
+        gfile, remote_ts = _get_cloud_db_file_and_ts(drive, folder_id)
 
-        # 클라우드 파일 검색
-        query = f"'{folder_id}' in parents and title = '{GDRIVE_DB_FILENAME}' and trashed = false"
-        file_list = drive.ListFile({'q': query}).GetList()
+        if not gfile:
+            return False, "클라우드 DB 없음"
 
-        if not file_list:
-            return True, "클라우드에 DB 파일이 없습니다. (신규 시작)"
+        # 다운로드
+        DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+        gfile.GetContentFile(str(DB_PATH))
 
-        # 최신 파일 찾기 (여러 개일 경우 대비)
-        file_list.sort(key=lambda x: x['modifiedDate'], reverse=True)
-        latest_file = file_list[0]
+        # ★ 중요: 마지막으로 받아온 클라우드 버전 기록
+        if remote_ts > 0:
+            _save_last_sync_ts(remote_ts)
 
-        print(f"[Sync] 클라우드 DB 다운로드 시작... (ID: {latest_file['id']})")
-
-        # 임시 파일로 다운로드
-        temp_path = str(DB_PATH) + ".temp"
-        latest_file.GetContentFile(temp_path)
-
-        # 다운로드 성공 시 로컬 DB 덮어쓰기
-        if os.path.exists(temp_path):
-            # (선택) 만약 기존 파일 백업이 필요하다면 아래 주석 해제
-            # if DB_PATH.exists():
-            #     shutil.copy2(DB_PATH, str(DB_PATH) + ".bak")
-
-            shutil.move(temp_path, DB_PATH)
-            return True, "클라우드 DB 다운로드 및 적용 완료"
-
-        return False, "임시 파일 다운로드 실패"
+        return True, f"클라우드 최신 DB 다운로드 완료 ({datetime.datetime.fromtimestamp(remote_ts).isoformat() if remote_ts else 'unknown'})"
 
     except Exception as e:
-        logging.error(f"[Sync] Download fail: {e}")
-        return False, f"다운로드 중 오류: {e}"
+        logging.error(f"[Sync] 다운로드 실패: {e}")
+        return False, str(e)
 
 
 def is_cloud_newer():
     """
-    [신규 함수] 구글 드라이브(Cloud)의 파일이 내 PC(Local)보다 최신인지 확인
-    True 리턴 시: 클라우드가 더 최신임 -> 업로드 중단해야 함
+    기존 로직(로컬 mtime vs 클라우드 modifiedDate) 기반의 '신규 여부' 판단은
+    덮어쓰기 사고를 유발하므로,
+    여기서는 '클라우드가 마지막 동기화 이후 변경되었는지'로 대체합니다.
     """
-    if not HAS_GOOGLE_DRIVE:
-        return False
+    return cloud_changed_since_last_sync()
 
-    try:
-        drive = _get_drive()
-        if not drive:
-            return False
-
-        folder_id = _get_folder_id(drive, GDRIVE_SYNC_FOLDER_NAME)
-        query = f"'{folder_id}' in parents and title = '{GDRIVE_DB_FILENAME}' and trashed = false"
-        file_list = drive.ListFile({'q': query}).GetList()
-
-        if not file_list:
-            # 클라우드에 파일이 없으면 내께 최신(또는 최초)이라고 판단
-            return False
-
-        # 1. 클라우드 파일 시간 파싱 (가장 최신 파일 기준)
-        file_list.sort(key=lambda x: x['modifiedDate'], reverse=True)
-        remote_file = file_list[0]
-        remote_time_str = remote_file['modifiedDate']  # 예: '2025-01-01T12:00:00.123Z'
-
-        # 문자열 -> datetime 변환 (소수점 제거 후 파싱)
-        # 구글 드라이브 시간 포맷은 ISO 8601 (UTC)
-        dt_part = remote_time_str.split('.')[0]
-        remote_dt = datetime.datetime.strptime(dt_part, "%Y-%m-%dT%H:%M:%S")
-
-        # UTC 타임스탬프로 변환
-        remote_ts = remote_dt.replace(tzinfo=datetime.timezone.utc).timestamp()
-
-        # 2. 로컬 파일 시간 확인
-        if not DB_PATH.exists():
-            return True  # 로컬 파일 없으면 클라우드가 최신 취급
-
-        local_ts = os.path.getmtime(DB_PATH)
-
-        # 3. 비교 (클라우드가 5초 이상 미래면 최신으로 인정 - 시간차 오차 고려)
-        if remote_ts > local_ts + 5:
-            logging.warning(f"[Sync] 클라우드가 더 최신임 (Cloud: {remote_ts} > Local: {local_ts})")
-            return True
-
-        return False
-
-    except Exception as e:
-        logging.error(f"[Sync] 시간 비교 실패: {e}")
-        # 에러 나면 안전을 위해 업로드 하지 않도록 True 반환하거나, 정책에 따라 변경 가능
-        return False
 
 def upload_current_db():
     """
-    [핵심 수정 사항]
-    1. 업로드 전 is_cloud_newer() 체크 -> 구글이 더 최신이면 업로드 중단 (덮어쓰기 방지)
-    2. 업로드 할 때도 '가장 최신 파일'을 찾아서 덮어쓰기 (중복 생성 방지)
+    [중요] 업로드 전에 충돌 검사:
+    - last_cloud_sync_ts.txt(내가 마지막으로 받은 클라우드 버전) 이후에
+      클라우드 DB가 변경되었으면 업로드를 막는다.
+    - 막았을 때는 사용자가 먼저 download_latest_db()를 수행해야 한다.
     """
-    # -----------------------------------------------------------
-    # [방어 로직] 클라우드가 더 최신이면 업로드 절대 금지
-    # -----------------------------------------------------------
-    if is_cloud_newer():
-        logging.warning("[Sync] 클라우드 DB가 더 최신입니다. 업로드를 취소합니다. (먼저 다운로드 필요)")
-        return False
-
     if not HAS_GOOGLE_DRIVE:
         return False
 
@@ -216,31 +264,41 @@ def upload_current_db():
 
         folder_id = _get_folder_id(drive, GDRIVE_SYNC_FOLDER_NAME)
 
-        # 기존 파일 검색
+        # ★ 핵심: 충돌 감지(덮어쓰기 방지)
+        # 마커가 없거나, 클라우드가 그 이후 변경되었으면 업로드 금지
+        if cloud_changed_since_last_sync():
+            logging.warning(
+                "[Sync] 업로드 차단: 클라우드 DB가 마지막 동기화 이후 변경되었습니다. "
+                "먼저 클라우드 최신 DB를 다운로드(download_latest_db)한 뒤 다시 시도하세요."
+            )
+            return False
+
+        # 기존 파일 검색(없으면 새로 생성)
         query = f"'{folder_id}' in parents and title = '{GDRIVE_DB_FILENAME}' and trashed = false"
         file_list = drive.ListFile({'q': query}).GetList()
 
         gfile = None
         if file_list:
-            # 최신 파일 찾아서 업데이트 타겟으로 설정
-            file_list.sort(key=lambda x: x['modifiedDate'], reverse=True)
+            file_list.sort(key=lambda x: x.get('modifiedDate', ''), reverse=True)
             gfile = file_list[0]
-
-            # 나머지 찌꺼기 정리
             if len(file_list) > 1:
                 for old_f in file_list[1:]:
                     try:
                         old_f.Trash()
-                    except:
+                    except Exception:
                         pass
         else:
-            # 없으면 새로 생성
             gfile = drive.CreateFile({'title': GDRIVE_DB_FILENAME, 'parents': [{'id': folder_id}]})
 
-        # 업로드 수행
         gfile.SetContentFile(str(DB_PATH))
         gfile.Upload()
-        logging.info("[Sync] DB 업로드 완료")
+
+        # ★ 업로드 성공 후: 방금 업로드된 클라우드 modifiedDate를 마커로 저장
+        remote_ts = _parse_gdrive_modified_date(gfile.get('modifiedDate', ''))
+        if remote_ts > 0:
+            _save_last_sync_ts(remote_ts)
+
+        logging.info(f"[Sync] 업로드 완료: {GDRIVE_DB_FILENAME}")
         return True
 
     except Exception as e:
@@ -249,9 +307,4 @@ def upload_current_db():
 
 
 
-
-
-
-
-
-    #
+#

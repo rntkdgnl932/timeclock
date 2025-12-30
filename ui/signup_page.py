@@ -7,6 +7,7 @@ from PyQt5 import QtWidgets, QtCore, QtGui  # ⬅️ QtGui 모듈 추가
 import logging
 from timeclock.utils import Message
 from timeclock.auth import pbkdf2_hash_password  # 비밀번호 해시 함수 (submit 함수에서 사용)
+from timeclock import sync_manager
 
 ID_PATTERN = re.compile(r"^[a-zA-Z0-9_]{4,20}$")
 
@@ -286,18 +287,30 @@ class SignupPage(QtWidgets.QWidget):
         # 비밀번호 해싱 (auth.py 재사용)
         pw_hash = pbkdf2_hash_password(pw)
 
+        # 🔴 [Sync] 1. 저장 전 DB 연결 해제 및 최신 다운로드
+        self.db.close_connection()
+        try:
+            sync_manager.download_latest_db()
+        except Exception as e:
+            print(f"[Sync Error] {e}")
+        finally:
+            self.db.reconnect()
+
         # ---------- DB ----------
         try:
             self.db.create_signup_request(
                 username=username,
-                pw_hash=pw_hash,  # ⬅️ 해시된 비밀번호를 전달해야 합니다.
+                pw_hash=pw_hash,
                 name=name,
                 phone=phone,
-                birth=birthdate,  # db.py의 인자가 birth이므로 birthdate 대신 birth를 사용합니다.
+                birth=birthdate,
                 email=email,
-                account=bank_account,  # db.py의 인자가 account이므로 bank_account 대신 account를 사용합니다.
+                account=bank_account,
                 address=address,
             )
+
+            # 🔴 [Sync] 2. 저장 직후 서버 업로드 (사업주가 즉시 확인 가능하도록)
+            sync_manager.upload_current_db()
 
         except Exception as e:
             # 로깅을 추가하여 디버깅을 돕습니다.
