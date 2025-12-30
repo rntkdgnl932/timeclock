@@ -7,11 +7,13 @@ from pathlib import Path
 import datetime
 from timeclock.settings import DB_PATH, APP_DIR
 from timeclock.utils import now_str
+import requests  # [추가] 다운로드 통신용
+import time      # [추가] 캐시방지 시간생성용
 
 # [설정] 구글 드라이브 경로 및 설정
 SECRETS_FILE = APP_DIR / "client_secrets.json"
 CREDS_FILE = APP_DIR / "mycreds.txt"
-GDRIVE_SYNC_FOLDER_NAME = "timeclock_sync_data"
+GDRIVE_SYNC_FOLDER_NAME = "timeclock_sync_data_v2"
 GDRIVE_DB_FILENAME = "timeclock.db"
 
 HAS_GOOGLE_DRIVE = False
@@ -204,11 +206,8 @@ def cloud_changed_since_last_sync() -> bool:
 
 def download_latest_db():
     """
-    [수정됨] 윈도우 파일 잠금 문제를 해결하기 위해
-    1. 임시 파일(.temp)로 다운로드
-    2. 기존 DB 삭제
-    3. 임시 파일을 원본 이름으로 변경
-    하는 방식을 사용합니다.
+    [수정됨] requests를 이용해 URL 뒤에 타임스탬프를 붙여
+    강제로 최신 파일을 받아오도록(캐시 무시) 변경했습니다.
     """
     if not HAS_GOOGLE_DRIVE:
         return False, "PyDrive 미설치"
@@ -224,17 +223,47 @@ def download_latest_db():
         if not gfile:
             return False, "클라우드 DB 없음"
 
-        # 🔴 [핵심 수정] 바로 덮어쓰지 않고 임시 파일로 다운로드
+        # 임시 파일 경로
         temp_path = str(DB_PATH) + ".temp"
-        gfile.GetContentFile(temp_path)
 
+        # -------------------------------------------------------------
+        # 🔴 [핵심 수정] PyDrive의 GetContentFile 대신 requests 사용
+        # -------------------------------------------------------------
+        try:
+            # 1. PyDrive가 이미 로그인해둔 인증 토큰(Token)을 가져옵니다.
+            access_token = drive.auth.credentials.access_token
+
+            # 2. 구글 드라이브 파일 다운로드 API URL (v3)
+            #    여기에 '&t=현재시간'을 붙여서 "새로운 요청"인 척 속입니다.
+            timestamp = int(time.time())
+            file_id = gfile['id']
+            download_url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media&t={timestamp}"
+
+            # 3. 헤더에 토큰 실어서 요청
+            headers = {"Authorization": f"Bearer {access_token}"}
+
+            print(f"[Sync] 캐시 무시 다운로드 요청: {download_url}")
+            response = requests.get(download_url, headers=headers)
+
+            if response.status_code == 200:
+                with open(temp_path, "wb") as f:
+                    f.write(response.content)
+            else:
+                # 만약 requests가 실패하면(권한 등), 원래 쓰던 PyDrive 방식으로 비상 복구
+                print(f"[Sync] requests 방식 실패({response.status_code}), 기본 방식으로 재시도합니다.")
+                gfile.GetContentFile(temp_path)
+
+        except Exception as req_e:
+            print(f"[Sync] requests 로직 에러: {req_e}, 기본 방식으로 재시도합니다.")
+            gfile.GetContentFile(temp_path)
+        # -------------------------------------------------------------
+
+        # 파일 교체 로직 (기존과 동일)
         if os.path.exists(temp_path):
-            # 기존 파일이 있으면 삭제 (파일 잠금 해제 후 삭제 시도)
             if DB_PATH.exists():
                 try:
                     os.remove(DB_PATH)
                 except Exception as e:
-                    # 삭제 실패 시(파일이 사용 중일 때) 임시 파일도 지우고 중단
                     try:
                         os.remove(temp_path)
                     except:
@@ -242,10 +271,8 @@ def download_latest_db():
                     logging.error(f"[Sync] 기존 DB 삭제 실패: {e}")
                     return False, f"실행 중인 DB 파일을 덮어쓸 수 없습니다. (잠금 상태): {e}"
 
-            # 임시 파일을 원본 파일명으로 변경
             shutil.move(temp_path, DB_PATH)
 
-            # ★ 중요: 마지막으로 받아온 클라우드 버전 기록 (User 코드 유지)
             if remote_ts > 0:
                 _save_last_sync_ts(remote_ts)
 
@@ -324,6 +351,113 @@ def upload_current_db():
     except Exception as e:
         logging.error(f"[Sync] 업로드 실패: {e}")
         return False
+
+
+# timeclock/sync_manager.py 맨 아래에 추가
+
+# timeclock/sync_manager.py 파일의 맨 끝에 아래 내용을 붙여넣으세요.
+
+def run_startup_sync():
+    """
+    [핵심] 프로그램 시작 시 실행.
+    구글 드라이브(Cloud) 시간이 내 컴퓨터(Local) 시간보다 최신이면
+    묻지도 따지지도 않고 다운로드하여 DB를 덮어쓴다.
+    """
+    if not HAS_GOOGLE_DRIVE:
+        print("[Startup] 구글 드라이브 모듈 없음.")
+        return
+
+    try:
+        print("[Startup] 구글 드라이브 상태 확인 중...")
+        drive = _get_drive()
+        if not drive:
+            print("[Startup] 인증 실패.")
+            return
+
+        folder_id = _get_folder_id(drive, GDRIVE_SYNC_FOLDER_NAME)
+        gfile, remote_ts = _get_cloud_db_file_and_ts(drive, folder_id)
+
+        if not gfile:
+            print("[Startup] 클라우드에 DB 파일이 없습니다. (첫 실행으로 간주)")
+            return
+
+        last_ts = _load_last_sync_ts()
+
+        # ★ 비교 로직: 클라우드가 더 최신인가?
+        if remote_ts > last_ts:
+            print(f"[Startup] 새 데이터 발견! (Cloud: {remote_ts} > Local: {last_ts})")
+            print("[Startup] 최신 DB를 다운로드합니다...")
+
+            # 다운로드 실행
+            success, msg = download_latest_db()
+            if success:
+                print(f"[Startup] 동기화 완료: {msg}")
+            else:
+                print(f"[Startup] 동기화 실패: {msg}")
+        else:
+            print("[Startup] 현재 데이터가 최신입니다. 다운로드 안 함.")
+
+    except Exception as e:
+        print(f"[Startup] 오류 발생: {e}")
+
+
+# timeclock/sync_manager.py 기존 코드 맨 아래에 추가
+
+def get_debug_info():
+    """
+    [UI 표시용] 로컬 DB와 클라우드 DB의 파일명/수정시간 정보를 조회하여 반환.
+    (다운로드 로직과는 별개로 '정보 조회'만 수행)
+    """
+    import datetime
+
+    info = {
+        "local_name": "-", "local_time": "-",
+        "cloud_name": "-", "cloud_time": "-",
+        "status": "Check Failed"
+    }
+
+    # 1. 로컬 정보 조회
+    if DB_PATH.exists():
+        info["local_name"] = DB_PATH.name
+        # timestamp -> datetime string
+        ts = DB_PATH.stat().st_mtime
+        dt = datetime.datetime.fromtimestamp(ts)
+        info["local_time"] = dt.strftime("%Y-%m-%d %H:%M:%S")
+    else:
+        info["local_name"] = "파일 없음"
+
+    # 2. 클라우드 정보 조회
+    if not HAS_GOOGLE_DRIVE:
+        info["status"] = "Google Drive 모듈 없음"
+        return info
+
+    try:
+        drive = _get_drive()
+        if not drive:
+            info["status"] = "인증 실패"
+            return info
+
+        folder_id = _get_folder_id(drive, GDRIVE_SYNC_FOLDER_NAME)
+        gfile, remote_ts = _get_cloud_db_file_and_ts(drive, folder_id)
+
+        if gfile:
+            info["cloud_name"] = gfile['title']
+            # epoch seconds -> datetime string
+            if remote_ts > 0:
+                dt = datetime.datetime.fromtimestamp(remote_ts)
+                info["cloud_time"] = dt.strftime("%Y-%m-%d %H:%M:%S")
+            else:
+                info["cloud_time"] = "시간 정보 없음"
+            info["status"] = "OK"
+        else:
+            info["cloud_name"] = "클라우드 파일 없음"
+            info["status"] = "Cloud Empty"
+
+    except Exception as e:
+        info["status"] = f"Error: {e}"
+
+    return info
+
 
 
 

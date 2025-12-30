@@ -4,7 +4,6 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 from timeclock.settings import DB_PATH, BACKUP_DIR, APP_DIR
-
 # -----------------------------------------------------------
 # [설정] 파일 경로 절대 경로로 고정
 # -----------------------------------------------------------

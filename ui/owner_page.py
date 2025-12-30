@@ -281,7 +281,8 @@ class OwnerPage(QtWidgets.QWidget):
         self.cb_work_status.currentIndexChanged.connect(lambda *_: self.refresh_work_logs())
 
         self.btn_work_refresh = QtWidgets.QPushButton("🔄 새로고침")
-        self.btn_work_refresh.clicked.connect(self.refresh_work_logs)
+        # self.btn_work_refresh.clicked.connect(self.refresh_work_logs)
+        self.btn_work_refresh.clicked.connect(self.sync_and_refresh)
         self._set_btn_variant(self.btn_work_refresh, "secondary")
 
         # 작업시작 승인 / 반려 / 퇴근 승인
@@ -364,6 +365,81 @@ class OwnerPage(QtWidgets.QWidget):
         except Exception as e:
             logging.exception("refresh_work_logs failed")
             Message.err(self, "오류", f"근무 기록 조회 실패: {e}")
+
+    def sync_and_refresh(self):
+        """
+        [수정] DB 파일 잠금(WinError 32) 해결을 위해
+        다운로드 전에 DB 연결을 끊고(close), 완료 후 다시 연결(reconnect)합니다.
+        """
+
+        # 1. [핵심] 다운로드 전에 DB 연결을 잠시 끊어줍니다.
+        #    이 코드가 없으면 "다른 프로세스가 사용 중"이라며 에러가 납니다.
+        print("🔄 동기화 시작: DB 연결 잠시 해제...")
+        self.db.close_connection()
+
+        # 작업 함수 (별도 스레드에서 실행)
+        def job_fn(progress_callback):
+            progress_callback({"msg": "🚀 구글 드라이브 접속 중..."})
+
+            # sync_manager가 최신 파일을 받아옵니다.
+            # (이제 DB 연결이 끊겨 있으므로 덮어쓰기에 성공할 것입니다)
+            from timeclock import sync_manager
+            ok, msg = sync_manager.download_latest_db()
+
+            if ok:
+                progress_callback({"msg": f"✅ 다운로드 완료: {msg}"})
+            else:
+                progress_callback({"msg": f"⚠️ 다운로드 실패/건너뜀: {msg}"})
+
+            # 정보 조회
+            progress_callback({"msg": "📊 데이터 확인 중..."})
+            info = sync_manager.get_debug_info()
+
+            return info, ok, msg
+
+        # 완료 후 처리 함수 (메인 스레드)
+        def on_done(ok_thread, result_data, err):
+            # 결과 데이터 풀기
+            if result_data:
+                info, download_ok, download_msg = result_data
+            else:
+                info, download_ok, download_msg = None, False, "스레드 오류"
+
+            # 2. [핵심] 작업이 끝났으니 DB에 다시 연결합니다.
+            print("✅ 동기화 종료: DB 재연결...")
+            self.db.reconnect()
+
+            # 3. 화면 갱신 (이제 최신 데이터가 보입니다)
+            self.refresh_work_logs()
+            self.refresh_members()
+            self.refresh_disputes()
+            self.refresh_signup_requests()
+
+            if not ok_thread:
+                QtWidgets.QMessageBox.critical(self, "오류", f"작업 중 오류 발생: {err}")
+                return
+
+            if not download_ok:
+                QtWidgets.QMessageBox.warning(self, "실패", f"최신 DB 가져오기 실패:\n{download_msg}")
+                return
+
+            # 결과 알림
+            if info:
+                msg = (
+                    f"📂 <b>[로컬 DB]</b> {info.get('local_time', '-')}\n"
+                    f"☁️ <b>[구글 DB]</b> {info.get('cloud_time', '-')}\n\n"
+                    f"결과: {download_msg}"
+                )
+                QtWidgets.QMessageBox.information(self, "동기화 완료", msg)
+
+        # 비동기 실행
+        run_job_with_progress_async(
+            self,
+            "데이터 동기화 중... (DB 연결 해제됨)",
+            job_fn,
+            on_done=on_done
+        )
+
 
     def update_badges(self):
         counts = self.db.get_pending_counts() or {}
