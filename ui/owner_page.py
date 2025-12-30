@@ -393,13 +393,21 @@ class OwnerPage(QtWidgets.QWidget):
         target_row = dict(self._work_rows[row_idx])
         log_id = target_row["id"]
 
-        # [수정됨] 무제한 수정 허용을 위해 상태 체크 로직 제거됨.
         dialog = WorkLogApproveDialog(self, target_row, mode)
 
         if dialog.exec_() == QtWidgets.QDialog.Accepted:
             app_start, app_end, final_comment = dialog.get_data()
 
-            # 1) DB 업데이트
+            # [Sync] 1. DB 연결 해제 및 최신 다운로드
+            self.db.close_connection()
+            try:
+                sync_manager.download_latest_db()
+            except Exception as e:
+                print(f"[Sync Error] {e}")
+            finally:
+                self.db.reconnect()
+
+            # [Sync] 2. DB 업데이트
             try:
                 self.db.approve_work_log(
                     log_id,
@@ -412,7 +420,7 @@ class OwnerPage(QtWidgets.QWidget):
                 Message.err(self, "오류", f"승인 실패: {e}")
                 return
 
-            # 2) 백업 및 [Sync] 서버 업로드
+            # [Sync] 3. 백업 및 업로드
             def job_fn(progress_callback):
                 if 'backup_manager' in globals():
                     return backup_manager.run_backup("approve", progress_callback)
@@ -420,13 +428,12 @@ class OwnerPage(QtWidgets.QWidget):
 
             def on_done(ok, res, err):
                 if ok:
-                    # [Sync] 승인 후 서버에 즉시 반영
                     sync_manager.upload_current_db()
                 self.refresh_work_logs()
 
             run_job_with_progress_async(
                 self,
-                "승인 데이터 백업 및 동기화 중...",
+                "승인 데이터 동기화 중...",
                 job_fn,
                 on_done=on_done
             )
@@ -446,31 +453,40 @@ class OwnerPage(QtWidgets.QWidget):
             if not Message.confirm(self, "반려 확인", "해당 작업 요청을 반려하시겠습니까?\n근로자는 다시 요청을 보낼 수 있게 되며,\n이 기록은 '반려' 상태로 남습니다."):
                 return
 
+        # [Sync] 1. 다운로드
+        self.db.close_connection()
+        try:
+            sync_manager.download_latest_db()
+        except Exception as e:
+            print(f"[Sync Error] {e}")
+        finally:
+            self.db.reconnect()
+
+        # [Sync] 2. DB 업데이트
         try:
             self.db.reject_work_log(target_row["id"])
         except Exception as e:
             Message.err(self, "오류", f"반려 처리 실패: {e}")
             return
 
+        # [Sync] 3. 업로드
         def job_fn(progress_callback):
             return backup_manager.run_backup("reject_log", progress_callback)
 
         def on_done(ok, res, err):
             if ok:
-                # [Sync] 반려 후 서버 업로드
                 sync_manager.upload_current_db()
             self.refresh_work_logs()
 
         run_job_with_progress_async(
             self,
-            "반려 데이터 백업 중...",
+            "반려 데이터 동기화 중...",
             job_fn,
             on_done=on_done
         )
 
-    # ==========================================================
-    # 2. 회원(급여) 관리 탭
-    # ==========================================================
+
+
     def _build_member_tab(self):
         self.le_member_search = QtWidgets.QLineEdit()
         self.le_member_search.setPlaceholderText("이름 검색...")
@@ -582,10 +598,21 @@ class OwnerPage(QtWidgets.QWidget):
             return
 
         if Message.confirm(self, "퇴사 확인", f"정말 '{username}' 님을 퇴사 처리하시겠습니까?\n(계정은 삭제되지 않고 비활성화됩니다)"):
+
+            # [Sync] 1. 다운로드
+            self.db.close_connection()
+            try:
+                sync_manager.download_latest_db()
+            except Exception as e:
+                print(f"[Sync Error] {e}")
+            finally:
+                self.db.reconnect()
+
             try:
                 self.db.resign_user(user_id)
-                # [Sync] 퇴사 처리 후 서버 업로드
+                # [Sync] 2. 업로드
                 sync_manager.upload_current_db()
+
                 Message.info(self, "완료", "퇴사 처리가 완료되었습니다.")
                 self.refresh_members()
             except Exception as e:
@@ -608,10 +635,20 @@ class OwnerPage(QtWidgets.QWidget):
             current_wage, 0, 1000000, 10
         )
         if ok:
+            # [Sync] 1. 다운로드
+            self.db.close_connection()
+            try:
+                sync_manager.download_latest_db()
+            except Exception as e:
+                print(f"[Sync Error] {e}")
+            finally:
+                self.db.reconnect()
+
             try:
                 self.db.update_user_wage(user_id, val)
-                # [Sync] 시급 변경 후 서버 업로드
+                # [Sync] 2. 업로드
                 sync_manager.upload_current_db()
+
                 Message.info(self, "완료", f"{username}님의 시급이 {val:,}원으로 변경되었습니다.")
                 self.refresh_members()
             except Exception as e:
@@ -648,10 +685,20 @@ class OwnerPage(QtWidgets.QWidget):
         if not val:
             return
 
+        # [Sync] 1. 다운로드
+        self.db.close_connection()
+        try:
+            sync_manager.download_latest_db()
+        except Exception as e:
+            print(f"[Sync Error] {e}")
+        finally:
+            self.db.reconnect()
+
         try:
             self.db.update_user_job_title(user_id, val)
-            # [Sync] 직급 변경 후 서버 업로드
+            # [Sync] 2. 업로드
             sync_manager.upload_current_db()
+
             Message.info(self, "완료", f"{username}님의 직급이 '{val}'로 변경되었습니다.")
             self.refresh_members()
         except Exception as e:
@@ -839,10 +886,21 @@ class OwnerPage(QtWidgets.QWidget):
         name = self.signup_table.get_cell(row, 1)
 
         if Message.confirm(self, "승인", f"'{name}'님의 가입을 승인하시겠습니까?"):
+
+            # [Sync] 1. 다운로드
+            self.db.close_connection()
+            try:
+                sync_manager.download_latest_db()
+            except Exception as e:
+                print(f"[Sync Error] {e}")
+            finally:
+                self.db.reconnect()
+
             try:
                 self.db.approve_signup_request(sid, self.session.user_id, "Approved")
-                # [Sync] 가입 승인 후 서버 업로드
+                # [Sync] 2. 업로드 (가입 승인은 간단해서 비동기 없이 즉시 처리해도 무방하지만, 통일성을 위해 유지해도 됨. 여기선 즉시 처리)
                 sync_manager.upload_current_db()
+
                 Message.info(self, "완료", "계정이 생성되었습니다.")
                 self.refresh_signup_requests()
                 self.refresh_members()
@@ -856,10 +914,20 @@ class OwnerPage(QtWidgets.QWidget):
 
         text, ok = QtWidgets.QInputDialog.getText(self, "거절", "거절 사유:")
         if ok:
+            # [Sync] 1. 다운로드
+            self.db.close_connection()
+            try:
+                sync_manager.download_latest_db()
+            except Exception as e:
+                print(f"[Sync Error] {e}")
+            finally:
+                self.db.reconnect()
+
             try:
                 self.db.reject_signup_request(sid, self.session.user_id, text)
-                # [Sync] 가입 거절 후 서버 업로드
+                # [Sync] 2. 업로드
                 sync_manager.upload_current_db()
+
                 Message.info(self, "완료", "거절 처리되었습니다.")
                 self.refresh_signup_requests()
             except Exception as e:

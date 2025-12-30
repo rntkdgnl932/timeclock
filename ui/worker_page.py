@@ -177,6 +177,8 @@ class WorkerPage(QtWidgets.QWidget):
             self.btn_action.setProperty("mode", "DONE")
             self.btn_action.setEnabled(False)
 
+    # timeclock/ui/worker_page.py
+
     def on_work_action(self):
         mode = self.btn_action.property("mode")
 
@@ -196,8 +198,15 @@ class WorkerPage(QtWidgets.QWidget):
 
             if msg_box.clickedButton() == btn_yes:
 
-                # [Sync] 1. 최신 DB 다운로드 (혹시 다른 PC에서 작업했을까봐)
-                sync_manager.download_latest_db()
+                # [Sync] 1. DB 연결 해제 후 최신 DB 다운로드 (파일 잠금 방지)
+                self.db.close_connection()
+                try:
+                    sync_manager.download_latest_db()
+                except Exception as e:
+                    print(f"[Sync Error] {e}")
+                finally:
+                    # 다운로드 성공/실패 여부와 관계없이 반드시 다시 연결
+                    self.db.reconnect()
 
                 # 2. DB에 시작 요청 기록
                 try:
@@ -237,8 +246,14 @@ class WorkerPage(QtWidgets.QWidget):
         elif mode == "OUT":
             if Message.confirm(self, "퇴근 요청", "작업을 모두 마치고 퇴근 승인을 요청하시겠습니까?"):
 
-                # [Sync] 1. 최신 DB 다운로드
-                sync_manager.download_latest_db()
+                # [Sync] 1. DB 연결 해제 후 최신 DB 다운로드
+                self.db.close_connection()
+                try:
+                    sync_manager.download_latest_db()
+                except Exception as e:
+                    print(f"[Sync Error] {e}")
+                finally:
+                    self.db.reconnect()
 
                 # 2. DB에 퇴근 기록
                 try:
@@ -344,12 +359,20 @@ class WorkerPage(QtWidgets.QWidget):
         self.open_dispute_chat()
 
     def open_dispute_chat(self):
-        # [Sync] 이의제기 창 열기 전 최신 DB 받기 (채팅 내역 확인 위해)
-        sync_manager.download_latest_db()
+        # [Sync] 대화방 열기 전 최신 DB 받기 (기본 조회용)
+        # (주의: 아래에서 Create 할 때 한 번 더 받게 됨, 안전을 위해 유지)
+        self.db.close_connection()
+        try:
+            sync_manager.download_latest_db()
+        except Exception:
+            pass
+        finally:
+            self.db.reconnect()
 
         row = self.dispute_table.selected_first_row_index()
         dispute_id = None
 
+        # 1. 기존 이의제기 선택 시
         if row >= 0 and row < len(self._my_dispute_rows):
             rr = dict(self._my_dispute_rows[row])
             dispute_id = int(rr["id"])
@@ -363,11 +386,12 @@ class WorkerPage(QtWidgets.QWidget):
             )
             dlg.exec_()
 
-            # [Sync] 대화 후 서버 업로드
+            # [Sync] 대화 종료 후 업로드 (대화방 안에서 메시지를 보냈을 수 있으므로)
             sync_manager.upload_current_db()
             self.refresh_my_disputes()
             return
 
+        # 2. 근무 기록 선택하여 신규 이의제기 생성 시
         w_row = self.work_table.selected_first_row_index()
         if w_row >= 0:
             try:
@@ -381,7 +405,22 @@ class WorkerPage(QtWidgets.QWidget):
             if ok and item:
                 text, ok2 = QtWidgets.QInputDialog.getText(self, "이의 제기", "첫 메시지를 입력하세요:")
                 if ok2 and text:
+
+                    # [Sync] 1. 신규 생성(Insert) 전 최신 DB 다운로드
+                    self.db.close_connection()
+                    try:
+                        sync_manager.download_latest_db()
+                    except Exception as e:
+                        print(f"[Sync Error] {e}")
+                    finally:
+                        self.db.reconnect()
+
+                    # DB Insert
                     dispute_id = self.db.create_dispute(work_log_id, self.session.user_id, item, text)
+
+                    # [Sync] 2. 생성 직후 업로드
+                    sync_manager.upload_current_db()
+
                     dlg = DisputeTimelineDialog(
                         parent=self,
                         db=self.db,
@@ -391,7 +430,7 @@ class WorkerPage(QtWidgets.QWidget):
                     )
                     dlg.exec_()
 
-                    # [Sync] 신규 이의제기 생성 후 서버 업로드
+                    # 대화방 종료 후 최종 동기화
                     sync_manager.upload_current_db()
                     self.refresh_my_disputes()
             return

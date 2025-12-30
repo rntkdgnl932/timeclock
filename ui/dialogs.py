@@ -184,6 +184,16 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
         msg = self.le_input.text().strip()
         if not msg: return
 
+        # [Sync] 1. 메시지 저장 전 최신 DB 다운로드
+        if self.db:
+            self.db.close_connection()
+            try:
+                sync_manager.download_latest_db()
+            except Exception as e:
+                print(f"[Sync Error] {e}")
+            finally:
+                self.db.reconnect()
+
         try:
             if self.my_role == "owner":
                 new_status = self.cb_status.currentData()
@@ -196,6 +206,9 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
                     sender_role="worker",
                     message=msg
                 )
+
+            # [Sync] 2. 저장 후 즉시 업로드
+            sync_manager.upload_current_db()
 
             self.le_input.clear()
             self.refresh_timeline()

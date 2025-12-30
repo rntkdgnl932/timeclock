@@ -823,4 +823,16 @@ class DB:
         row = self.conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
         return dict(row) if row else None
 
+    def close_connection(self):
+        """DB 연결 해제 (파일 덮어쓰기 전 필수)"""
+        if self.conn:
+            try:
+                self.conn.close()
+            except Exception:
+                pass
+            self.conn = None
 
+    def reconnect(self):
+        """DB 다시 연결 (파일 덮어쓴 후 필수)"""
+        self.conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
+        self.conn.row_factory = sqlite3.Row
