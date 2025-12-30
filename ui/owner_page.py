@@ -900,7 +900,8 @@ class OwnerPage(QtWidgets.QWidget):
 
         self.btn_approve_signup.clicked.connect(self.approve_signup)
         self.btn_reject_signup.clicked.connect(self.reject_signup)
-        self.btn_refresh_signup.clicked.connect(self.refresh_signup_requests)
+        # self.btn_refresh_signup.clicked.connect(self.refresh_signup_requests)
+        self.btn_refresh_signup.clicked.connect(self.sync_and_refresh)
 
         self._set_btn_variant(self.btn_approve_signup, "primary")
         self._set_btn_variant(self.btn_reject_signup, "danger_outline")

@@ -56,6 +56,38 @@ class DB:
         self._migrate()
         self._ensure_defaults()
 
+    # timeclock/db.py 의 DB 클래스 내부에 추가하세요.
+
+    def _save_and_sync(self, tag):
+        """
+        [핵심 수정] 모든 DB 작업 후 공통으로 호출되는 함수
+        스레드 없이 '저장(Close) -> 업로드 -> 재연결'을 강제로 수행합니다.
+        """
+        print(f"🔄 [AutoSync] '{tag}' 동기화 시작...")
+
+        # 1. DB 연결 해제 (임시 데이터를 파일에 꽉 눌러 담기)
+        self.close_connection()
+
+        try:
+            # 2. 백업 및 구글 드라이브 업로드
+            # (이제 파일이 완벽한 상태이므로 업로드하면 100% 반영됨)
+            if 'backup_manager' in globals():
+                backup_manager.run_backup(tag)
+
+            ok = sync_manager.upload_current_db()
+            if ok:
+                print(f"✅ [AutoSync] '{tag}' 업로드 완료")
+            else:
+                print(f"⚠️ [AutoSync] '{tag}' 업로드 실패/건너뜀")
+
+        except Exception as e:
+            print(f"❌ [AutoSync] 오류 발생: {e}")
+
+        finally:
+            # 3. DB 재연결 (화면이 멈추지 않고 계속 작동하도록)
+            self.reconnect()
+
+
     def close(self):
         try:
             self.conn.close()
@@ -313,6 +345,7 @@ class DB:
         pw_hash = pbkdf2_hash_password(new_password)
         self.conn.execute("UPDATE users SET pw_hash=?, must_change_pw=0 WHERE id=?", (pw_hash, user_id))
         self.conn.commit()
+        self._save_and_sync("change_password")
 
     def verify_user_password(self, user_id: int, password: str) -> bool:
         row = self.conn.execute("SELECT pw_hash FROM users WHERE id=?", (user_id,)).fetchone()
@@ -369,7 +402,7 @@ class DB:
         sql = "UPDATE users SET " + ", ".join(updates) + " WHERE id=?"
         self.conn.execute(sql, tuple(params))
         self.conn.commit()
-        run_sync_background("admin_update_profile")
+        self._save_and_sync("admin_update_profile")
 
     def list_workers(self, keyword=None, status_filter="ACTIVE"):
         sql = "SELECT id, username, name, phone, birthdate, job_title, hourly_wage, created_at, is_active FROM users WHERE role='worker'"
@@ -395,9 +428,7 @@ class DB:
             (user_id,)
         )
         self.conn.commit()
-        run_sync_background("admin_resign_user")
-#         backup_manager.run_backup("admin_resign_user")run_sync_background("admin_update_profile")
-#         sync_manager.upload_current_db()
+        self._save_and_sync("admin_resign_user")
 
     def update_user_wage(self, user_id, new_wage):
         self.conn.execute(
@@ -405,9 +436,7 @@ class DB:
             (new_wage, user_id)
         )
         self.conn.commit()
-        run_sync_background("admin_update_wage")
-#         backup_manager.run_backup("admin_update_wage")run_sync_background("admin_update_profile")
-#         sync_manager.upload_current_db()
+        self._save_and_sync("admin_update_wage")
 
     def update_user_job_title(self, user_id: int, job_title: str):
         self.conn.execute(
@@ -415,9 +444,7 @@ class DB:
             (job_title, user_id)
         )
         self.conn.commit()
-        run_sync_background("admin_update_job")
-#         backup_manager.run_backup("admin_update_job")run_sync_background("admin_update_profile")
-#         sync_manager.upload_current_db()
+        self._save_and_sync("admin_update_job")
 
     # ----------------------------------------------------------------
     # Work Logs (출퇴근 로직)
@@ -451,9 +478,7 @@ class DB:
             (user_id, today, now, now)
         )
         self.conn.commit()
-        run_sync_background("request_in")
-#         backup_manager.run_backup("request_in")run_sync_background("admin_update_profile")
-#         sync_manager.upload_current_db()
+        self._save_and_sync("request_in")
 
     def end_work(self, user_id):
         row = self.conn.execute(
@@ -470,9 +495,7 @@ class DB:
             (now, row["id"])
         )
         self.conn.commit()
-        run_sync_background("request_out")
-#         backup_manager.run_backup("request_out")run_sync_background("admin_update_profile")
-#         sync_manager.upload_current_db()
+        self._save_and_sync("request_out")
 
     def reject_work_log(self, log_id):
         """
@@ -481,6 +504,7 @@ class DB:
         sql = "UPDATE work_logs SET status = 'REJECTED' WHERE id = ?"
         self.conn.execute(sql, (log_id,))
         self.conn.commit()
+        self._save_and_sync("reject_work_log")
 
     def list_work_logs(self, user_id, date_from, date_to, limit=1000):
         date_from, date_to = normalize_date_range(date_from, date_to)
@@ -536,9 +560,7 @@ class DB:
                 """,
                 (app_start, app_end, comment, new_status, owner_id, now_str(), work_log_id)
             )
-            run_sync_background("approve")
-#             backup_manager.run_backup("approve")run_sync_background("admin_update_profile")
-#             sync_manager.upload_current_db()
+            self._save_and_sync("approve")
 
     # ----------------------------------------------------------------
     # Disputes (이의 제기)
@@ -567,9 +589,7 @@ class DB:
                               (dispute_type, dispute_id))
             self.add_dispute_message(dispute_id, user_id, "worker", comment, None)
             self.conn.commit()
-            run_sync_background("dispute_create")
-#             backup_manager.run_backup("dispute_create")run_sync_background("admin_update_profile")
-#             sync_manager.upload_current_db()
+            self._save_and_sync("dispute_create")
 
             return dispute_id
 
@@ -580,9 +600,7 @@ class DB:
         dispute_id = cur.lastrowid
         self.add_dispute_message(dispute_id, user_id, "worker", comment, None)
         self.conn.commit()
-        run_sync_background("dispute_create")
-#         backup_manager.run_backup("dispute_create")run_sync_background("admin_update_profile")
-#         sync_manager.upload_current_db()
+        self._save_and_sync("dispute_create")
 
         return dispute_id
 
@@ -646,9 +664,7 @@ class DB:
         )
         self.conn.commit()
         self.add_dispute_message(dispute_id, resolved_by_id, "owner", resolution_comment, status_code)
-        run_sync_background("dispute_resolved")
-#         backup_manager.run_backup("dispute_resolved")run_sync_background("admin_update_profile")
-#         sync_manager.upload_current_db()
+        self._save_and_sync("dispute_resolved")
 
     def add_dispute_message(self, dispute_id, sender_user_id, sender_role, message, status_code=None):
         self.conn.execute(
@@ -725,9 +741,7 @@ class DB:
                 (username, pw_hash, name, phone, birth, email, account, address,
                  datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
             )
-        run_sync_background("signup_request")
-#         backup_manager.run_backup("signup_request")run_sync_background("admin_update_profile")
-#         sync_manager.upload_current_db()
+        self._save_and_sync("signup_request")
 
     def is_username_available(self, username):
         u = self.conn.execute("SELECT 1 FROM users WHERE username=?", (username,)).fetchone()
@@ -756,15 +770,14 @@ class DB:
             self.conn.execute(
                 "UPDATE signup_requests SET status='APPROVED', decided_at=?, decided_by=?, decision_comment=? WHERE id=?",
                 (now_str(), owner_id, comment, request_id))
-        run_sync_background("signup_approve")
-#         backup_manager.run_backup("signup_approve")run_sync_background("admin_update_profile")
-#         sync_manager.upload_current_db()
+        self._save_and_sync("signup_approve")
 
     def reject_signup_request(self, request_id, owner_id, comment=""):
         self.conn.execute(
             "UPDATE signup_requests SET status='REJECTED', decided_at=?, decided_by=?, decision_comment=? WHERE id=?",
             (now_str(), owner_id, comment, request_id))
         self.conn.commit()
+        self._save_and_sync("reject_signup")
 
     def log_audit(self, action, actor_user_id=None, target_type=None, target_id=None, detail=None):
         dj = json.dumps(detail, ensure_ascii=False) if detail else None

@@ -184,10 +184,11 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
         msg = self.le_input.text().strip()
         if not msg: return
 
-        # [Sync] 1. 메시지 저장 전 최신 DB 다운로드
+        # 1. [동기화] 메시지 입력 전, 상대방이 보낸 최신글이 있을 수 있으니 다운로드
         if self.db:
             self.db.close_connection()
             try:
+                from timeclock import sync_manager
                 sync_manager.download_latest_db()
             except Exception as e:
                 print(f"[Sync Error] {e}")
@@ -197,9 +198,14 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
         try:
             if self.my_role == "owner":
                 new_status = self.cb_status.currentData()
+
+                # [사업주] resolve_dispute 함수 안에서 이미 _save_and_sync가 돌기 때문에
+                # 별도의 업로드 코드가 필요 없습니다. (자동 업로드됨)
                 self.db.resolve_dispute(self.dispute_id, self.user_id, new_status, msg)
                 self.current_status = new_status
             else:
+                # [근로자] 메시지만 추가하는 함수는 자동 업로드가 없으므로,
+                # 여기서 '공통 함수'를 호출해 확실하게 저장하고 보냅니다.
                 self.db.add_dispute_message(
                     self.dispute_id,
                     sender_user_id=self.user_id,
@@ -207,9 +213,10 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
                     message=msg
                 )
 
-            # [Sync] 2. 저장 후 즉시 업로드
-            sync_manager.upload_current_db()
+                # 🔴 [핵심 수정] 근로자 채팅 강제 동기화 (저장 -> 업로드 -> 재연결)
+                self.db._save_and_sync("chat_message")
 
+            # 입력창 비우기 및 화면 갱신
             self.le_input.clear()
             self.refresh_timeline()
 
