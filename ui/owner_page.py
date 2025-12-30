@@ -1371,6 +1371,17 @@ class OwnerPage(QtWidgets.QWidget):
             sync_manager.upload_current_db()
 
     def open_personal_info(self):
+        # 1. [다운로드] 다른 PC에서 변경된 정보가 있을 수 있으므로 먼저 다운로드
+        self.db.close_connection()
+        try:
+            sync_manager.download_latest_db()
+        except Exception as e:
+            print(f"[Sync Error] {e}")
+        finally:
+            self.db.reconnect()
+
+        # 2. 다이얼로그 열기
+        # (저장은 다이얼로그 내부에서 DB 함수를 통해 자동 업로드됨)
         dlg = PersonalInfoDialog(self.db, self.session.user_id, self)
         dlg.exec_()
 

@@ -90,7 +90,8 @@ class WorkerPage(QtWidgets.QWidget):
         self.btn_calc.clicked.connect(self.calculate_my_salary)
 
         self.btn_refresh = QtWidgets.QPushButton("새로고침")
-        self.btn_refresh.clicked.connect(self.refresh)
+        # self.btn_refresh.clicked.connect(self.refresh)
+        self.btn_refresh.clicked.connect(self.sync_and_refresh)
 
         ctrl_layout.addWidget(self.filter)
         ctrl_layout.addStretch()
@@ -214,7 +215,7 @@ class WorkerPage(QtWidgets.QWidget):
                 # 3. [저장 및 업로드] 공통 함수 한 줄로 해결!
                 # (알아서 연결 끊고 -> 업로드 -> 다시 연결해줍니다)
                 # -----------------------------------------------------
-                self.db._save_and_sync("request_in")
+                # ❌ [삭제] self.db._save_and_sync("request_in")
                 # -----------------------------------------------------
 
                 # 4. 완료 알림 및 갱신
@@ -244,7 +245,7 @@ class WorkerPage(QtWidgets.QWidget):
 
                 # 3. [저장 및 업로드] 공통 함수 사용!
                 # -----------------------------------------------------
-                self.db._save_and_sync("request_out")
+                # ❌ [삭제] self.db._save_and_sync("request_out")
                 # -----------------------------------------------------
 
                 # 4. 완료 알림
@@ -262,6 +263,42 @@ class WorkerPage(QtWidgets.QWidget):
         else:
             self.refresh()
             self._update_action_button()
+
+    def sync_and_refresh(self):
+        """
+        [새로고침 버튼] DB 연결 해제 -> 최신 파일 다운로드 -> DB 재연결 -> 화면 갱신
+        """
+        print("🔄 근로자 데이터 동기화 시작...")
+
+        # 1. DB 연결 잠시 해제 (파일 잠금 방지)
+        self.db.close_connection()
+
+        def job_fn(progress_callback):
+            progress_callback({"msg": "☁️ 최신 데이터 가져오는 중..."})
+            ok, msg = sync_manager.download_latest_db()
+            return ok, msg
+
+        def on_done(ok, res, err):
+            # 2. 작업 후 DB 재연결
+            print("🔌 DB 재연결...")
+            self.db.reconnect()
+
+            if ok:
+                # 3. 화면 갱신
+                self.refresh()
+                self.refresh_my_disputes()
+                self._update_action_button()
+                # (성공 시 조용히 갱신만 하거나, 필요하면 메시지 띄우기)
+            else:
+                QtWidgets.QMessageBox.warning(self, "동기화 실패", f"최신 데이터를 가져오지 못했습니다.\n{res}")
+
+        # 비동기 실행
+        run_job_with_progress_async(
+            self,
+            "동기화 중...",
+            job_fn,
+            on_done=on_done
+        )
 
     def refresh(self):
         d1, d2 = self.filter.get_range()
@@ -478,9 +515,18 @@ class WorkerPage(QtWidgets.QWidget):
         QtWidgets.QMessageBox.information(self, "예상 급여 내역", msg)
 
     def open_profile_settings(self):
-        # [Sync] 개인정보 변경 전 최신 DB 다운로드
-        sync_manager.download_latest_db()
+        # 1. [다운로드] 변경 전 최신 정보 가져오기
+        self.db.close_connection()
+        try:
+            sync_manager.download_latest_db()
+        except Exception as e:
+            print(f"[Sync Error] {e}")
+        finally:
+            self.db.reconnect()
 
+        # 2. [다이얼로그 실행]
+        # ProfileEditDialog 내부에서 'update_user_profile'을 호출하면
+        # DB가 알아서 '저장+업로드'를 수행합니다.
         dlg = ConfirmPasswordDialog(self, title="개인정보 변경", message="개인정보 변경을 위해 현재 비밀번호를 다시 입력해 주세요.")
         if dlg.exec_() != QtWidgets.QDialog.Accepted:
             return
@@ -496,9 +542,9 @@ class WorkerPage(QtWidgets.QWidget):
             return
 
         edit = ProfileEditDialog(self.db, self.session.user_id, parent=self)
-        if edit.exec_() == QtWidgets.QDialog.Accepted:
-            # [Sync] 변경 사항 서버 업로드
-            sync_manager.upload_current_db()
+        edit.exec_()
+
+        # ❌ [삭제] sync_manager.upload_current_db() <-- 필요 없음! (중복)
 
     def open_personal_info(self):
         # 이것은 단순히 조회용 팝업이므로 동기화 불필요하거나,
