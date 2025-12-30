@@ -311,3 +311,6 @@ class SignupPage(QtWidgets.QWidget):
             "가입신청이 완료되었습니다.\n사업주 승인 후 로그인 가능합니다.",
         )
         self.signup_done.emit()
+
+
+    # ?

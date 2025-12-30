@@ -190,7 +190,7 @@ class WorkerPage(QtWidgets.QWidget):
             msg_box.setIcon(QtWidgets.QMessageBox.Warning)
             msg_box.setText("반드시 작업 시작시 작업 시작 요청을 해야합니다.\n\n작업 준비 시간은 실제 근무시간에 포함되지 않습니다.")
 
-            # 버튼 추가 (이해했습니다 / 준비하러갈게요)
+            # 버튼 추가
             btn_yes = msg_box.addButton("이해했습니다", QtWidgets.QMessageBox.YesRole)
             btn_no = msg_box.addButton("준비하러갈게요", QtWidgets.QMessageBox.NoRole)
 
@@ -198,14 +198,14 @@ class WorkerPage(QtWidgets.QWidget):
 
             if msg_box.clickedButton() == btn_yes:
 
-                # [Sync] 1. DB 연결 해제 후 최신 DB 다운로드 (파일 잠금 방지)
+                # 🔴 [수정 핵심] 다운로드 전 DB 연결 끊기 (파일 잠금 해제)
                 self.db.close_connection()
                 try:
                     sync_manager.download_latest_db()
                 except Exception as e:
                     print(f"[Sync Error] {e}")
                 finally:
-                    # 다운로드 성공/실패 여부와 관계없이 반드시 다시 연결
+                    # 다운로드 성공/실패와 무관하게 반드시 재연결
                     self.db.reconnect()
 
                 # 2. DB에 시작 요청 기록
@@ -246,7 +246,7 @@ class WorkerPage(QtWidgets.QWidget):
         elif mode == "OUT":
             if Message.confirm(self, "퇴근 요청", "작업을 모두 마치고 퇴근 승인을 요청하시겠습니까?"):
 
-                # [Sync] 1. DB 연결 해제 후 최신 DB 다운로드
+                # 🔴 [수정 핵심] 퇴근 시에도 동일하게 적용
                 self.db.close_connection()
                 try:
                     sync_manager.download_latest_db()
