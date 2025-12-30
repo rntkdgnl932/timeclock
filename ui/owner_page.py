@@ -528,9 +528,11 @@ class OwnerPage(QtWidgets.QWidget):
         target_row = dict(self._work_rows[row_idx])
         log_id = target_row["id"]
 
-        if target_row["status"] == "APPROVED" and mode == "START":
-            Message.warn(self, "알림", "이미 완료된 건입니다.")
-            return
+        # [수정됨] 사업주는 이미 승인된 건(APPROVED)이라도 실수 정정을 위해 언제든 수정 가능해야 함.
+        # 따라서 아래 제한 코드를 주석 처리하여 무조건 수정 창이 뜨도록 변경함.
+        # if target_row["status"] == "APPROVED" and mode == "START":
+        #     Message.warn(self, "알림", "이미 완료된 건입니다.")
+        #     return
 
         dialog = WorkLogApproveDialog(self, target_row, mode)
 
@@ -1517,22 +1519,7 @@ class OwnerPage(QtWidgets.QWidget):
 
 
 
-    def _restart_program(self):
-        """현재 파이썬 프로그램을 재시작합니다."""
-        try:
-            # 🔴 import sys가 상단에 있는지 꼭 확인하세요!
-            python = sys.executable
-            os.execl(python, python, *sys.argv)
-        except Exception as e:
-            Message.err(self, "재시작 실패", f"자동 재시작에 실패했습니다. 수동으로 다시 실행해주세요.\n{e}")
 
-    def _restart_program(self):
-        """현재 파이썬 프로그램을 재시작합니다."""
-        try:
-            python = sys.executable
-            os.execl(python, python, *sys.argv)
-        except Exception as e:
-            Message.err(self, "재시작 실패", f"자동 재시작에 실패했습니다. 수동으로 다시 실행해주세요.\n{e}")
 
 class WorkLogApproveDialog(QtWidgets.QDialog):
     def __init__(self, parent=None, row_data=None, mode="START"):

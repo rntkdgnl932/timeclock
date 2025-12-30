@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 import sys
 import re
-from PyQt5 import QtWidgets
+from PyQt5 import QtWidgets, QtCore  # QtCore 추가됨
 from PyQt5.QtCore import QTimer
 
 from timeclock.utils import setup_logging
@@ -60,6 +60,97 @@ def _ensure_backup_id_or_exit(app: QtWidgets.QApplication) -> str:
         return bid
 
 
+# ------------------------------------------------------------------------
+# [추가] 자동 로그아웃 감지 필터
+# ------------------------------------------------------------------------
+class AutoLogoutFilter(QtCore.QObject):
+    def __init__(self, app, main_window, timeout_min=10):
+        super().__init__()
+        self.app = app
+        self.win = main_window
+        self.timeout_ms = timeout_min * 60 * 1000  # 10분 (설정 시간)
+        self.warning_ms = 60 * 1000  # 1분 (경고 후 대기 시간)
+
+        # 1. 비활동 감지 타이머
+        self.idle_timer = QtCore.QTimer(self)
+        self.idle_timer.setInterval(self.timeout_ms)
+        self.idle_timer.timeout.connect(self.on_idle_timeout)
+
+        # 2. 로그아웃 카운트다운 타이머
+        self.logout_timer = QtCore.QTimer(self)
+        self.logout_timer.setInterval(self.warning_ms)
+        self.logout_timer.setSingleShot(True)
+        self.logout_timer.timeout.connect(self.do_logout)
+
+        self.warn_dialog = None
+
+        # 앱 전체 이벤트 필터링 시작
+        self.app.installEventFilter(self)
+        self.idle_timer.start()
+
+    def eventFilter(self, obj, event):
+        # 사용자가 마우스를 움직이거나, 클릭하거나, 키보드를 누르면 타이머 리셋
+        if event.type() in (QtCore.QEvent.MouseMove,
+                            QtCore.QEvent.MouseButtonPress,
+                            QtCore.QEvent.KeyPress):
+            self.reset_activity()
+        return super().eventFilter(obj, event)
+
+    def reset_activity(self):
+        """활동이 감지되면 타이머를 초기화하고 경고창이 있다면 닫음"""
+        # 경고창이 떠있으면 닫기 (사용자가 돌아옴)
+        if self.warn_dialog:
+            try:
+                self.warn_dialog.close()
+            except:
+                pass
+            self.warn_dialog = None
+
+        if self.logout_timer.isActive():
+            self.logout_timer.stop()
+
+        # 메인 타이머 재시작
+        self.idle_timer.start(self.timeout_ms)
+
+    def on_idle_timeout(self):
+        """10분간 입력이 없을 때 호출됨"""
+        # 로그인 상태가 아니면 무시 (이미 로그인 화면이면 작동 X)
+        if hasattr(self.win, "is_logged_in") and not self.win.is_logged_in():
+            self.idle_timer.start(self.timeout_ms)
+            return
+
+        self.idle_timer.stop()
+
+        # 경고창 표시
+        self.warn_dialog = QtWidgets.QMessageBox(self.win)
+        self.warn_dialog.setWindowTitle("자동 로그아웃 알림")
+        self.warn_dialog.setText("10분 동안 활동이 감지되지 않아\n잠시 후 자동으로 로그아웃됩니다.\n\n계속 하시려면 마우스를 움직이거나 클릭하세요.")
+        self.warn_dialog.setIcon(QtWidgets.QMessageBox.Warning)
+        self.warn_dialog.setStandardButtons(QtWidgets.QMessageBox.Ok)
+        self.warn_dialog.button(QtWidgets.QMessageBox.Ok).setText("로그인 연장")
+        self.warn_dialog.setModal(True)  # 다른 작업 못하게 막음
+        self.warn_dialog.show()
+
+        # 1분 카운트다운 시작 (이 시간 안에도 반응 없으면 로그아웃)
+        self.logout_timer.start()
+
+    def do_logout(self):
+        """최종 로그아웃 실행"""
+        if self.warn_dialog:
+            try:
+                self.warn_dialog.close()
+            except:
+                pass
+            self.warn_dialog = None
+
+        # 메인 윈도우에 로그아웃 명령 전달
+        if hasattr(self.win, "force_logout"):
+            self.win.force_logout()
+
+        # 타이머 재시작 (로그인 화면에서도 감지는 계속 하되, on_idle_timeout에서 걸러짐)
+        self.idle_timer.start(self.timeout_ms)
+
+
 def main():
     app = QtWidgets.QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
@@ -70,11 +161,7 @@ def main():
     setup_logging()
     db = DB(DB_PATH)
 
-    # 🔴 [삭제됨] 여기서 백업을 실행하면 안 됩니다! (화면이 뜨기 전이라 에러 발생/멈춤 원인)
-    # print("[System] 시작 자동 백업 실행 중...")  <-- 삭제
-    # backup_manager.run_backup("program_start")    <-- 삭제
-
-    # [1] 6시간 주기 자동 백업 타이머 (이건 백그라운드라 유지해도 괜찮음)
+    # [1] 6시간 주기 자동 백업 타이머
     backup_timer = QTimer()
     interval = 6 * 60 * 60 * 1000
     backup_timer.timeout.connect(lambda: backup_manager.run_backup("periodic_6h"))
@@ -82,6 +169,9 @@ def main():
 
     win = MainWindow(db)
     win.show()
+
+    # [2] 자동 로그아웃 감시자 실행 (10분 = 10, 테스트시 숫자를 줄여보세요)
+    logout_filter = AutoLogoutFilter(app, win, timeout_min=10)
 
     # 메인 루프 실행
     rc = app.exec_()

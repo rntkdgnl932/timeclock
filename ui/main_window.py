@@ -278,3 +278,20 @@ class MainWindow(QtWidgets.QMainWindow):
         logging.info(f"Logout: {self.session.username if self.session else '-'}")
         self.session = None
         self._back_to_login()
+
+
+    def is_logged_in(self) -> bool:
+        """현재 로그인 페이지가 아닌 다른 페이지(업무/관리자)에 있는지 확인"""
+        # 스택 위젯의 현재 페이지가 로그인 페이지인지 확인하는 로직
+        # 예: 현재 페이지 위젯의 타입이 LoginPage가 아니면 로그인 상태로 간주
+        current_widget = self.stack.currentWidget()
+        # self.login_page 변수가 __init__에서 생성되어 있다고 가정
+        return current_widget != self.login_page
+
+    def force_logout(self):
+        """강제 로그아웃 실행"""
+        # 기존 로그아웃 처리 로직 호출 (화면 전환, 세션 초기화 등)
+        # 예: 로그인 페이지로 이동
+        self.stack.setCurrentWidget(self.login_page)
+        # 필요하다면 메시지 표시
+        # QtWidgets.QMessageBox.information(self, "알림", "장시간 미사용으로 로그아웃되었습니다.")
