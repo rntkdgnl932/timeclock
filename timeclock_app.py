@@ -10,7 +10,7 @@ from timeclock.settings import DB_PATH, APP_NAME
 from timeclock.db import DB
 from ui.main_window import MainWindow
 from timeclock import backup_manager
-
+from timeclock import sync_manager
 
 def _ensure_backup_id_or_exit(app: QtWidgets.QApplication) -> str:
     """
@@ -159,6 +159,16 @@ def main():
     _ensure_backup_id_or_exit(app)
 
     setup_logging()
+
+    # [Sync] 앱 시작 시 최신 DB 다운로드 (동기화)
+    # 로그인 화면이 뜨기 전에 최신 데이터를 받아옵니다.
+    print("[Sync] 최신 DB 확인 중...")
+    ok, msg = sync_manager.download_latest_db()
+    if ok:
+        print(f"[Sync] {msg}")
+    else:
+        print(f"[Sync] 동기화 건너뜀: {msg}")
+
     db = DB(DB_PATH)
 
     # [1] 6시간 주기 자동 백업 타이머
@@ -170,7 +180,7 @@ def main():
     win = MainWindow(db)
     win.show()
 
-    # [2] 자동 로그아웃 감시자 실행 (10분 = 10, 테스트시 숫자를 줄여보세요)
+    # [2] 자동 로그아웃 감시자 실행 (10분)
     logout_filter = AutoLogoutFilter(app, win, timeout_min=10)
 
     # 메인 루프 실행

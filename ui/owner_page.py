@@ -21,6 +21,7 @@ from timeclock.settings import WORK_STATUS, SIGNUP_STATUS
 from ui.dialogs import ChangePasswordDialog, DisputeTimelineDialog, DateRangeDialog
 from timeclock.salary import SalaryCalculator
 from ui.dialogs import PersonalInfoDialog
+from timeclock import sync_manager  # [Sync] 동기화 모듈 추가
 
 
 class OwnerPage(QtWidgets.QWidget):
@@ -105,9 +106,7 @@ class OwnerPage(QtWidgets.QWidget):
         self.tabs.addTab(self._build_signup_tab(), "직원 가입 승인")
         self.tabs.addTab(self._build_member_tab(), "직원 관리")
         self.tabs.addTab(self._build_restore_tab(), "백업/복구")
-
-        # ✅ [추가된 부분] 시스템 업데이트 탭
-        self.tabs.addTab(self._build_update_tab(), "시스템 업데이트")
+        self.tabs.addTab(self._build_update_tab(), "시스템 업데이트")  # 시스템 업데이트 탭
 
         self._tune_owner_tabbar()
 
@@ -142,133 +141,58 @@ class OwnerPage(QtWidgets.QWidget):
     # Theme helpers
     # --------------------------------------------------------------
     def _apply_owner_theme(self) -> None:
-        # Window base
         self.setAutoFillBackground(True)
         pal = self.palette()
         pal.setColor(QtGui.QPalette.Window, QtGui.QColor("#FCFBF8"))
         self.setPalette(pal)
 
-        # A single stylesheet for OwnerPage (keeps UI consistent)
         self.setStyleSheet("""
             QWidget { font-family: 'Malgun Gothic', 'Segoe UI', sans-serif; font-size: 12px; color: #2b2b2b; }
             QLabel#OwnerBrand { font-size: 26px; font-weight: 900; letter-spacing: 0.5px; color: #5D4037; }
             QLabel#OwnerSubtitle { font-size: 13px; color: #6f6f6f; }
 
-            QFrame#OwnerHeader {
-                background: #ffffff;
-                border: 1px solid #ececec;
-                border-radius: 16px;
+            QFrame#OwnerHeader, QFrame#OwnerTabsCard {
+                background: #ffffff; border: 1px solid #ececec; border-radius: 16px;
             }
-            QFrame#OwnerTabsCard {
-                background: #ffffff;
-                border: 1px solid #ececec;
-                border-radius: 16px;
-            }
-
-            /* Tabs */
             QTabWidget#OwnerTabs::pane { border: none; }
             QTabBar::tab {
-                background: transparent;
-                color: #6a6a6a;
-            
-                /* 글자 잘림 체감 줄이기: 높이/패딩 균형 */
-                padding: 10px 18px;
-                min-height: 34px;
-            
-                /* 탭 간격 */
-                margin-right: 8px;
-            
-                border-radius: 12px;
-                font-weight: 700;
-                font-size: 12px;  /* 글자 크기 살짝 안정화 */
-            
-                /* 탭 폭은 내용 길이에 따라 자연스럽게 늘어나게 두되,
-                   너무 작아지지 않도록 하한만 줌 */
-                min-width: 120px;
+                background: transparent; color: #6a6a6a; padding: 10px 18px; min-height: 34px;
+                margin-right: 8px; border-radius: 12px; font-weight: 700; font-size: 12px; min-width: 120px;
             }
-            
             QFrame#OwnerToolbarCard {
-                background: #fafafa;
-                border: 1px solid #eeeeee;
-                border-radius: 14px;
+                background: #fafafa; border: 1px solid #eeeeee; border-radius: 14px;
             }
-            QLabel#OwnerHint {
-                color: #8a8a8a;
-                font-weight: 700;
-            }
-            
-            QTabBar::tab:selected {
-                background: #FFF3E0;
-                color: #5D4037;
-            }
-            
-            QTabBar::tab:hover {
-                background: #f5f5f5;
-            }
-
-
-            /* Inputs */
+            QLabel#OwnerHint { color: #8a8a8a; font-weight: 700; }
+            QTabBar::tab:selected { background: #FFF3E0; color: #5D4037; }
+            QTabBar::tab:hover { background: #f5f5f5; }
             QLineEdit, QComboBox, QDateEdit {
-                background: #ffffff;
-                border: 1px solid #dcdcdc;
-                border-radius: 10px;
-                padding: 6px 10px;
-                min-height: 28px;
+                background: #ffffff; border: 1px solid #dcdcdc; border-radius: 10px; padding: 6px 10px; min-height: 28px;
             }
             QLineEdit:focus, QComboBox:focus, QDateEdit:focus { border: 1px solid #caa57a; }
-
-            /* GroupBox */
             QGroupBox {
-                border: 1px solid #ececec;
-                border-radius: 14px;
-                margin-top: 12px;
-                padding: 12px;
-                background: #ffffff;
+                border: 1px solid #ececec; border-radius: 14px; margin-top: 12px; padding: 12px; background: #ffffff;
             }
             QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 12px;
-                padding: 0 6px;
-                color: #5D4037;
-                font-weight: 800;
+                subcontrol-origin: margin; left: 12px; padding: 0 6px; color: #5D4037; font-weight: 800;
             }
-
-            /* Buttons (variant by dynamic property) */
-            QPushButton {
-                border-radius: 10px;
-                padding: 8px 14px;
-                font-weight: 800;
-            }
+            QPushButton { border-radius: 10px; padding: 8px 14px; font-weight: 800; }
             QPushButton[variant="primary"] { background: #6D4C41; color: #ffffff; border: 1px solid #6D4C41; }
             QPushButton[variant="primary"]:hover { background: #5e4036; border-color: #5e4036; }
             QPushButton[variant="secondary"] { background: #f3f3f3; color: #333; border: 1px solid #e2e2e2; }
             QPushButton[variant="secondary"]:hover { background: #ededed; }
-
             QPushButton[variant="ghost"] { background: #ffffff; color: #5D4037; border: 1px solid #e7e7e7; }
             QPushButton[variant="ghost"]:hover { background: #fafafa; }
-
             QPushButton[variant="danger_outline"] { background: #ffffff; color: #b71c1c; border: 1px solid #f0c7c7; }
             QPushButton[variant="danger_outline"]:hover { background: #fff5f5; }
-
             QPushButton[variant="warn"] { background: #FFF3E0; color: #E65100; border: 1px solid #FFE0B2; }
             QPushButton[variant="warn"]:hover { background: #FFE0B2; }
-
-            /* Tables (QTableWidget) */
             QTableWidget {
-                background: #ffffff;
-                border: 1px solid #e9e9e9;
-                border-radius: 12px;
-                gridline-color: #f1f1f1;
-                selection-background-color: #FFE0B2;
-                selection-color: #2b2b2b;
+                background: #ffffff; border: 1px solid #e9e9e9; border-radius: 12px; gridline-color: #f1f1f1;
+                selection-background-color: #FFE0B2; selection-color: #2b2b2b;
             }
             QHeaderView::section {
-                background: #fafafa;
-                border: none;
-                border-bottom: 1px solid #e9e9e9;
-                padding: 8px 10px;
-                font-weight: 900;
-                color: #5D4037;
+                background: #fafafa; border: none; border-bottom: 1px solid #e9e9e9; padding: 8px 10px;
+                font-weight: 900; color: #5D4037;
             }
             QTableWidget::item { padding-left: 6px; padding-right: 6px; }
             QTableWidget::item:selected { background: #FFE0B2; }
@@ -276,53 +200,34 @@ class OwnerPage(QtWidgets.QWidget):
             QScrollBar::handle:vertical { background: #dcdcdc; border-radius: 5px; min-height: 30px; }
             QScrollBar::handle:vertical:hover { background: #cfcfcf; }
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
-            
-            
-            
-
         """)
 
     def _set_btn_variant(self, btn: "QtWidgets.QPushButton", variant: str) -> None:
         btn.setProperty("variant", variant)
-
-        # 예: OwnerPage에서 버튼 공통 최소 높이를 관리하고 싶을 때
         btn.setMinimumHeight(getattr(self, "_btn_min_h", 34))
-
         btn.style().unpolish(btn)
         btn.style().polish(btn)
         btn.update()
 
     @staticmethod
     def _mk_stat_card(title: str, value: str, hint: str = "") -> dict:
-        """
-        KPI 카드 생성.
-        기존 코드가 self.kpi_work["frame"], self.kpi_work["value"] 형태를 쓰므로
-        dict 형태로 반환해야 함.
-        """
         card = QtWidgets.QFrame()
         card.setObjectName("OwnerStatCard")
-
         lay = QtWidgets.QVBoxLayout(card)
         lay.setContentsMargins(14, 12, 14, 12)
         lay.setSpacing(6)
-
         lb_title = QtWidgets.QLabel(title)
         lb_title.setObjectName("OwnerStatTitle")
-
         lb_value = QtWidgets.QLabel(str(value))
         lb_value.setObjectName("OwnerStatValue")
-
         lay.addWidget(lb_title)
         lay.addWidget(lb_value)
-
         lb_hint = None
         if hint:
             lb_hint = QtWidgets.QLabel(hint)
             lb_hint.setObjectName("OwnerStatSub")
             lay.addWidget(lb_hint)
-
         lay.addStretch(1)
-
         return {
             "frame": card,
             "title": lb_title,
@@ -337,36 +242,18 @@ class OwnerPage(QtWidgets.QWidget):
             self.kpi_dispute["value"].setText(str(int(counts.get("dispute", 0) or 0)))
             self.kpi_signup["value"].setText(str(int(counts.get("signup", 0) or 0)))
         except Exception:
-            # KPI는 UI 보조 정보이므로 실패해도 화면이 죽지 않게 처리
             logging.exception("refresh_kpis failed")
 
     def _tune_owner_tabbar(self) -> None:
-        """
-        탭 글자 잘림 방지:
-        - 탭은 내용 길이대로(width) 잡고
-        - 공간이 부족하면 스크롤 버튼으로 좌/우 이동
-        - 글자 생략(… ) 금지
-        """
         if not hasattr(self, "tabs") or self.tabs is None:
             return
-
         tabs = self.tabs
         bar = tabs.tabBar()
-
-        # 핵심: 탭을 강제로 균등분할(expand)하지 않게 → 내용 길이대로
         bar.setExpanding(False)
-
-        # 공간 부족 시 좌/우 스크롤 버튼 표시
         tabs.setUsesScrollButtons(True)
-
-        # …(엘리드)로 잘라먹지 않게
         # noinspection PyUnresolvedReferences
         bar.setElideMode(QtCore.Qt.ElideNone)
-
-        # 문서모드: 탭 상단 UI가 더 깔끔해지는 경향
         tabs.setDocumentMode(True)
-
-        # 탭 클릭 영역/레이아웃 안정화
         bar.setMovable(False)
         bar.setDrawBase(False)
 
@@ -374,19 +261,10 @@ class OwnerPage(QtWidgets.QWidget):
     def _mk_toolbar_card() -> QtWidgets.QFrame:
         frame = QtWidgets.QFrame()
         frame.setObjectName("OwnerToolbarCard")
-
         lay = QtWidgets.QHBoxLayout(frame)
         lay.setContentsMargins(12, 10, 12, 10)
         lay.setSpacing(10)
-
         return frame
-
-    def _apply_tab_action_variants(self) -> None:
-        """
-        기존 탭별 개별 setStyleSheet()를 걷어내고, Owner 테마(variant)로 통일.
-        호출은 각 탭 빌드 함수 내부에서 필요한 버튼에 대해 직접 _set_btn_variant로 처리해도 됨.
-        """
-        pass
 
     # ==========================================================
     # 1. 근무 기록 관리 탭
@@ -465,19 +343,14 @@ class OwnerPage(QtWidgets.QWidget):
                 st = rr["status"]
                 st_str = WORK_STATUS.get(st, st)
 
-                # [수정] 근로자 이름 표시 형식: 성함(ID) 또는 ID(ID)
                 name = rr.get("worker_name")
                 uid = rr["worker_username"]
-
-                if name:
-                    display_name = f"{name} ({uid})"
-                else:
-                    display_name = f"{uid} ({uid})"
+                display_name = f"{name} ({uid})" if name else f"{uid} ({uid})"
 
                 out.append([
                     str(rr["id"]),
                     rr["work_date"],
-                    display_name,  # 변경된 이름 형식 적용
+                    display_name,
                     rr["start_time"] or "",
                     rr["end_time"] or "",
                     st_str,
@@ -486,7 +359,6 @@ class OwnerPage(QtWidgets.QWidget):
                     rr["owner_comment"] or ""
                 ])
             self.work_table.set_rows(out)
-
             self.update_badges()
 
         except Exception as e:
@@ -494,7 +366,6 @@ class OwnerPage(QtWidgets.QWidget):
             Message.err(self, "오류", f"근무 기록 조회 실패: {e}")
 
     def update_badges(self):
-        """DB에서 대기 건수를 가져와 탭 제목과 색상을 변경"""
         counts = self.db.get_pending_counts() or {}
 
         def set_tab_style(index: int, title: str, count: int):
@@ -502,23 +373,17 @@ class OwnerPage(QtWidgets.QWidget):
                 return
             if count and int(count) > 0:
                 self.tabs.setTabText(index, f"{title} ({int(count)})")
-                self.tabs.tabBar().setTabTextColor(index, QtGui.QColor("#D32F2F"))  # red
+                self.tabs.tabBar().setTabTextColor(index, QtGui.QColor("#D32F2F"))
             else:
                 self.tabs.setTabText(index, title)
                 self.tabs.tabBar().setTabTextColor(index, QtGui.QColor("#6a6a6a"))
 
-        # 탭 순서(현재 코드 기준):
-        # 0 근무 승인 / 1 이의 제기 / 2 직원 가입 승인 / 3 직원 관리 / 4 백업/복구
         set_tab_style(0, "근무 승인", counts.get("work", 0))
         set_tab_style(1, "이의 제기", counts.get("dispute", 0))
         set_tab_style(2, "직원 가입 승인", counts.get("signup", 0))
-        # 직원 관리(3), 백업/복구(4)는 배지 없음 (원하면 추가 가능)
 
         self._refresh_kpis()
 
-    # ----------------------------------------------------------------
-    # [수정] 작업/퇴근 승인 (오류 수정됨: now_str -> datetime 사용)
-    # ----------------------------------------------------------------
     def approve_selected_log(self, mode="START"):
         row_idx = self.work_table.selected_first_row_index()
         if row_idx < 0:
@@ -528,18 +393,13 @@ class OwnerPage(QtWidgets.QWidget):
         target_row = dict(self._work_rows[row_idx])
         log_id = target_row["id"]
 
-        # [수정됨] 사업주는 이미 승인된 건(APPROVED)이라도 실수 정정을 위해 언제든 수정 가능해야 함.
-        # 따라서 아래 제한 코드를 주석 처리하여 무조건 수정 창이 뜨도록 변경함.
-        # if target_row["status"] == "APPROVED" and mode == "START":
-        #     Message.warn(self, "알림", "이미 완료된 건입니다.")
-        #     return
-
+        # [수정됨] 무제한 수정 허용을 위해 상태 체크 로직 제거됨.
         dialog = WorkLogApproveDialog(self, target_row, mode)
 
         if dialog.exec_() == QtWidgets.QDialog.Accepted:
             app_start, app_end, final_comment = dialog.get_data()
 
-            # 1) DB 업데이트 (즉시 처리)
+            # 1) DB 업데이트
             try:
                 self.db.approve_work_log(
                     log_id,
@@ -552,29 +412,25 @@ class OwnerPage(QtWidgets.QWidget):
                 Message.err(self, "오류", f"승인 실패: {e}")
                 return
 
-            # 2) 백업 수행 (비동기 진행바)
+            # 2) 백업 및 [Sync] 서버 업로드
             def job_fn(progress_callback):
                 if 'backup_manager' in globals():
                     return backup_manager.run_backup("approve", progress_callback)
                 return True, "백업 매니저 없음"
 
             def on_done(ok, res, err):
-                # 백업까지 다 끝나면 메시지 띄우고 목록 갱신
-                # (성공 시 메시지는 async_helper가 '완료' 표시 후 자동 닫힘 처리하므로
-                #  추가 메시지가 필요하면 여기서 띄웁니다.)
                 if ok:
-                    # Message.info(self, "완료", "승인 처리가 완료되었습니다.") # 너무 팝업이 많으면 생략 가능
-                    pass
+                    # [Sync] 승인 후 서버에 즉시 반영
+                    sync_manager.upload_current_db()
                 self.refresh_work_logs()
 
             run_job_with_progress_async(
                 self,
-                "승인 데이터 백업 중...",
+                "승인 데이터 백업 및 동기화 중...",
                 job_fn,
                 on_done=on_done
             )
 
-    # [추가] 작업 시작 반려(삭제) 기능
     def reject_start_request(self):
         row_idx = self.work_table.selected_first_row_index()
         if row_idx < 0:
@@ -590,22 +446,19 @@ class OwnerPage(QtWidgets.QWidget):
             if not Message.confirm(self, "반려 확인", "해당 작업 요청을 반려하시겠습니까?\n근로자는 다시 요청을 보낼 수 있게 되며,\n이 기록은 '반려' 상태로 남습니다."):
                 return
 
-        # 1) DB 반려 처리 (즉시)
         try:
             self.db.reject_work_log(target_row["id"])
         except Exception as e:
             Message.err(self, "오류", f"반려 처리 실패: {e}")
             return
 
-        # 2) 백업 수행 (비동기)
         def job_fn(progress_callback):
             return backup_manager.run_backup("reject_log", progress_callback)
 
         def on_done(ok, res, err):
-            # 완료 후 목록 갱신
             if ok:
-                # Message.info(self, "완료", "반려되었습니다.") # 필요 시 주석 해제
-                pass
+                # [Sync] 반려 후 서버 업로드
+                sync_manager.upload_current_db()
             self.refresh_work_logs()
 
         run_job_with_progress_async(
@@ -639,7 +492,6 @@ class OwnerPage(QtWidgets.QWidget):
 
         self.btn_edit_job_title = QtWidgets.QPushButton("🏷 직급 변경")
         self.btn_edit_job_title.clicked.connect(self.edit_job_title)
-
 
         self.btn_calc_salary = QtWidgets.QPushButton("🧮 급여 정산")
         self.btn_calc_salary.clicked.connect(self.calculate_salary)
@@ -732,6 +584,8 @@ class OwnerPage(QtWidgets.QWidget):
         if Message.confirm(self, "퇴사 확인", f"정말 '{username}' 님을 퇴사 처리하시겠습니까?\n(계정은 삭제되지 않고 비활성화됩니다)"):
             try:
                 self.db.resign_user(user_id)
+                # [Sync] 퇴사 처리 후 서버 업로드
+                sync_manager.upload_current_db()
                 Message.info(self, "완료", "퇴사 처리가 완료되었습니다.")
                 self.refresh_members()
             except Exception as e:
@@ -756,6 +610,8 @@ class OwnerPage(QtWidgets.QWidget):
         if ok:
             try:
                 self.db.update_user_wage(user_id, val)
+                # [Sync] 시급 변경 후 서버 업로드
+                sync_manager.upload_current_db()
                 Message.info(self, "완료", f"{username}님의 시급이 {val:,}원으로 변경되었습니다.")
                 self.refresh_members()
             except Exception as e:
@@ -794,6 +650,8 @@ class OwnerPage(QtWidgets.QWidget):
 
         try:
             self.db.update_user_job_title(user_id, val)
+            # [Sync] 직급 변경 후 서버 업로드
+            sync_manager.upload_current_db()
             Message.info(self, "완료", f"{username}님의 직급이 '{val}'로 변경되었습니다.")
             self.refresh_members()
         except Exception as e:
@@ -885,6 +743,9 @@ class OwnerPage(QtWidgets.QWidget):
         self.dispute_table.itemDoubleClicked.connect(self.open_dispute_chat)
 
     def open_dispute_chat(self):
+        # [Sync] 이의제기 대화 열기 전 최신 DB 다운로드
+        sync_manager.download_latest_db()
+
         row = self.dispute_table.selected_first_row_index()
         if row < 0 or row >= len(self._dispute_rows):
             Message.warn(self, "알림", "목록에서 항목을 선택하세요.")
@@ -901,6 +762,9 @@ class OwnerPage(QtWidgets.QWidget):
             my_role="owner"
         )
         dlg.exec_()
+
+        # [Sync] 대화 후 서버 업로드
+        sync_manager.upload_current_db()
         self.refresh_disputes()
 
     # ==========================================================
@@ -963,7 +827,6 @@ class OwnerPage(QtWidgets.QWidget):
                     status_str
                 ])
             self.signup_table.set_rows(data)
-
             self.update_badges()
 
         except Exception as e:
@@ -978,6 +841,8 @@ class OwnerPage(QtWidgets.QWidget):
         if Message.confirm(self, "승인", f"'{name}'님의 가입을 승인하시겠습니까?"):
             try:
                 self.db.approve_signup_request(sid, self.session.user_id, "Approved")
+                # [Sync] 가입 승인 후 서버 업로드
+                sync_manager.upload_current_db()
                 Message.info(self, "완료", "계정이 생성되었습니다.")
                 self.refresh_signup_requests()
                 self.refresh_members()
@@ -993,6 +858,8 @@ class OwnerPage(QtWidgets.QWidget):
         if ok:
             try:
                 self.db.reject_signup_request(sid, self.session.user_id, text)
+                # [Sync] 가입 거절 후 서버 업로드
+                sync_manager.upload_current_db()
                 Message.info(self, "완료", "거절 처리되었습니다.")
                 self.refresh_signup_requests()
             except Exception as e:
@@ -1004,6 +871,8 @@ class OwnerPage(QtWidgets.QWidget):
             pw = dlg.get_password()
             if pw:
                 self.db.change_password(self.session.user_id, pw)
+                # [Sync] 비밀번호 변경 후 업로드
+                sync_manager.upload_current_db()
                 Message.info(self, "성공", "비밀번호가 변경되었습니다.")
 
     def calculate_salary(self):
@@ -1073,8 +942,6 @@ class OwnerPage(QtWidgets.QWidget):
         real_name = rr.get('name') or username
         hourly_wage = rr['hourly_wage'] or 0
 
-        # ✅ 직급: DB 컬럼명이 job_title로 들어오는 구조를 전제로 하되,
-        # 혹시 다른 키로 들어오면 안전하게 보정
         rank = (rr.get("job_title") or rr.get("rank") or "사원").strip() if rr else "사원"
         if not rank:
             rank = "사원"
@@ -1089,16 +956,12 @@ class OwnerPage(QtWidgets.QWidget):
             Message.warn(self, "알림", "해당 기간에 승인된 근무 기록이 없습니다.")
             return
 
-        # 1. 계산기 실행
         calc = SalaryCalculator(hourly_wage)
         res = calc.calculate_period([dict(r) for r in logs])
 
-        # salary.py의 친절한 설명 기능 호출
         friendly_text = calc.get_friendly_description(res)
-
         total_pay = res['grand_total']
 
-        # 공제 항목 (약식 계산)
         ei_tax = int(total_pay * 0.009 / 10) * 10
         pension = 0
         health = 0
@@ -1108,7 +971,6 @@ class OwnerPage(QtWidgets.QWidget):
         total_deduction = ei_tax + pension + health + care + income_tax + local_tax
         net_pay = total_pay - total_deduction
 
-        # 상세 항목 텍스트 생성
         over_hours = 0
         night_hours = 0
         ju_hyu_hours = 0
@@ -1145,18 +1007,13 @@ class OwnerPage(QtWidgets.QWidget):
         else:
             note_text = "※ 본 명세서는 근로기준법 제48조에 따라 교부합니다."
 
-        # 2. 데이터 포장
         data_ctx = {
             "title": f"{d1[:4]}년 {d1[5:7]}월 급여명세서",
             "name": real_name,
             "period": f"{d1} ~ {d2}",
             "pay_date": datetime.now().strftime("%Y-%m-%d"),
-
-            # ✅ 추가: 직급 치환 변수
             "rank": rank,
-
             "company": "Hobby Brown",
-
             "base_pay": res['base_pay'],
             "ju_hyu_pay": res['ju_hyu_pay'],
             "overtime_pay": res['overtime_pay'],
@@ -1164,7 +1021,6 @@ class OwnerPage(QtWidgets.QWidget):
             "holiday_pay": res['holiday_pay'],
             "other_pay": 0,
             "total_pay": total_pay,
-
             "ei_ins": ei_tax,
             "pension": pension,
             "health_ins": health,
@@ -1173,9 +1029,7 @@ class OwnerPage(QtWidgets.QWidget):
             "local_tax": local_tax,
             "total_deduction": total_deduction,
             "net_pay": net_pay,
-
             "calc_detail": friendly_text,
-
             "base_detail": base_str,
             "over_detail": over_str,
             "ju_hyu_detail": ju_hyu_str,
@@ -1229,11 +1083,7 @@ class OwnerPage(QtWidgets.QWidget):
         lbl_info.setStyleSheet("color: #d32f2f; font-weight: bold; margin: 10px;")
         layout.addWidget(lbl_info)
 
-        # -------------------------------------------------------
-        # [수정] 구글 드라이브 관련 버튼들
-        # -------------------------------------------------------
         gdrive_layout = QtWidgets.QHBoxLayout()
-
         self.btn_gdrive_auth = QtWidgets.QPushButton("🌍 1. 구글 연동 (로그인)")
         self.btn_gdrive_auth.setStyleSheet("background-color: #E8F5E9; color: #2E7D32; font-weight: bold;")
         self.btn_gdrive_auth.clicked.connect(self.auth_gdrive)
@@ -1245,7 +1095,6 @@ class OwnerPage(QtWidgets.QWidget):
         gdrive_layout.addWidget(self.btn_gdrive_auth)
         gdrive_layout.addWidget(self.btn_gdrive_test)
         layout.addLayout(gdrive_layout)
-        # -------------------------------------------------------
 
         btn_layout = QtWidgets.QHBoxLayout()
         btn_refresh = QtWidgets.QPushButton("🔄 목록 새로고침")
@@ -1278,7 +1127,6 @@ class OwnerPage(QtWidgets.QWidget):
         w.setLayout(layout)
         return w
 
-    # [추가] 핸들러 함수들
     def auth_gdrive(self):
         ok, msg = backup_manager.authenticate_gdrive()
         if ok:
@@ -1312,15 +1160,11 @@ class OwnerPage(QtWidgets.QWidget):
         if res != QtWidgets.QMessageBox.Yes:
             return
 
-        # 비동기 백업 실행
         def job_fn(progress_callback):
             return backup_manager.run_backup("manual", progress_callback)
 
         def on_done(ok, res, err):
-            # 백업이 끝나면 목록을 새로고침
             self.refresh_backup_list()
-            # async_helper가 성공 시 자동으로 "완료" 후 닫히므로
-            # 별도 팝업은 띄우지 않아도 깔끔합니다.
 
         run_job_with_progress_async(
             self,
@@ -1359,7 +1203,9 @@ class OwnerPage(QtWidgets.QWidget):
             self.refresh_backup_list()
 
     def open_profile_settings(self):
-        """개인정보 변경: 현재 비밀번호 재확인 → 개인정보 수정 UI."""
+        # [Sync] 프로필 변경 전 최신화
+        sync_manager.download_latest_db()
+
         dlg = ConfirmPasswordDialog(self, title="개인정보 변경", message="개인정보 변경을 위해 현재 비밀번호를 다시 입력해 주세요.")
         if dlg.exec_() != QtWidgets.QDialog.Accepted:
             return
@@ -1375,7 +1221,9 @@ class OwnerPage(QtWidgets.QWidget):
             return
 
         edit = ProfileEditDialog(self.db, self.session.user_id, parent=self)
-        edit.exec_()
+        if edit.exec_() == QtWidgets.QDialog.Accepted:
+            # [Sync] 변경 후 서버 업로드
+            sync_manager.upload_current_db()
 
     def open_personal_info(self):
         dlg = PersonalInfoDialog(self.db, self.session.user_id, self)
@@ -1388,23 +1236,18 @@ class OwnerPage(QtWidgets.QWidget):
         layout = QtWidgets.QVBoxLayout()
         layout.setSpacing(20)
         layout.setContentsMargins(50, 50, 50, 50)
-
-        # 🟢 레이아웃 전체를 가운데 정렬
         layout.setAlignment(QtCore.Qt.AlignCenter)
 
-        # 아이콘
         lbl_icon = QtWidgets.QLabel("🚀")
         lbl_icon.setStyleSheet("font-size: 60px; background: transparent;")
         lbl_icon.setAlignment(QtCore.Qt.AlignCenter)
         layout.addWidget(lbl_icon)
 
-        # 제목
         lbl_title = QtWidgets.QLabel("최신 버전 업데이트")
         lbl_title.setStyleSheet("font-size: 24px; font-weight: bold; color: #333; background: transparent;")
         lbl_title.setAlignment(QtCore.Qt.AlignCenter)
         layout.addWidget(lbl_title)
 
-        # 설명
         lbl_desc = QtWidgets.QLabel(
             "서버(GitHub)에 올라온 최신 기능과 버그 수정 사항을 다운로드합니다.\n"
             "업데이트가 완료되면 프로그램이 자동으로 재시작됩니다."
@@ -1413,10 +1256,9 @@ class OwnerPage(QtWidgets.QWidget):
         lbl_desc.setAlignment(QtCore.Qt.AlignCenter)
         layout.addWidget(lbl_desc)
 
-        # 🟢 [수정] 업데이트 버튼 (가운데 정렬 속성 명시)
         self.btn_update = QtWidgets.QPushButton("지금 업데이트 실행 (Git Pull)")
         self.btn_update.setCursor(QtCore.Qt.PointingHandCursor)
-        self.btn_update.setFixedSize(280, 55)  # 크기 조금 더 키움
+        self.btn_update.setFixedSize(280, 55)
         self.btn_update.setStyleSheet("""
             QPushButton {
                 background-color: #2196F3; 
@@ -1435,11 +1277,8 @@ class OwnerPage(QtWidgets.QWidget):
             }
         """)
         self.btn_update.clicked.connect(self.run_git_update)
-
-        # addWidget 할 때 정렬 옵션(Qt.AlignCenter)을 한 번 더 줘서 확실하게 가운데로 보냄
         layout.addWidget(self.btn_update, 0, QtCore.Qt.AlignCenter)
 
-        # 저장소 주소
         lbl_repo = QtWidgets.QLabel("Repository: https://github.com/rntkdgnl932/timeclock.git")
         lbl_repo.setStyleSheet("font-size: 11px; color: #999; margin-top: 20px; background: transparent;")
         lbl_repo.setAlignment(QtCore.Qt.AlignCenter)
@@ -1454,71 +1293,13 @@ class OwnerPage(QtWidgets.QWidget):
     def run_git_update(self):
         import git
         import os
-        my_repo = git.Repo()
-        my_repo.remotes.origin.pull()
-        # 실행 후 재시작 부분
-        os.execl(sys.executable, sys.executable, *sys.argv)
-
-
-    def run_git_update_ex(self):
-        # 1. 실행 전 확인
-        if not Message.confirm(self, "업데이트", "서버 버전으로 강제 업데이트하시겠습니까?\n(로컬 상태는 무시하고 덮어씌웁니다.)"):
-            return
-
-        # 2. 업데이트 작업 (닥치고 강제 동기화)
-        def job_fn(progress_callback):
-            import git
-            import os
-
-            repo = git.Repo(os.getcwd())
-
-            # (1) 자물쇠(.git/index.lock) 있으면 부수기
-            try:
-                lock_path = os.path.join(repo.git_dir, "index.lock")
-                if os.path.exists(lock_path):
-                    os.remove(lock_path)
-            except Exception:
-                pass
-
-            # (2) 서버 데이터 다운로드 (Fetch) - 병합은 안 함
-            progress_callback({"msg": "서버 데이터 가져오는 중..."})
-            repo.remotes.origin.fetch()
-
-            # (3) [핵심] 내 컴퓨터 상태 싹 무시하고 서버 상태로 '리셋'
-            progress_callback({"msg": "최신 버전으로 강제 덮어쓰기..."})
-
-            # 현재 브랜치 이름 확인 (보통 main)
-            current_branch = repo.active_branch.name
-
-            # ❗ 여기가 핵심입니다: pull 대신 reset --hard 사용
-            # "origin(서버)의 main 브랜치랑 똑같이 만들어라"
-            repo.git.reset('--hard', f'origin/{current_branch}')
-
-            return "업데이트 성공"
-
-        # 3. 완료 후 재시작
-        def on_done(ok, res, err):
-            if ok:
-                import time
-                import sys
-                import os
-
-                time.sleep(1)
-                os.execl(sys.executable, sys.executable, *sys.argv)
-            else:
-                pass
-
-                # 4. 실행
-
-        run_job_with_progress_async(
-            self,
-            "시스템 업데이트 (강제 리셋)",
-            job_fn,
-            on_done=on_done
-        )
-
-
-
+        try:
+            my_repo = git.Repo(os.getcwd())
+            my_repo.remotes.origin.pull()
+            Message.info(self, "업데이트 성공", "최신 버전을 받아왔습니다.\n프로그램을 재시작합니다.")
+            os.execl(sys.executable, sys.executable, *sys.argv)
+        except Exception as e:
+            Message.err(self, "업데이트 실패", f"Git Pull 실패: {e}")
 
 
 class WorkLogApproveDialog(QtWidgets.QDialog):
@@ -1527,7 +1308,6 @@ class WorkLogApproveDialog(QtWidgets.QDialog):
         self.data = row_data or {}
         self.mode = mode
 
-        # 제목 설정
         if self.mode == "START":
             self.setWindowTitle("작업 시작 승인 (시간 확정)")
         else:
@@ -1537,7 +1317,6 @@ class WorkLogApproveDialog(QtWidgets.QDialog):
 
         layout = QtWidgets.QVBoxLayout()
 
-        # [1] 상단 안내
         if self.mode == "END":
             info_text = (
                 f"근로자: {self.data.get('worker_username')}\n"
@@ -1553,7 +1332,6 @@ class WorkLogApproveDialog(QtWidgets.QDialog):
 
         form = QtWidgets.QFormLayout()
 
-        # [2] 날짜/시간 에디터
         self.dte_start = QtWidgets.QDateTimeEdit(QtCore.QDateTime.currentDateTime())
         self.dte_start.setDisplayFormat("yyyy-MM-dd HH:mm:ss")
         self.dte_start.setCalendarPopup(True)
@@ -1562,7 +1340,6 @@ class WorkLogApproveDialog(QtWidgets.QDialog):
         self.dte_end.setDisplayFormat("yyyy-MM-dd HH:mm:ss")
         self.dte_end.setCalendarPopup(True)
 
-        # 초기값 주입
         s_time_str = self.data.get("approved_start") or self.data.get("start_time")
         e_time_str = self.data.get("approved_end") or self.data.get("end_time")
 
@@ -1574,7 +1351,6 @@ class WorkLogApproveDialog(QtWidgets.QDialog):
         else:
             self.dte_end.setDateTime(QtCore.QDateTime.currentDateTime())
 
-        # [3] 잠금 처리
         disabled_style = "background-color: #e0e0e0; color: #666; border: 1px solid #ccc;"
         active_style = "background-color: #ffffff; color: #000; font-weight: bold;"
 
@@ -1587,7 +1363,6 @@ class WorkLogApproveDialog(QtWidgets.QDialog):
             self.dte_start.setStyleSheet(disabled_style)
             self.dte_end.setStyleSheet(active_style)
 
-        # [4] 비고 (콤보박스 없음)
         self.cb_comment = QtWidgets.QComboBox()
         self.cb_comment.setEditable(True)
         self.cb_comment.setPlaceholderText("특이사항이 있다면 입력하세요.")
@@ -1604,12 +1379,10 @@ class WorkLogApproveDialog(QtWidgets.QDialog):
 
         layout.addLayout(form)
 
-        # [5] 버튼
         btns = QtWidgets.QHBoxLayout()
         btn_label = "작업 시작 승인" if self.mode == "START" else "퇴근 및 시간 확정"
 
         self.btn_ok = QtWidgets.QPushButton(btn_label)
-        # noinspection PyUnresolvedReferences
         self.btn_ok.setCursor(QtCore.Qt.PointingHandCursor)
         self.btn_ok.setStyleSheet("""
             QPushButton {
@@ -1621,7 +1394,6 @@ class WorkLogApproveDialog(QtWidgets.QDialog):
         self.btn_ok.clicked.connect(self.on_ok_clicked)
 
         self.btn_cancel = QtWidgets.QPushButton("취소")
-        # noinspection PyUnresolvedReferences
         self.btn_cancel.setCursor(QtCore.Qt.PointingHandCursor)
         self.btn_cancel.clicked.connect(self.reject)
 
@@ -1659,40 +1431,27 @@ class WorkLogApproveDialog(QtWidgets.QDialog):
                                                      QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
 
                 if ans == QtWidgets.QMessageBox.Yes:
-                    # (1) 퇴근 시간 연장
                     new_e_dt = e_dt.addSecs(added_min * 60)
                     self.dte_end.setDateTime(new_e_dt)
 
-                    # (2) 스마트 필터링 (00분, 30분 단위 정렬)
                     time_slots = []
-
-                    # 시작 시간을 다음 30분 단위로 올림(Ceiling)
-                    # 예: 09:22 -> 09:30, 09:40 -> 10:00
                     curr = s_dt
                     mm = curr.time().minute()
                     ss = curr.time().second()
 
-                    # 정각이나 30분이 아니면 앞으로 당김
                     if not (mm == 0 and ss == 0) and not (mm == 30 and ss == 0):
                         if mm < 30:
-                            # 30분으로 이동
                             add_sec = (30 - mm) * 60 - ss
                         else:
-                            # 다음 시간 00분으로 이동
                             add_sec = (60 - mm) * 60 - ss
                         curr = curr.addSecs(add_sec)
 
                     required_gap = added_min * 60
 
-                    # 루프: 근무 시간 내에서 30분 간격으로 생성
                     while curr.secsTo(new_e_dt) >= required_gap:
                         nxt = curr.addSecs(required_gap)
-
-                        # 리스트에 추가 (깔끔한 00/30분 단위)
                         slot_str = f"{curr.toString('HH:mm')} ~ {nxt.toString('HH:mm')}"
                         time_slots.append(slot_str)
-
-                        # 다음 보기는 30분 뒤
                         curr = curr.addSecs(30 * 60)
 
                     time_slots.append("직접 입력")
@@ -1735,5 +1494,3 @@ class WorkLogApproveDialog(QtWidgets.QDialog):
 
         c = self.cb_comment.currentText().strip()
         return s, e, c
-
-

@@ -11,7 +11,7 @@ from timeclock.settings import WORK_STATUS
 from ui.widgets import DateRangeBar, Table
 from ui.dialogs import DisputeTimelineDialog, DateRangeDialog, ConfirmPasswordDialog, ProfileEditDialog
 from ui.dialogs import PersonalInfoDialog
-
+from timeclock import sync_manager  # [추가] 동기화 모듈 임포트
 
 
 class WorkerPage(QtWidgets.QWidget):
@@ -51,7 +51,6 @@ class WorkerPage(QtWidgets.QWidget):
         """)
         self.btn_logout.clicked.connect(self.logout_requested.emit)
 
-
         self.btn_profile = QtWidgets.QPushButton("개인정보 변경")
         self.btn_profile.setCursor(QtCore.Qt.PointingHandCursor)
         self.btn_profile.setStyleSheet("""
@@ -61,7 +60,8 @@ class WorkerPage(QtWidgets.QWidget):
             }
             QPushButton:hover { background-color: #eee; }
         """)
-        self.btn_profile.clicked.connect(self.open_personal_info)
+        self.btn_profile.clicked.connect(
+            self.open_profile_settings)  # 메서드 이름 수정(open_personal_info -> open_profile_settings 연결 통일)
 
         header_layout.addWidget(self.btn_profile)
         header_layout.addSpacing(8)
@@ -195,24 +195,30 @@ class WorkerPage(QtWidgets.QWidget):
             msg_box.exec_()
 
             if msg_box.clickedButton() == btn_yes:
-                # 1) DB에 시작 요청 기록 (먼저 처리)
+
+                # [Sync] 1. 최신 DB 다운로드 (혹시 다른 PC에서 작업했을까봐)
+                sync_manager.download_latest_db()
+
+                # 2. DB에 시작 요청 기록
                 try:
                     self.db.start_work(self.session.user_id)
                 except Exception as e:
                     Message.err(self, "오류", str(e))
                     return
 
-                # 2) 비동기 백업 실행 (진행창 표시)
+                # 3. 비동기 백업 + [Sync] 업로드
                 def job_fn(progress_callback):
-                    # 백그라운드에서 실행될 백업 함수
-                    return backup_manager.run_backup("request_in", progress_callback)
+                    # 로컬 백업 먼저
+                    ok, msg = backup_manager.run_backup("request_in", progress_callback)
+                    # [Sync] 구글 드라이브 동기화 업로드
+                    sync_manager.upload_current_db()
+                    return ok, msg
 
                 def on_done(ok, res, err):
-                    # 백업 완료 후 실행될 UI 로직
                     if ok:
-                        Message.info(self, "요청 완료", "관리자에게 승인 요청을 보냈습니다.\n(데이터 백업 완료)")
+                        Message.info(self, "요청 완료", "관리자에게 승인 요청을 보냈습니다.\n(서버 동기화 완료)")
                     else:
-                        Message.err(self, "백업 실패", f"요청은 되었으나 백업 실패: {err}")
+                        Message.err(self, "백업 실패", f"요청은 되었으나 백업/동기화 실패: {err}")
 
                     self.refresh()
                     self._update_action_button()
@@ -220,57 +226,57 @@ class WorkerPage(QtWidgets.QWidget):
                 # 진행창 띄우기
                 run_job_with_progress_async(
                     self,
-                    "출근 요청 데이터 백업 중...",
+                    "출근 요청 데이터 동기화 중...",
                     job_fn,
                     on_done=on_done
                 )
             else:
-                # 취소 시 아무 동작 안함
                 return
 
         # [2] 퇴근 요청 (OUT)
         elif mode == "OUT":
-            # 퇴근 요청 확인
             if Message.confirm(self, "퇴근 요청", "작업을 모두 마치고 퇴근 승인을 요청하시겠습니까?"):
-                # 1) DB에 퇴근 기록
+
+                # [Sync] 1. 최신 DB 다운로드
+                sync_manager.download_latest_db()
+
+                # 2. DB에 퇴근 기록
                 try:
                     self.db.end_work(self.session.user_id)
                 except Exception as e:
                     Message.err(self, "오류", str(e))
                     return
 
-                # 2) 비동기 백업 실행
+                # 3. 비동기 백업 + [Sync] 업로드
                 def job_fn(progress_callback):
-                    return backup_manager.run_backup("request_out", progress_callback)
+                    ok, msg = backup_manager.run_backup("request_out", progress_callback)
+                    sync_manager.upload_current_db()
+                    return ok, msg
 
                 def on_done(ok, res, err):
-                    # 백업 완료 후 '수고하셨습니다' 알림창 표시
                     auto_close_dlg = QtWidgets.QMessageBox(self)
                     auto_close_dlg.setWindowTitle("퇴근")
 
                     if ok:
-                        auto_close_dlg.setText("수고하셨습니다. (백업 완료)")
+                        auto_close_dlg.setText("수고하셨습니다. (서버 동기화 완료)")
                     else:
-                        auto_close_dlg.setText(f"수고하셨습니다. (백업 실패: {err})")
+                        auto_close_dlg.setText(f"수고하셨습니다. (동기화 실패: {err})")
 
                     auto_close_dlg.setStandardButtons(QtWidgets.QMessageBox.NoButton)
-
-                    # 3초(3000ms) 뒤에 자동으로 닫힘
                     QtCore.QTimer.singleShot(3000, auto_close_dlg.accept)
                     auto_close_dlg.exec_()
 
                     self.refresh()
                     self._update_action_button()
 
-                # 진행창 띄우기
                 run_job_with_progress_async(
                     self,
-                    "퇴근 요청 데이터 백업 중...",
+                    "퇴근 요청 데이터 동기화 중...",
                     job_fn,
                     on_done=on_done
                 )
 
-        # [3] 그 외 상태 (이미 완료됨 등) -> 화면 갱신만
+        # [3] 그 외
         else:
             self.refresh()
             self._update_action_button()
@@ -338,7 +344,11 @@ class WorkerPage(QtWidgets.QWidget):
         self.open_dispute_chat()
 
     def open_dispute_chat(self):
+        # [Sync] 이의제기 창 열기 전 최신 DB 받기 (채팅 내역 확인 위해)
+        sync_manager.download_latest_db()
+
         row = self.dispute_table.selected_first_row_index()
+        dispute_id = None
 
         if row >= 0 and row < len(self._my_dispute_rows):
             rr = dict(self._my_dispute_rows[row])
@@ -352,6 +362,9 @@ class WorkerPage(QtWidgets.QWidget):
                 my_role="worker"
             )
             dlg.exec_()
+
+            # [Sync] 대화 후 서버 업로드
+            sync_manager.upload_current_db()
             self.refresh_my_disputes()
             return
 
@@ -377,12 +390,17 @@ class WorkerPage(QtWidgets.QWidget):
                         my_role="worker"
                     )
                     dlg.exec_()
+
+                    # [Sync] 신규 이의제기 생성 후 서버 업로드
+                    sync_manager.upload_current_db()
                     self.refresh_my_disputes()
             return
 
         Message.warn(self, "알림", "이의 제기 내역 또는 근무 기록을 먼저 선택해주세요.")
 
     def calculate_my_salary(self):
+        # ... (생략 없이 기존 로직 유지) ...
+        # 여기는 조회 기능이라 동기화 불필요
         user_info = self.db.get_user_by_username(self.session.username)
         if not user_info:
             Message.err(self, "오류", "사용자 정보를 찾을 수 없습니다.")
@@ -454,7 +472,9 @@ class WorkerPage(QtWidgets.QWidget):
         QtWidgets.QMessageBox.information(self, "예상 급여 내역", msg)
 
     def open_profile_settings(self):
-        """개인정보 변경: 현재 비밀번호 재확인 → 개인정보 수정 UI."""
+        # [Sync] 개인정보 변경 전 최신 DB 다운로드
+        sync_manager.download_latest_db()
+
         dlg = ConfirmPasswordDialog(self, title="개인정보 변경", message="개인정보 변경을 위해 현재 비밀번호를 다시 입력해 주세요.")
         if dlg.exec_() != QtWidgets.QDialog.Accepted:
             return
@@ -470,20 +490,12 @@ class WorkerPage(QtWidgets.QWidget):
             return
 
         edit = ProfileEditDialog(self.db, self.session.user_id, parent=self)
-        edit.exec_()
+        if edit.exec_() == QtWidgets.QDialog.Accepted:
+            # [Sync] 변경 사항 서버 업로드
+            sync_manager.upload_current_db()
 
     def open_personal_info(self):
+        # 이것은 단순히 조회용 팝업이므로 동기화 불필요하거나,
+        # 만약 여기서도 수정을 한다면 위와 같은 패턴 적용
         dlg = PersonalInfoDialog(self.db, self.session.user_id, self)
         dlg.exec_()
-
-
-
-
-
-
-
-
-
-
-
-
