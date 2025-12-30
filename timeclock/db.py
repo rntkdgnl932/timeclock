@@ -6,7 +6,8 @@ import json
 from pathlib import Path
 import datetime
 import csv
-
+from timeclock import backup_manager
+from timeclock import sync_manager
 from timeclock.auth import pbkdf2_hash_password, pbkdf2_verify_password
 from timeclock.utils import now_str, normalize_date_range, ensure_dirs
 from timeclock.settings import (
@@ -342,6 +343,9 @@ class DB:
         self.conn.execute(sql, tuple(params))
         self.conn.commit()
 
+        backup_manager.run_backup("admin_update_profile")
+        sync_manager.upload_current_db()
+
     def list_workers(self, keyword=None, status_filter="ACTIVE"):
         sql = "SELECT id, username, name, phone, birthdate, job_title, hourly_wage, created_at, is_active FROM users WHERE role='worker'"
 
@@ -367,6 +371,9 @@ class DB:
         )
         self.conn.commit()
 
+        backup_manager.run_backup("admin_resign_user")
+        sync_manager.upload_current_db()
+
     def update_user_wage(self, user_id, new_wage):
         self.conn.execute(
             "UPDATE users SET hourly_wage=? WHERE id=?",
@@ -374,12 +381,18 @@ class DB:
         )
         self.conn.commit()
 
+        backup_manager.run_backup("admin_update_wage")
+        sync_manager.upload_current_db()
+
     def update_user_job_title(self, user_id: int, job_title: str):
         self.conn.execute(
             "UPDATE users SET job_title=? WHERE id=?",
             (job_title, user_id)
         )
         self.conn.commit()
+
+        backup_manager.run_backup("admin_update_job")
+        sync_manager.upload_current_db()
 
     # ----------------------------------------------------------------
     # Work Logs (출퇴근 로직)
@@ -414,6 +427,9 @@ class DB:
         )
         self.conn.commit()
 
+        backup_manager.run_backup("request_in")
+        sync_manager.upload_current_db()
+
     def end_work(self, user_id):
         row = self.conn.execute(
             "SELECT * FROM work_logs WHERE user_id=? AND status='WORKING' ORDER BY id DESC LIMIT 1",
@@ -429,6 +445,9 @@ class DB:
             (now, row["id"])
         )
         self.conn.commit()
+
+        backup_manager.run_backup("request_out")
+        sync_manager.upload_current_db()
 
     def reject_work_log(self, log_id):
         """
@@ -493,6 +512,9 @@ class DB:
                 (app_start, app_end, comment, new_status, owner_id, now_str(), work_log_id)
             )
 
+            backup_manager.run_backup("approve")
+            sync_manager.upload_current_db()
+
     # ----------------------------------------------------------------
     # Disputes (이의 제기)
     # ----------------------------------------------------------------
@@ -520,6 +542,10 @@ class DB:
                               (dispute_type, dispute_id))
             self.add_dispute_message(dispute_id, user_id, "worker", comment, None)
             self.conn.commit()
+
+            backup_manager.run_backup("dispute_create")
+            sync_manager.upload_current_db()
+
             return dispute_id
 
         cur = self.conn.execute(
@@ -529,6 +555,10 @@ class DB:
         dispute_id = cur.lastrowid
         self.add_dispute_message(dispute_id, user_id, "worker", comment, None)
         self.conn.commit()
+
+        backup_manager.run_backup("dispute_create")
+        sync_manager.upload_current_db()
+
         return dispute_id
 
     def list_my_disputes(self, user_id, date_from, date_to, filter_type="ACTIVE", limit=2000):
@@ -591,6 +621,9 @@ class DB:
         )
         self.conn.commit()
         self.add_dispute_message(dispute_id, resolved_by_id, "owner", resolution_comment, status_code)
+
+        backup_manager.run_backup("dispute_resolved")
+        sync_manager.upload_current_db()
 
     def add_dispute_message(self, dispute_id, sender_user_id, sender_role, message, status_code=None):
         self.conn.execute(
@@ -668,6 +701,9 @@ class DB:
                  datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
             )
 
+        backup_manager.run_backup("signup_request")
+        sync_manager.upload_current_db()
+
     def is_username_available(self, username):
         u = self.conn.execute("SELECT 1 FROM users WHERE username=?", (username,)).fetchone()
         if u: return False
@@ -695,6 +731,9 @@ class DB:
             self.conn.execute(
                 "UPDATE signup_requests SET status='APPROVED', decided_at=?, decided_by=?, decision_comment=? WHERE id=?",
                 (now_str(), owner_id, comment, request_id))
+
+        backup_manager.run_backup("signup_approve")
+        sync_manager.upload_current_db()
 
     def reject_signup_request(self, request_id, owner_id, comment=""):
         self.conn.execute(
