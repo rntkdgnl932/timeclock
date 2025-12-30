@@ -640,29 +640,22 @@ class DB:
             (date_from, date_to, limit)
         ).fetchall()
 
-    def resolve_dispute(self, dispute_id, resolved_by_id, status_code, resolution_comment):
+    def resolve_dispute(self, dispute_id, owner_id, new_status, resolution_comment):
         now = now_str()
         resolution_comment = (resolution_comment or "").strip()
 
-        row = self.conn.execute("SELECT resolution_comment, resolved_by, status FROM disputes WHERE id=?",
-                                (dispute_id,)).fetchone()
-        if row:
-            old_c = (row["resolution_comment"] or "").strip()
-            if old_c and old_c != resolution_comment:
-                exists = self.conn.execute(
-                    "SELECT 1 FROM dispute_messages WHERE dispute_id=? AND message=? AND sender_role='owner'",
-                    (dispute_id, old_c)).fetchone()
-                if not exists:
-                    self.add_dispute_message(dispute_id, row["resolved_by"] or resolved_by_id, "owner", old_c,
-                                             row["status"])
-
+        # 1. 상태 업데이트
         self.conn.execute(
-            "UPDATE disputes SET status=?, resolved_at=?, resolved_by=?, resolution_comment=? WHERE id=?",
-            (status_code, now, resolved_by_id, resolution_comment, dispute_id)
+            "UPDATE disputes SET status=?, resolved_at=?, resolved_by=? WHERE id=?",
+            (new_status, now, owner_id, dispute_id)
         )
+
+        # 2. 메시지가 있다면 추가
+        if resolution_comment:
+            self.add_dispute_message(dispute_id, owner_id, "owner", resolution_comment, new_status)
+
+        # 3. [수정] _save_and_sync 삭제 -> 오직 로컬 저장만 함 (업로드는 UI가 담당)
         self.conn.commit()
-        self.add_dispute_message(dispute_id, resolved_by_id, "owner", resolution_comment, status_code)
-        self._save_and_sync("dispute_resolved")
 
     def add_dispute_message(self, dispute_id, sender_user_id, sender_role, message, status_code=None):
         self.conn.execute(
