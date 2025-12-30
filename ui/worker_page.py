@@ -198,30 +198,18 @@ class WorkerPage(QtWidgets.QWidget):
 
             if msg_box.clickedButton() == btn_yes:
 
-                # 1. [다운로드] 작업 전 최신 DB 가져오기 (충돌 방지)
-                self.db.close_connection()
-                try:
-                    sync_manager.download_latest_db()
-                finally:
-                    self.db.reconnect()
-
-                # 2. [DB 쓰기] 시작 요청 기록
+                # 1. [로컬 저장] 먼저 내 컴퓨터에 기록 (에러 나면 중단)
                 try:
                     self.db.start_work(self.session.user_id)
                 except Exception as e:
                     Message.err(self, "오류", str(e))
                     return
 
-                # 3. [저장 및 업로드] 공통 함수 한 줄로 해결!
-                # (알아서 연결 끊고 -> 업로드 -> 다시 연결해줍니다)
-                # -----------------------------------------------------
-                # ❌ [삭제] self.db._save_and_sync("request_in")
-                # -----------------------------------------------------
-
-                # 4. 완료 알림 및 갱신
-                Message.info(self, "요청 완료", "관리자에게 출근 요청을 보냈습니다.")
-                self.refresh()
-                self._update_action_button()
+                # 2. [업로드] 로딩창 띄우고 서버 전송
+                self.process_async_action(
+                    action_func=None,
+                    success_callback=lambda: Message.info(self, "완료", "출근 요청이 전송되었습니다.")
+                )
             else:
                 return
 
@@ -229,35 +217,18 @@ class WorkerPage(QtWidgets.QWidget):
         elif mode == "OUT":
             if Message.confirm(self, "퇴근 요청", "작업을 모두 마치고 퇴근 승인을 요청하시겠습니까?"):
 
-                # 1. [다운로드]
-                self.db.close_connection()
-                try:
-                    sync_manager.download_latest_db()
-                finally:
-                    self.db.reconnect()
-
-                # 2. [DB 쓰기] 퇴근 기록
+                # 1. [로컬 저장] 먼저 내 컴퓨터에 기록
                 try:
                     self.db.end_work(self.session.user_id)
                 except Exception as e:
                     Message.err(self, "오류", str(e))
                     return
 
-                # 3. [저장 및 업로드] 공통 함수 사용!
-                # -----------------------------------------------------
-                # ❌ [삭제] self.db._save_and_sync("request_out")
-                # -----------------------------------------------------
-
-                # 4. 완료 알림
-                auto_close_dlg = QtWidgets.QMessageBox(self)
-                auto_close_dlg.setWindowTitle("퇴근")
-                auto_close_dlg.setText("수고하셨습니다. (서버 전송 완료)")
-                auto_close_dlg.setStandardButtons(QtWidgets.QMessageBox.NoButton)
-                QtCore.QTimer.singleShot(2000, auto_close_dlg.accept)
-                auto_close_dlg.exec_()
-
-                self.refresh()
-                self._update_action_button()
+                # 2. [업로드] 로딩창 띄우고 서버 전송
+                self.process_async_action(
+                    action_func=None,
+                    success_callback=lambda: Message.info(self, "완료", "퇴근 요청이 전송되었습니다.")
+                )
 
         # [3] 그 외 (이미 퇴근함 등)
         else:
@@ -363,8 +334,7 @@ class WorkerPage(QtWidgets.QWidget):
         self.open_dispute_chat()
 
     def open_dispute_chat(self):
-        # [Sync] 대화방 열기 전 최신 DB 받기 (기본 조회용)
-        # (주의: 아래에서 Create 할 때 한 번 더 받게 됨, 안전을 위해 유지)
+        # [Sync] 대화방 열기 전 최신 DB 받기
         self.db.close_connection()
         try:
             sync_manager.download_latest_db()
@@ -390,7 +360,7 @@ class WorkerPage(QtWidgets.QWidget):
             )
             dlg.exec_()
 
-            # [Sync] 대화 종료 후 업로드 (대화방 안에서 메시지를 보냈을 수 있으므로)
+            # 대화 종료 후 업로드 (채팅 내용 저장)
             sync_manager.upload_current_db()
             self.refresh_my_disputes()
             return
@@ -410,33 +380,33 @@ class WorkerPage(QtWidgets.QWidget):
                 text, ok2 = QtWidgets.QInputDialog.getText(self, "이의 제기", "첫 메시지를 입력하세요:")
                 if ok2 and text:
 
-                    # [Sync] 1. 신규 생성(Insert) 전 최신 DB 다운로드
-                    self.db.close_connection()
+                    # 1. [로컬 저장] DB에 생성 (commit만 됨)
                     try:
-                        sync_manager.download_latest_db()
+                        dispute_id = self.db.create_dispute(work_log_id, self.session.user_id, item, text)
                     except Exception as e:
-                        print(f"[Sync Error] {e}")
-                    finally:
-                        self.db.reconnect()
+                        Message.err(self, "오류", f"이의제기 생성 실패: {e}")
+                        return
 
-                    # DB Insert
-                    dispute_id = self.db.create_dispute(work_log_id, self.session.user_id, item, text)
+                    # 2. [채팅창 열기 함수] 업로드가 끝나면 실행될 함수 정의
+                    def open_chat_window():
+                        # 이때는 DB가 재연결된 상태이므로 안전함
+                        dlg = DisputeTimelineDialog(
+                            parent=self,
+                            db=self.db,
+                            user_id=self.session.user_id,
+                            dispute_id=dispute_id,
+                            my_role="worker"
+                        )
+                        dlg.exec_()
+                        # 채팅 끝나면 한 번 더 업로드 (채팅 내용 저장)
+                        sync_manager.upload_current_db()
+                        self.refresh_my_disputes()
 
-                    # [Sync] 2. 생성 직후 업로드
-                    sync_manager.upload_current_db()
-
-                    dlg = DisputeTimelineDialog(
-                        parent=self,
-                        db=self.db,
-                        user_id=self.session.user_id,
-                        dispute_id=dispute_id,
-                        my_role="worker"
+                    # 3. [업로드] 로딩창 -> 끝나면 open_chat_window 실행
+                    self.process_async_action(
+                        action_func=None,
+                        success_callback=open_chat_window
                     )
-                    dlg.exec_()
-
-                    # 대화방 종료 후 최종 동기화
-                    sync_manager.upload_current_db()
-                    self.refresh_my_disputes()
             return
 
         Message.warn(self, "알림", "이의 제기 내역 또는 근무 기록을 먼저 선택해주세요.")
@@ -551,3 +521,43 @@ class WorkerPage(QtWidgets.QWidget):
         # 만약 여기서도 수정을 한다면 위와 같은 패턴 적용
         dlg = PersonalInfoDialog(self.db, self.session.user_id, self)
         dlg.exec_()
+
+    def process_async_action(self, action_func, success_callback=None):
+        """
+        [공통 해결사]
+        1. DB 잠금 해제 -> 2. 로딩창 띄우고 업로드 -> 3. DB 재연결 -> 4. 다음 작업 실행
+        """
+        # 1. 일단 로컬 DB에 저장된 내용을 확정짓기 위해 연결을 끊습니다.
+        print("💾 데이터 패키징 중 (Close)...")
+        self.db.close_connection()
+
+        # 2. 비동기 작업 정의 (업로드)
+        def job_fn(progress_callback):
+            progress_callback({"msg": "☁️ 서버에 데이터 전송 중..."})
+            ok = sync_manager.upload_current_db()
+            return ok, "업로드 완료"
+
+        # 3. 완료 후 처리 (재연결 -> 콜백 실행)
+        def on_done(ok, res, err):
+            print("🔌 DB 재연결...")
+            self.db.reconnect()  # 👈 [중요] 여기서 문을 다시 열어줍니다! (튕김 해결)
+
+            if ok:
+                if success_callback:
+                    success_callback()  # 다음 작업(예: 채팅방 열기) 실행
+                self.refresh()
+                self._update_action_button()
+            else:
+                Message.err(self, "전송 실패", "데이터는 저장되었으나 서버 전송에 실패했습니다.")
+                # 실패해도 재연결은 했으니 프로그램은 안 꺼집니다.
+                self.refresh()
+
+        # 4. 실행 (로딩창 뜸)
+        run_job_with_progress_async(
+            self,
+            "처리 중입니다...",
+            job_fn,
+            on_done=on_done
+        )
+
+

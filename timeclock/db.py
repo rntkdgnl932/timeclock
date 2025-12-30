@@ -478,7 +478,7 @@ class DB:
             (user_id, today, now, now)
         )
         self.conn.commit()
-        self._save_and_sync("request_in")
+        # self._save_and_sync("start_work")
 
     def end_work(self, user_id):
         row = self.conn.execute(
@@ -495,7 +495,7 @@ class DB:
             (now, row["id"])
         )
         self.conn.commit()
-        self._save_and_sync("request_out")
+        # self._save_and_sync("end_work")
 
     def reject_work_log(self, log_id):
         """
@@ -589,7 +589,6 @@ class DB:
                               (dispute_type, dispute_id))
             self.add_dispute_message(dispute_id, user_id, "worker", comment, None)
             self.conn.commit()
-            self._save_and_sync("dispute_create")
 
             return dispute_id
 
@@ -600,7 +599,6 @@ class DB:
         dispute_id = cur.lastrowid
         self.add_dispute_message(dispute_id, user_id, "worker", comment, None)
         self.conn.commit()
-        self._save_and_sync("dispute_create")
 
         return dispute_id
 
