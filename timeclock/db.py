@@ -268,7 +268,6 @@ class DB:
         except Exception:
             pass
 
-
         # 3. disputes 테이블 생성 (work_log_id 포함)
         cur.execute(
             """
@@ -280,9 +279,16 @@ class DB:
                 dispute_type TEXT NOT NULL,
                 status TEXT NOT NULL DEFAULT 'IN_REVIEW',
                 created_at TEXT NOT NULL,
+
+                -- 레거시/신규 혼재 방지용(둘 다 살아있을 수 있음)
                 decided_at TEXT,
                 decided_by INTEGER,
                 decision_comment TEXT,
+
+                -- 현재 코드에서 사용하는 resolved_* (없으면 추가 마이그레이션으로 보강)
+                resolved_at TEXT,
+                resolved_by INTEGER,
+
                 comment TEXT,
                 FOREIGN KEY(user_id) REFERENCES users(id),
                 FOREIGN KEY(decided_by) REFERENCES users(id)
@@ -290,16 +296,24 @@ class DB:
             """
         )
 
-        # disputes 테이블에 work_log_id가 없으면 강제로 추가
-        try:
-            cur.execute("ALTER TABLE disputes ADD COLUMN work_log_id INTEGER")
-        except Exception:
-            pass
+        # ✅ disputes 컬럼 보강(기존 DB 스키마 불일치 방지)
+        for sql in [
+            "ALTER TABLE disputes ADD COLUMN work_log_id INTEGER",
+            "ALTER TABLE disputes ADD COLUMN comment TEXT",
 
-        try:
-            cur.execute("ALTER TABLE disputes ADD COLUMN comment TEXT")
-        except Exception:
-            pass
+            # 현재 코드가 쓰는 컬럼(없으면 no such column 터짐)
+            "ALTER TABLE disputes ADD COLUMN resolved_at TEXT",
+            "ALTER TABLE disputes ADD COLUMN resolved_by INTEGER",
+
+            # 레거시 호환(혹시 누락된 DB 대비)
+            "ALTER TABLE disputes ADD COLUMN decided_at TEXT",
+            "ALTER TABLE disputes ADD COLUMN decided_by INTEGER",
+            "ALTER TABLE disputes ADD COLUMN decision_comment TEXT",
+        ]:
+            try:
+                cur.execute(sql)
+            except Exception:
+                pass
 
         # 4. dispute_messages 테이블 생성
         cur.execute(
@@ -755,17 +769,32 @@ class DB:
         now = now_str()
         resolution_comment = (resolution_comment or "").strip()
 
-        # 1) 상태 업데이트
-        self.conn.execute(
-            "UPDATE disputes SET status=?, resolved_at=?, resolved_by=? WHERE id=?",
-            (new_status, now, int(owner_id), int(dispute_id))
-        )
+        # disputes 테이블 컬럼 확인(스키마 불일치 대응)
+        dcols = {r[1] for r in self.conn.execute("PRAGMA table_info(disputes)").fetchall()}
+
+        # 어떤 DB는 decided_*만 있고, 어떤 DB는 resolved_*가 있을 수 있으니 둘 다 지원
+        time_col = "resolved_at" if "resolved_at" in dcols else ("decided_at" if "decided_at" in dcols else None)
+        by_col = "resolved_by" if "resolved_by" in dcols else ("decided_by" if "decided_by" in dcols else None)
+
+        sets = ["status=?"]
+        params = [new_status]
+
+        if time_col:
+            sets.append(f"{time_col}=?")
+            params.append(now)
+        if by_col:
+            sets.append(f"{by_col}=?")
+            params.append(int(owner_id))
+
+        sql = "UPDATE disputes SET " + ", ".join(sets) + " WHERE id=?"
+        params.append(int(dispute_id))
+
+        self.conn.execute(sql, tuple(params))
 
         # 2) 메시지가 있다면 추가(이 안에서 _save_and_sync 호출됨)
         if resolution_comment:
             self.add_dispute_message(dispute_id, owner_id, "owner", resolution_comment, new_status)
         else:
-            # 메시지가 없으면 여기서 업로드 트리거
             self.conn.commit()
             self._save_and_sync("dispute_resolve")
 
@@ -901,17 +930,56 @@ class DB:
             rconn = sqlite3.connect(str(temp_db_path))
             rconn.row_factory = sqlite3.Row
 
-            # 1) disputes 상태 merge (status/resolved_at/resolved_by/comment)
+            # 로컬/원격 disputes 컬럼 목록
+            lcols = {r[1] for r in self.conn.execute("PRAGMA table_info(disputes)").fetchall()}
+            rcols = {r[1] for r in rconn.execute("PRAGMA table_info(disputes)").fetchall()}
+
+            def pick_time_col(cols):
+                return "resolved_at" if "resolved_at" in cols else ("decided_at" if "decided_at" in cols else None)
+
+            def pick_by_col(cols):
+                return "resolved_by" if "resolved_by" in cols else ("decided_by" if "decided_by" in cols else None)
+
+            r_time = pick_time_col(rcols)
+            r_by = pick_by_col(rcols)
+            l_time = pick_time_col(lcols)
+            l_by = pick_by_col(lcols)
+
+            # 1) disputes 상태 merge
+            # 원격에서 실제로 존재하는 컬럼만 SELECT
+            sel_cols = ["id", "status"]
+            if r_time:
+                sel_cols.append(r_time)
+            if r_by:
+                sel_cols.append(r_by)
+            if "comment" in rcols:
+                sel_cols.append("comment")
+
             r_dispute = rconn.execute(
-                "SELECT id, status, resolved_at, resolved_by, comment FROM disputes WHERE id=?",
+                f"SELECT {', '.join(sel_cols)} FROM disputes WHERE id=?",
                 (int(dispute_id),)
             ).fetchone()
 
             if r_dispute:
+                sets = ["status=?"]
+                params = [r_dispute["status"]]
+
+                # 시간/작성자 컬럼은 로컬에 존재할 때만 업데이트
+                if l_time and r_time:
+                    sets.append(f"{l_time}=?")
+                    params.append(r_dispute[r_time])
+                if l_by and r_by:
+                    sets.append(f"{l_by}=?")
+                    params.append(r_dispute[r_by])
+
+                if "comment" in lcols and "comment" in rcols:
+                    sets.append("comment=?")
+                    params.append(r_dispute["comment"])
+
+                params.append(int(dispute_id))
                 self.conn.execute(
-                    "UPDATE disputes SET status=?, resolved_at=?, resolved_by=?, comment=? WHERE id=?",
-                    (r_dispute["status"], r_dispute["resolved_at"], r_dispute["resolved_by"], r_dispute["comment"],
-                     int(dispute_id))
+                    "UPDATE disputes SET " + ", ".join(sets) + " WHERE id=?",
+                    tuple(params)
                 )
 
             # 2) 메시지 merge: id(PK) 기준 INSERT OR IGNORE
@@ -929,7 +997,6 @@ class DB:
                     (r["id"], r["dispute_id"], r["sender_user_id"], r["sender_role"], r["message"], r["status_code"],
                      r["created_at"])
                 )
-                # sqlite3는 rowcount가 -1 나오는 경우가 있어도, ignore면 0/1이 나오기도 함
                 if cur.rowcount and cur.rowcount > 0:
                     inserted += 1
 
