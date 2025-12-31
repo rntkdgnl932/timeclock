@@ -319,98 +319,85 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
         if not msg:
             return
 
-        # 1) 전송 누르면 즉시 입력창 비움 + 버튼 잠시 비활성
+        # 1) 전송 누르면 즉시 입력창 비움
         self.le_input.clear()
         self.btn_send.setEnabled(False)
 
-        # 2) ✅ 서버/DB 기다리지 않고 "즉시" 화면에 먼저 올림
-        self._append_local_echo(msg)
+        try:
+            # 2) 로컬 DB에 "즉시 저장" (하지만 autosync=False로 UI 멈춤 제거)
+            if self.my_role == "owner":
+                new_status = self.cb_status.currentData()
+                self.db.resolve_dispute(self.dispute_id, self.user_id, new_status, msg, autosync=False)
+                self.current_status = new_status
+            else:
+                self.db.add_dispute_message(
+                    self.dispute_id,
+                    sender_user_id=self.user_id,
+                    sender_role="worker",
+                    message=msg,
+                    status_code=None,
+                    autosync=False,
+                )
 
-        # 3) 저장/업로드는 백그라운드로 처리 (UI 프리징 방지)
-        def _work():
-            try:
-                if self.my_role == "owner":
-                    new_status = self.cb_status.currentData() if self.cb_status else self.current_status
-                    self.db.resolve_dispute(self.dispute_id, self.user_id, new_status, msg)
-                    return True, new_status
-                else:
-                    self.db.add_dispute_message(
-                        self.dispute_id,
-                        sender_user_id=self.user_id,
-                        sender_role="worker",
-                        message=msg
-                    )
-                    return True, None
-            except Exception as e:
-                return False, str(e)
+            # 3) 즉시 화면 반영 + 항상 맨 아래로
+            self.refresh_timeline()
+            self._scroll_to_bottom()
 
-        def _done(res):
-            # res: (ok, payload)
-            try:
-                ok = bool(res[0]) if isinstance(res, (tuple, list)) and len(res) >= 1 else False
-                payload = res[1] if isinstance(res, (tuple, list)) and len(res) >= 2 else None
+            # 4) 서버 업로드는 백그라운드로 조용히 수행 (UI 프리즈 방지)
+            self._silent_upload("dispute_message")
 
-                if ok:
-                    # owner면 status 갱신
-                    if self.my_role == "owner" and payload and isinstance(payload, str):
-                        self.current_status = payload
+        except Exception as e:
+            import logging
+            logging.exception("[DisputeChat] send_message failed: %s", e)
 
-                    # 정합성 맞추기 위해 로컬 DB 기반으로 다시 렌더링 + 하단 고정
-                    self.refresh_timeline()
-
-                    # 업로드는 조용히(백그라운드)
-                    self._silent_upload("dispute_message")
-                else:
-                    err = payload or "unknown error"
-                    QtWidgets.QMessageBox.critical(self, "오류", f"전송 실패: {err}")
-                    # 실패 시 입력 복구(사용자 편의)
-                    self.le_input.setText(msg)
-
-            finally:
-                self.btn_send.setEnabled(True)
-
-        self._run_silent(_work, _done)
+        finally:
+            self.btn_send.setEnabled(True)
 
     def _silent_poll_refresh(self):
         """
-        2초마다 호출:
-        - 클라우드 스냅샷을 받아서(dispute thread) 로컬에 병합
-        - 변경이 있으면 refresh_timeline() + 하단 고정
-        - 입력 중이면 방해하지 않음
+        2초마다 실행되는 자동 동기화(다운로드→merge→필요 시 화면 갱신).
+        - 절대 UI 스레드를 막지 않음
+        - PyInstaller에서도 깨지지 않게 timeclock 패키지 경로만 사용
         """
-        # 입력 중이면 수신 갱신을 잠깐 멈춤(타자 방해 방지)
-        try:
-            if self.le_input.hasFocus() or (self.le_input.text().strip() != ""):
-                return
-        except Exception:
-            pass
-
-        if getattr(self, "_sync_in_progress", False):
+        if getattr(self, "_sending", False):
+            return
+        if getattr(self, "_syncing", False):
             return
 
-        self._sync_in_progress = True
+        self._syncing = True
 
-        def _work():
+        def _do():
             try:
-                # db.py에서 cloud snapshot을 병합하는 함수가 정상 동작해야 함
-                # 병합 결과가 "변경 있음(True)/없음(False)" 형태면 그대로 사용
-                changed = self.db.sync_dispute_thread_from_cloud(self.dispute_id)
-                return True, bool(changed)
+                # sync_manager는 dialogs.py 상단에서 이미 import 되어있거나,
+                # 여기서도 timeclock 패키지로만 접근해야 PyInstaller에서 안전함
+                from timeclock import sync_manager
+                ok = sync_manager.download_latest_db_snapshot()
+                return ok, None
             except Exception as e:
                 return False, str(e)
 
-        def _done(res):
+        def _done(result):
             try:
-                ok = bool(res[0]) if isinstance(res, (tuple, list)) and len(res) >= 1 else False
-                payload = res[1] if isinstance(res, (tuple, list)) and len(res) >= 2 else None
+                ok, err = result
+                if not ok:
+                    if err:
+                        import logging
+                        logging.exception("[DisputeChat] poll refresh failed: %s", err)
+                    return
 
-                if ok and payload:
-                    # 변경이 있을 때만 리렌더 + 하단 고정
+                # 다운로드 성공 → temp DB에서 메시지 merge
+                try:
+                    changed = self.db.sync_dispute_thread_from_cloud(self.dispute_id)
+                except Exception:
+                    changed = False
+
+                if changed:
                     self.refresh_timeline()
+                    self._scroll_to_bottom()
             finally:
-                self._sync_in_progress = False
+                self._syncing = False
 
-        self._run_silent(_work, _done)
+        self._run_silent(_do, _done)
 
     def _merge_remote_messages_from_temp_db(self, temp_db_path: str) -> int:
         """
@@ -583,119 +570,69 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
         super().closeEvent(event)
 
     def refresh_timeline(self):
-        """
-        이의제기 대화 타임라인 렌더링 (로컬 DB 기반)
-        - IMPORTANT: 여기서 클라우드 동기화(다운로드/병합) 절대 하지 않음
-          => UI 즉시 반응/전송 즉시 표시 보장
-        """
-        # 1) 타임라인 로드 (로컬)
-        try:
-            events = self.db.get_dispute_timeline(self.dispute_id) or []
-        except Exception:
-            return
+        rows = self.db.get_dispute_timeline(self.dispute_id)
 
         def esc(s: str) -> str:
-            if s is None:
-                return ""
-            s = str(s)
-            s = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-            s = s.replace("\n", "<br>")
-            return s
+            s = s or ""
+            return (
+                s.replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace('"', "&quot;")
+            )
 
-        def date_only(ts: str) -> str:
-            if not ts:
-                return ""
-            ts = str(ts)
-            return ts[:10]
+        html = []
+        html.append("""
+        <html>
+        <head>
+          <style>
+            body { font-family: 'Malgun Gothic'; font-size: 12px; }
+            .wrap { padding: 6px; }
+            .row { display: flex; margin: 6px 0; }
+            .left { justify-content: flex-start; }
+            .right { justify-content: flex-end; }
+            .bubble {
+              max-width: 72%;
+              padding: 8px 10px;
+              border-radius: 16px;
+              line-height: 1.45;
+              white-space: pre-wrap;
+              word-wrap: break-word;
+            }
+            .meta { font-size: 11px; color: #666; margin-top: 2px; }
+            .owner { background: #F7D3D8; }
+            .worker { background: #D6EAF8; }
+          </style>
+        </head>
+        <body>
+          <div class="wrap">
+        """)
 
-        def time_only(ts: str) -> str:
-            if not ts:
-                return ""
-            ts = str(ts)
-            if len(ts) >= 16 and " " in ts:
-                return ts[11:16]
-            return ts
+        for r in rows:
+            who = (r.get("who") or "")
+            username = r.get("username") or ("Owner" if who == "owner" else "Worker")
+            at = r.get("at") or ""
+            comment = r.get("comment") or ""
+            side_cls = "right" if who == "owner" else "left"
+            bubble_cls = "owner" if who == "owner" else "worker"
 
-        BG = "#B2C7D9"
-        MY = "#FEE500"
-        OTHER = "#FFFFFF"
-        TIME = "#666666"
-
-        html = f"""
-        <html><head><meta charset="utf-8"></head>
-        <body style="margin:0; padding:0;">
-          <div style="background:{BG}; padding:12px; font-family:'Malgun Gothic'; font-size:13px;">
-        """
-
-        last_date = None
-
-        for ev in events:
-            who = (ev.get("who") or "").strip()  # "owner" | "worker"
-            username = (ev.get("username") or who or "").strip()
-            msg = (ev.get("comment") or "").strip()
-            ts = (ev.get("at") or "").strip()
-
-            if not msg and not ts and not username:
-                continue
-
-            d = date_only(ts)
-            if d and d != last_date:
-                last_date = d
-                html += f"""
-                <div style="text-align:center; margin:10px 0;">
-                  <span style="background:rgba(0,0,0,0.18); color:#fff; padding:4px 10px; border-radius:12px; font-size:12px;">
-                    {esc(d)}
-                  </span>
+            html.append(f"""
+              <div class="row {side_cls}">
+                <div>
+                  <div class="bubble {bubble_cls}">{esc(comment)}</div>
+                  <div class="meta">{esc(username)} · {esc(at)}</div>
                 </div>
-                """
+              </div>
+            """)
 
-            # 내/상대 판정
-            if self.my_role == "owner":
-                is_me = (who == "owner")
-            else:
-                is_me = (who == "worker")
-
-            name_disp = username or who
-            t_disp = time_only(ts)
-
-            bubble_bg = MY if is_me else OTHER
-            align = "right" if is_me else "left"
-
-            html += f"""
-            <table width="100%" cellspacing="0" cellpadding="0" style="margin:6px 0;">
-              <tr>
-                <td align="{align}" valign="bottom">
-                  <div style="margin:0; padding:0;">
-                    <div style="font-size:12px; color:#222; margin:0 0 2px 2px; text-align:{align};">
-                      {esc(name_disp)}
-                    </div>
-
-                    <table cellspacing="0" cellpadding="8" style="display:inline-table; max-width:72%;">
-                      <tr>
-                        <td bgcolor="{bubble_bg}">
-                          <span style="font-size:13px; line-height:1.45;">
-                            {esc(msg)}
-                          </span>
-                        </td>
-                      </tr>
-                    </table>
-
-                    <div style="font-size:11px; color:{TIME}; margin-top:2px; text-align:{align};">
-                      {esc(t_disp)}
-                    </div>
-                  </div>
-                </td>
-              </tr>
-            </table>
-            """
-
-        html += """
+        html.append("""
           </div>
-        </body></html>
-        """
+        </body>
+        </html>
+        """)
 
-        self.browser.setHtml(html)
-        self._scroll_to_bottom()
+        self.text_view.setHtml("".join(html))
+        QtCore.QTimer.singleShot(0, self._scroll_to_bottom)
 
     def _scroll_to_bottom(self):
         """
