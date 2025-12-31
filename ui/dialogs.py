@@ -247,27 +247,56 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
         if not msg:
             return
 
+        # [1] 먼저 로컬 DB에 저장 (즉시 UI 반영 가능)
         try:
-            # 1) 로컬 DB에 먼저 저장 (UI는 즉시 갱신)
             if self.my_role == "owner":
-                # 사업주는 dispute 상태/답변을 함께 갱신할 수 있음(기존 로직 유지)
-                # 여기서는 “답변 = 메시지”로만 저장하고 상태 변경은 기존 처리 흐름을 따름
-                self.db.add_dispute_message(self.dispute_id, "owner", msg)
+                new_status = self.cb_status.currentData()
+                # 상태 업데이트 + 메시지 저장(내부에서 add_dispute_message 호출)
+                self.db.resolve_dispute(self.dispute_id, self.user_id, new_status, msg)
+                self.current_status = new_status
             else:
-                self.db.add_dispute_message(self.dispute_id, "worker", msg)
-
-            self.db.conn.commit()
-
-            # 2) 카톡처럼: 입력창 즉시 비우고 타임라인 즉시 갱신
-            self.le_input.clear()
-            self.refresh_timeline()
-
-            # 3) 업로드는 조용히 백그라운드로
-            self._silent_upload()
+                # ✅ add_dispute_message 시그니처에 맞게 4개 인자 전달
+                # (dispute_id, sender_user_id, sender_role, message, status_code=None)
+                self.db.add_dispute_message(self.dispute_id, self.user_id, "worker", msg, None)
 
         except Exception as e:
-            logging.exception("send_message failed")
-            QtWidgets.QMessageBox.warning(self, "오류", f"메시지 저장 실패: {e}")
+            QtWidgets.QMessageBox.critical(self, "오류", f"메시지 저장 실패: {e}")
+            return
+
+        # [2] 업로드(서버 반영) - 전송 버튼 눌렀을 때만 비동기로 수행
+        #    입력 중에 동기화가 돌지 않게 하려는 목적
+        try:
+            self.db.close_connection()
+        except Exception:
+            pass
+
+        def job_fn(progress_callback):
+            progress_callback({"msg": "☁️ 메시지 전송 중..."})
+            ok = sync_manager.upload_current_db()
+            return ok, "전송 완료"
+
+        def on_done(ok, res, err):
+            # 재연결
+            try:
+                self.db.reconnect()
+            except Exception as e:
+                QtWidgets.QMessageBox.warning(self, "오류", f"DB 재연결 실패: {e}")
+                return
+
+            if ok:
+                self.le_input.clear()
+                self.refresh_timeline()
+            else:
+                QtWidgets.QMessageBox.warning(self, "전송 실패", f"서버 전송 실패: {err}")
+                # 로컬에는 저장되어 있으니 화면은 갱신
+                self.refresh_timeline()
+
+        run_job_with_progress_async(
+            self,
+            "전송 중.",
+            job_fn,
+            on_done=on_done
+        )
 
     def _silent_poll_refresh(self):
         """
