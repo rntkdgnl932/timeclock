@@ -156,29 +156,58 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
         self._poll_timer.timeout.connect(self._silent_poll_refresh)
         self._poll_timer.start()
 
+    def _ensure_db_conn(self) -> bool:
+        """
+        conn이 None인 상태(=DB가 닫힌 상태)에서 execute가 불리면 바로 터진다.
+        대화방에서는 항상 '사용 직전'에 연결을 보장한다.
+        """
+        if not self.db:
+            return False
+        try:
+            if getattr(self.db, "conn", None) is None:
+                self.db.reconnect()
+            return True
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "오류", f"DB 재연결 실패: {e}\n프로그램을 재시작하세요.")
+            return False
+
     def _load_data(self):
-        if not self.db or not self.dispute_id: return
+        if not self.db or not self.dispute_id:
+            return
 
-        row = self.db.conn.execute(
-            "SELECT work_log_id, dispute_type, status FROM disputes WHERE id=?",
-            (self.dispute_id,)
-        ).fetchone()
+        if not self._ensure_db_conn():
+            return
 
-        if row:
-            self.current_status = row["status"]
-            wl_id = row["work_log_id"]
+        try:
+            row = self.db.conn.execute(
+                "SELECT work_log_id, dispute_type, status FROM disputes WHERE id=?",
+                (self.dispute_id,)
+            ).fetchone()
+            if not row:
+                return
 
-            wl_row = self.db.conn.execute(
-                "SELECT work_date, start_time, end_time FROM work_logs WHERE id=?",
-                (wl_id,)
+            work_log_id, dispute_type, status = row
+            self.current_status = status or "PENDING"
+
+            # 헤더에 표시할 정보
+            w = self.db.conn.execute(
+                """
+                SELECT w.work_date, u.username
+                FROM work_logs w
+                LEFT JOIN users u ON u.id = w.user_id
+                WHERE w.id=?
+                """,
+                (work_log_id,)
             ).fetchone()
 
             self.header_info = {
-                "work_date": wl_row["work_date"] if wl_row else "-",
-                "dispute_type": row["dispute_type"],
-                "start_time": wl_row["start_time"] if wl_row else "-",
-                "end_time": wl_row["end_time"] if wl_row else "-"
+                "work_date": w[0] if w else "",
+                "worker_username": w[1] if w else "",
+                "dispute_type": dispute_type or "",
             }
+        except Exception as e:
+            logging.exception("_load_data failed")
+            QtWidgets.QMessageBox.warning(self, "오류", f"이의제기 정보 로드 실패: {e}")
 
     def _create_fixed_header(self):
         widget = QtWidgets.QWidget()
@@ -215,88 +244,85 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
             self.cb_status.setCurrentIndex(0)
 
     def _silent_upload(self):
-        # 동시 업로드 방지
-        if self._sync_in_progress:
+        """
+        DB 연결을 끊지 않고(=conn 유지),
+        sync_manager.upload_current_db()가 내부에서 스냅샷 업로드를 한다는 가정으로 조용히 업로드한다.
+        실패 시 사용자에게만 안내하고, 로컬은 이미 저장되어 있으므로 대화는 유지된다.
+        """
+        if getattr(self, "_sync_in_progress", False):
+            # 이미 업로드 중이면, 나중에 한번 더 올리기만 표시
             self._pending_upload = True
-            self.lbl_sync.setText("동기화 대기…")
             return
 
         self._sync_in_progress = True
         self._pending_upload = False
-        self.lbl_sync.setText("동기화 중…")
 
-        def _job():
-            # sync_manager.upload_current_db()는 이제 DB 스냅샷을 업로드하므로
-            # UI/DB 연결을 끊을 필요가 없다.
-            return sync_manager.upload_current_db()
+        def fn():
+            # 업로드는 시간이 걸릴 수 있으니 여기서만 실행
+            return bool(sync_manager.upload_current_db())
 
-        self._thread = QtCore.QThread(self)
-        self._worker = _SilentWorker(_job)
-        self._worker.moveToThread(self._thread)
+        def on_finished(ok: bool, err: str):
+            self._sync_in_progress = False
 
-        self._thread.started.connect(self._worker.run)
-        self._worker.finished.connect(self._on_upload_done)
-        self._worker.finished.connect(self._thread.quit)
-        self._worker.finished.connect(self._worker.deleteLater)
-        self._thread.finished.connect(self._thread.deleteLater)
+            if not ok:
+                self._pending_upload = True
+                # 모달 없이 경고만
+                QtWidgets.QMessageBox.warning(self, "전송 실패", f"서버 전송 실패: {err or '업로드 실패'}\n새로고침(동기화) 후 다시 시도하세요.")
+                return
 
-        self._thread.start()
+            # 업로드 성공했는데 pending이 있었다면(연속 입력) 한 번 더 올린다
+            if getattr(self, "_pending_upload", False):
+                self._pending_upload = False
+                QtCore.QTimer.singleShot(100, self._silent_upload)
+
+        th = QtCore.QThread(self)
+        worker = _SilentWorker(fn)
+        worker.moveToThread(th)
+
+        th.started.connect(worker.run)
+        worker.finished.connect(lambda ok, err: on_finished(ok, err))
+        worker.finished.connect(th.quit)
+        worker.finished.connect(worker.deleteLater)
+        th.finished.connect(th.deleteLater)
+
+        th.start()
 
     def send_message(self):
         msg = self.le_input.text().strip()
         if not msg:
             return
 
-        # [1] 먼저 로컬 DB에 저장 (즉시 UI 반영 가능)
+        if not self._ensure_db_conn():
+            return
+
+        # 1) 로컬 DB 저장은 즉시 끝나야 함(여기서 DB를 끊지 않는다)
         try:
             if self.my_role == "owner":
-                new_status = self.cb_status.currentData()
-                # 상태 업데이트 + 메시지 저장(내부에서 add_dispute_message 호출)
+                new_status = self.cb_status.currentData() if self.cb_status else "IN_REVIEW"
                 self.db.resolve_dispute(self.dispute_id, self.user_id, new_status, msg)
                 self.current_status = new_status
             else:
-                # ✅ add_dispute_message 시그니처에 맞게 4개 인자 전달
-                # (dispute_id, sender_user_id, sender_role, message, status_code=None)
-                self.db.add_dispute_message(self.dispute_id, self.user_id, "worker", msg, None)
+                self.db.add_dispute_message(
+                    self.dispute_id,
+                    sender_user_id=self.user_id,
+                    sender_role="worker",
+                    message=msg
+                )
+            # db 메서드가 commit을 해도, 혹시 몰라 한번 더 안전 커밋
+            if getattr(self.db, "conn", None) is not None:
+                self.db.conn.commit()
 
         except Exception as e:
+            logging.exception("send_message save failed")
             QtWidgets.QMessageBox.critical(self, "오류", f"메시지 저장 실패: {e}")
             return
 
-        # [2] 업로드(서버 반영) - 전송 버튼 눌렀을 때만 비동기로 수행
-        #    입력 중에 동기화가 돌지 않게 하려는 목적
-        try:
-            self.db.close_connection()
-        except Exception:
-            pass
+        # 2) UI는 카톡처럼 즉시 반영
+        self.le_input.clear()
+        self.refresh_timeline()
 
-        def job_fn(progress_callback):
-            progress_callback({"msg": "☁️ 메시지 전송 중..."})
-            ok = sync_manager.upload_current_db()
-            return ok, "전송 완료"
-
-        def on_done(ok, res, err):
-            # 재연결
-            try:
-                self.db.reconnect()
-            except Exception as e:
-                QtWidgets.QMessageBox.warning(self, "오류", f"DB 재연결 실패: {e}")
-                return
-
-            if ok:
-                self.le_input.clear()
-                self.refresh_timeline()
-            else:
-                QtWidgets.QMessageBox.warning(self, "전송 실패", f"서버 전송 실패: {err}")
-                # 로컬에는 저장되어 있으니 화면은 갱신
-                self.refresh_timeline()
-
-        run_job_with_progress_async(
-            self,
-            "전송 중.",
-            job_fn,
-            on_done=on_done
-        )
+        # 3) 업로드는 "조용히" 백그라운드(모달 로딩창/DB close 금지)
+        self._silent_upload()
 
     def _silent_poll_refresh(self):
         """

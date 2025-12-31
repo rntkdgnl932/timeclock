@@ -7,6 +7,7 @@ from pathlib import Path
 import datetime
 import csv
 import threading
+import logging
 
 from timeclock import backup_manager
 from timeclock import sync_manager
@@ -58,35 +59,22 @@ class DB:
 
     # timeclock/db.py 의 DB 클래스 내부에 추가하세요.
 
-    def _save_and_sync(self, tag):
+    def _save_and_sync(self, tag: str) -> None:
         """
-        [핵심 수정] 모든 DB 작업 후 공통으로 호출되는 함수
-        스레드 없이 '저장(Close) -> 업로드 -> 재연결'을 강제로 수행합니다.
+        기존: close_connection()을 길게 잡고 업로드 → 그 사이 UI에서 execute 호출하면 NoneType execute 터짐
+        변경: DB는 닫지 않고, commit만 한 뒤 백그라운드로 업로드/백업 실행
         """
-        print(f"🔄 [AutoSync] '{tag}' 동기화 시작...")
-
-        # 1. DB 연결 해제 (임시 데이터를 파일에 꽉 눌러 담기)
-        self.close_connection()
+        try:
+            if getattr(self, "conn", None) is not None:
+                self.conn.commit()
+        except Exception:
+            logging.exception("_save_and_sync commit failed")
 
         try:
-            # 2. 백업 및 구글 드라이브 업로드
-            # (이제 파일이 완벽한 상태이므로 업로드하면 100% 반영됨)
-            if 'backup_manager' in globals():
-                backup_manager.run_backup(tag)
-
-            ok = sync_manager.upload_current_db()
-            if ok:
-                print(f"✅ [AutoSync] '{tag}' 업로드 완료")
-            else:
-                print(f"⚠️ [AutoSync] '{tag}' 업로드 실패/건너뜀")
-
-        except Exception as e:
-            print(f"❌ [AutoSync] 오류 발생: {e}")
-
-        finally:
-            # 3. DB 재연결 (화면이 멈추지 않고 계속 작동하도록)
-            self.reconnect()
-
+            # run_sync_background는 별도 스레드에서 백업+업로드를 수행해야 한다.
+            run_sync_background(tag)
+        except Exception:
+            logging.exception("_save_and_sync background start failed")
 
     def close(self):
         try:
