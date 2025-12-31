@@ -65,35 +65,35 @@ class DB:
 
     def _save_and_sync(self, tag: str):
         """
-        [안정화 핵심]
-        - UI가 DB를 사용 중인 상태에서 self.conn을 close/reconnect 하지 않는다. (크래시 원인)
-        - 대신 DB 스냅샷 파일을 만들어 백그라운드에서:
-            1) 로컬 백업
-            2) 구글드라이브 업로드(스냅샷 파일 업로드)
-          를 수행한다.
+        [핵심 안정화]
+        - UI가 DB를 사용 중인 상태에서 self.conn을 close/reconnect 하지 않는다.
+        - 대신 현재 DB 파일을 스냅샷으로 복사한 뒤(짧은 재시도 포함),
+          그 스냅샷 파일을 백그라운드 스레드로 업로드한다.
+        - 업로드 성공/실패는 로그로 남긴다.
         """
         try:
-            # DB 변경사항은 우선 커밋
+            print(f"🔄 [AutoSync] '{tag}' 동기화 시작...")
+
+            # 1) 변경사항 커밋
             try:
                 self.conn.commit()
             except Exception:
                 pass
 
-            # 스냅샷 파일 생성
+            # 2) 스냅샷 파일 생성 (DB 연결 유지한 채 파일 복사)
             snap_dir = self.db_path.parent / "_sync_tmp"
             snap_dir.mkdir(parents=True, exist_ok=True)
 
             ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
             snap_path = snap_dir / f"{self.db_path.stem}.snapshot_{ts}{self.db_path.suffix}"
 
-            # WAL 환경에서 안전하게 파일을 “복사”하기 위해 checkpoint 후 복사
+            # WAL 환경이면 checkpoint로 파일 상태를 최대한 안정화
             try:
                 self.conn.execute("PRAGMA wal_checkpoint(FULL);")
                 self.conn.commit()
             except Exception:
                 pass
 
-            # 짧게 재시도(Windows 잠금/간헐 실패 대비)
             last_err = None
             for _ in range(3):
                 try:
@@ -105,26 +105,28 @@ class DB:
                     time.sleep(0.15)
 
             if last_err is not None:
-                print(f"[AutoSync] snapshot copy failed: {last_err}")
+                print(f"❌ [AutoSync] snapshot copy failed: {last_err}")
                 return
 
+            # 3) 백그라운드 업로드 (UI 블로킹/크래시 방지)
             def _worker():
                 try:
-                    # 1) 로컬 백업(기존 정책 유지)
+                    # 로컬/드라이브 백업은 기존 정책 유지
                     try:
-                        backup_manager.run_backup(tag)
+                        if 'backup_manager' in globals():
+                            backup_manager.run_backup(tag)
                     except Exception as e:
-                        print(f"[AutoSync] backup failed: {e}")
+                        print(f"⚠️ [AutoSync] backup failed: {e}")
 
-                    # 2) 업로드(스냅샷 파일 업로드)
+                    # 스냅샷 업로드
                     try:
                         ok = sync_manager.upload_current_db(db_path=snap_path)
                         if ok:
                             print(f"✅ [AutoSync] '{tag}' 업로드 완료")
                         else:
-                            print(f"⚠️ [AutoSync] '{tag}' 업로드 차단/실패")
+                            print(f"⚠️ [AutoSync] '{tag}' 업로드 실패/차단")
                     except Exception as e:
-                        print(f"[AutoSync] upload failed: {e}")
+                        print(f"❌ [AutoSync] upload failed: {e}")
 
                 finally:
                     try:
@@ -136,7 +138,7 @@ class DB:
             t.start()
 
         except Exception as e:
-            print(f"[AutoSync] _save_and_sync failed: {e}")
+            print(f"❌ [AutoSync] _save_and_sync failed: {e}")
 
     def close(self):
         try:
@@ -753,55 +755,34 @@ class DB:
         now = now_str()
         resolution_comment = (resolution_comment or "").strip()
 
-        # disputes 테이블 컬럼 확인 (현재 스키마: decided_*/decision_comment)
-        dcols = {r[1] for r in self.conn.execute("PRAGMA table_info(disputes)").fetchall()}
+        # 1) 상태 업데이트
+        self.conn.execute(
+            "UPDATE disputes SET status=?, resolved_at=?, resolved_by=? WHERE id=?",
+            (new_status, now, int(owner_id), int(dispute_id))
+        )
 
-        # 1) 상태 업데이트 (스키마에 맞게 decided_* 사용)
-        # - decision_comment는 "사업주 답변"을 disputes에도 저장(요약/리스트용)
-        sets = ["status=?"]
-        params = [new_status]
-
-        if "decided_at" in dcols:
-            sets.append("decided_at=?")
-            params.append(now)
-        if "decided_by" in dcols:
-            sets.append("decided_by=?")
-            params.append(owner_id)
-        if "decision_comment" in dcols:
-            sets.append("decision_comment=?")
-            params.append(resolution_comment if resolution_comment else None)
-
-        # (혹시 과거 DB에서 resolved_* 계열이 존재하면 같이 업데이트해도 무해)
-        if "resolved_at" in dcols:
-            sets.append("resolved_at=?")
-            params.append(now)
-        if "resolved_by" in dcols:
-            sets.append("resolved_by=?")
-            params.append(owner_id)
-        if "resolution_comment" in dcols:
-            sets.append("resolution_comment=?")
-            params.append(resolution_comment if resolution_comment else None)
-
-        params.append(dispute_id)
-
-        sql = "UPDATE disputes SET " + ", ".join(sets) + " WHERE id=?"
-        self.conn.execute(sql, tuple(params))
-
-        # 2) 메시지(채팅)로도 저장
+        # 2) 메시지가 있다면 추가(이 안에서 _save_and_sync 호출됨)
         if resolution_comment:
             self.add_dispute_message(dispute_id, owner_id, "owner", resolution_comment, new_status)
-
-        # 3) 로컬 커밋
-        self.conn.commit()
+        else:
+            # 메시지가 없으면 여기서 업로드 트리거
+            self.conn.commit()
+            self._save_and_sync("dispute_resolve")
 
     def add_dispute_message(self, dispute_id, sender_user_id, sender_role, message, status_code=None):
-        self.ensure_connection()
+        message = (message or "").strip()
+        if not message:
+            return
 
         self.conn.execute(
-            "INSERT INTO dispute_messages(dispute_id, sender_user_id, sender_role, message, status_code, created_at) VALUES(?,?,?,?,?,?)",
-            (dispute_id, sender_user_id, sender_role, (message or "").strip(), status_code, now_str())
+            "INSERT INTO dispute_messages(dispute_id, sender_user_id, sender_role, message, status_code, created_at) "
+            "VALUES(?,?,?,?,?,?)",
+            (dispute_id, int(sender_user_id), str(sender_role), message, status_code, now_str())
         )
         self.conn.commit()
+
+        # ✅ 이의제기 메시지는 즉시 서버 업로드 트리거
+        self._save_and_sync("dispute_message")
 
     def get_dispute_timeline(self, dispute_id):
         req_row = self.conn.execute("SELECT work_log_id FROM disputes WHERE id=?", (dispute_id,)).fetchone()

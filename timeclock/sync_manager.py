@@ -386,11 +386,8 @@ def is_cloud_newer():
 
 def upload_current_db(db_path: Path = None):
     """
-    [안정화 패치]
-    - 동시/연속 호출 방지(락 + 쿨다운)
-    - 충돌 감지 로직 유지
-    - db_path가 주어지면 해당 파일(스냅샷)을 업로드한다.
-      (UI DB 연결을 닫지 않아도 됨)
+    - db_path가 주어지면 해당 파일(스냅샷)을 업로드
+    - 주어지지 않으면 기본 DB_PATH 업로드
     """
     global _LAST_UL_CALL_TS
 
@@ -410,25 +407,23 @@ def upload_current_db(db_path: Path = None):
 
             folder_id = _get_folder_id(drive, GDRIVE_SYNC_FOLDER_NAME)
 
-            # ★ 충돌 감지(덮어쓰기 방지)
+            # 충돌 감지(덮어쓰기 방지)
             if cloud_changed_since_last_sync():
                 logging.warning(
                     "[Sync] 업로드 차단: 클라우드 DB가 마지막 동기화 이후 변경되었습니다. "
-                    "먼저 클라우드 최신 DB를 다운로드(download_latest_db)한 뒤 다시 시도하세요."
+                    "먼저 최신 DB를 다운로드한 뒤 다시 시도하세요."
                 )
                 return False
 
             upload_path = Path(db_path) if db_path else Path(DB_PATH)
 
-            # 기존 파일 검색(없으면 새로 생성) - _find_file_in_folder 없어도 동작하도록 내장 검색 사용
             query = f"'{folder_id}' in parents and title = '{GDRIVE_DB_FILENAME}' and trashed = false"
             file_list = drive.ListFile({'q': query}).GetList()
 
-            gfile = None
             if file_list:
                 file_list.sort(key=lambda x: x.get('modifiedDate', ''), reverse=True)
                 gfile = file_list[0]
-                # 중복 파일 정리
+                # 중복 정리
                 if len(file_list) > 1:
                     for old_f in file_list[1:]:
                         try:
@@ -441,7 +436,7 @@ def upload_current_db(db_path: Path = None):
             gfile.SetContentFile(str(upload_path))
             gfile.Upload()
 
-            # 업로드 성공 후, 클라우드 modifiedDate를 last_sync로 저장
+            # last_sync_ts 저장
             try:
                 gfile.FetchMetadata(fields="modifiedDate")
                 remote_ts = _parse_gdrive_modified_date(gfile.get("modifiedDate", ""))
@@ -456,6 +451,7 @@ def upload_current_db(db_path: Path = None):
         except Exception as e:
             logging.error(f"[Sync] 업로드 실패: {e}")
             return False
+
 
 
 def run_startup_sync():
