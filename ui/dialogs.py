@@ -131,6 +131,9 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
         self.le_input.returnPressed.connect(self.send_message)
         input_layout.addWidget(self.le_input, 1)
 
+        # ✅ 호환성: 예전 코드/다른 파일에서 self.input 을 참조해도 안 터지게 alias 제공
+        self.input = self.le_input
+
         self.btn_send = QtWidgets.QPushButton("전송")
         # noinspection PyUnresolvedReferences
         self.btn_send.setCursor(QtCore.Qt.PointingHandCursor)
@@ -150,9 +153,10 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
         # 최초 표시
         self.refresh_timeline()
 
-        # ✅ 카톡처럼: 주기적으로 조용히(입력 중이면 건너뜀) 최신 내용 반영
+        # ✅ 폴링(다운로드/DB교체)은 너무 자주 돌면 프로그램이 망가짐
+        # 1.5초 → 7초로 완화 (카톡처럼 보이되 크래시는 줄임)
         self._poll_timer = QtCore.QTimer(self)
-        self._poll_timer.setInterval(1500)  # 1.5초
+        self._poll_timer.setInterval(7000)  # 7초
         self._poll_timer.timeout.connect(self._silent_poll_refresh)
         self._poll_timer.start()
 
@@ -343,21 +347,26 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
         self.lbl_sync.setText("동기화 중…")
 
         def _job():
-            # DB 파일 교체(download_latest_db)는 파일 잠금이 치명적이므로
-            # 반드시 연결을 끊고 교체 후 재연결
+            # download_latest_db는 "DB 파일 교체"를 수행할 수 있어 파일 잠금이 민감하다.
+            # 여기서는:
+            # - DB 연결을 잠깐 끊고
+            # - 다운로드/교체 시도
+            # - 실패(잠김 등)면 그냥 False로 종료(팝업 X)
             try:
                 try:
-                    self.db.close_connection()
+                    if self.db:
+                        self.db.close_connection()
                 except Exception:
                     pass
 
                 ok, _msg = sync_manager.download_latest_db()
-                return ok
+                return bool(ok)
+
             finally:
                 try:
-                    self.db.reconnect()
+                    if self.db:
+                        self.db.reconnect()
                 except Exception:
-                    # reconnect 실패는 다음 액션에서 터질 수 있으므로 False로 반환
                     return False
 
         self._poll_thread = QtCore.QThread(self)
@@ -366,16 +375,14 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
 
         def _on_done(ok: bool, err: str):
             self._sync_in_progress = False
-
             if ok:
-                # 조용히 최신 반영
                 self.lbl_sync.setText("")
                 try:
                     self.refresh_timeline()
                 except Exception:
                     pass
             else:
-                # 팝업 대신 상태만 표시(타이핑 UX 유지)
+                # 팝업 대신 상태만 표시
                 self.lbl_sync.setText("동기화 실패(대기)…")
 
         self._poll_thread.started.connect(self._poll_worker.run)
