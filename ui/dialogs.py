@@ -319,28 +319,37 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
         if not msg:
             return
 
-        try:
-            # 1) 로컬 DB에 메시지 저장(이 함수 내부에서 _save_and_sync 트리거하도록 db.py가 설계돼 있음)
-            #    -> "근로자도" 동일하게 저장해야 함
-            self.db.add_dispute_message(
-                self.dispute_id,
-                self.user_id,
-                self.my_role,
-                msg,
-                self.current_status
-            )
+        # 1) 전송 누르면 즉시 입력창 비움 (카톡 느낌)
+        self.le_input.clear()
+        self.btn_send.setEnabled(False)
 
-            # 2) 입력창 비우고 UI 갱신
-            self.le_input.clear()
+        try:
+            # 2) 먼저 로컬 DB에 저장 (즉시 화면 반영의 핵심)
+            if self.my_role == "owner":
+                new_status = self.cb_status.currentData()
+                self.db.resolve_dispute(self.dispute_id, self.user_id, new_status, msg)
+                self.current_status = new_status
+            else:
+                self.db.add_dispute_message(
+                    self.dispute_id,
+                    sender_user_id=self.user_id,
+                    sender_role="worker",
+                    message=msg
+                )
+
+            # 3) 즉시 화면 갱신 + 하단 고정
             self.refresh_timeline()
 
-            # 3) 카톡처럼: 입력 후 즉시 “조용히 업로드” 한번 더 보장 (환경/버전 섞여도 안전)
-            #    - add_dispute_message가 이미 업로드 트리거해도, 이건 중복 업로드 방지 로직이 있어 문제 없음 :contentReference[oaicite:4]{index=4}
+            # 4) 서버 업로드는 백그라운드(비동기)
             self._silent_upload("dispute_message")
 
         except Exception as e:
-            logging.exception("send_message failed")
-            QtWidgets.QMessageBox.warning(self, "오류", f"메시지 전송 실패: {e}")
+            QtWidgets.QMessageBox.critical(self, "오류", f"전송 실패: {e}")
+            # 실패하면 입력 복구
+            self.le_input.setText(msg)
+
+        finally:
+            self.btn_send.setEnabled(True)
 
     def _silent_poll_refresh(self):
         """
@@ -411,6 +420,8 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
             try:
                 if ok:
                     self.refresh_timeline()
+                    self._scroll_to_bottom()
+
                 # 실패 시에도 팝업 띄우지 않고 조용히 종료
             finally:
                 try:
@@ -610,24 +621,16 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
 
     def refresh_timeline(self):
         """
-        이의제기 대화 타임라인 렌더링 (Qt RichText 호환)
-        - flex 사용 X (Qt에서 깨짐)
-        - table + align + span(inline-block)로 "글자 길이만큼" 둥근 말풍선 구현
+        이의제기 대화 타임라인 렌더링 (로컬 DB 기반)
+        - IMPORTANT: 여기서 클라우드 동기화(다운로드/병합) 절대 하지 않음
+          => UI 즉시 반응/전송 즉시 표시 보장
         """
-        # 0) 먼저 클라우드에서 수신 merge (실패해도 로컬 렌더 계속)
-        try:
-            if self.db and self.dispute_id:
-                self.db.sync_dispute_thread_from_cloud(self.dispute_id)
-        except Exception:
-            pass
-
-        # 1) 타임라인 로드
+        # 1) 타임라인 로드 (로컬)
         try:
             events = self.db.get_dispute_timeline(self.dispute_id) or []
         except Exception:
             return
 
-        # 2) 유틸
         def esc(s: str) -> str:
             if s is None:
                 return ""
@@ -650,7 +653,6 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
                 return ts[11:16]
             return ts
 
-        # 3) Qt RichText는 CSS 지원이 제한적이라 table 기반으로 구성
         BG = "#B2C7D9"
         MY = "#FEE500"
         OTHER = "#FFFFFF"
@@ -696,9 +698,6 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
             bubble_bg = MY if is_me else OTHER
             align = "right" if is_me else "left"
 
-            # ✅ 핵심: span(inline-block) + max-width 로 "글자 길이만큼"만 배경이 칠해짐
-            # Qt에서 div 배경은 줄 전체로 늘어날 수 있으니 bubble은 반드시 span 사용
-            # 기존 span 말풍선을 아래로 교체 (Qt에서 확실히 먹는 방식: table + cellpadding)
             html += f"""
             <table width="100%" cellspacing="0" cellpadding="0" style="margin:6px 0;">
               <tr>
@@ -708,10 +707,9 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
                       {esc(name_disp)}
                     </div>
 
-                    <!-- ✅ 말풍선: CSS padding 대신 'cellpadding'으로 크기 조절 -->
                     <table cellspacing="0" cellpadding="8" style="display:inline-table; max-width:72%;">
                       <tr>
-                        <td bgcolor="{bubble_bg}" style="border-radius:16px;">
+                        <td bgcolor="{bubble_bg}">
                           <span style="font-size:13px; line-height:1.45;">
                             {esc(msg)}
                           </span>
@@ -734,13 +732,22 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
         """
 
         self.browser.setHtml(html)
+        self._scroll_to_bottom()
 
-        # 스크롤 맨 아래
-        try:
-            sb = self.browser.verticalScrollBar()
-            sb.setValue(sb.maximum())
-        except Exception:
-            pass
+    def _scroll_to_bottom(self):
+        """
+        QTextBrowser는 setHtml 직후 스크롤바 최대값이 늦게 반영되는 경우가 많아
+        QTimer.singleShot(0)로 한 템포 늦춰 하단 고정한다.
+        """
+
+        def _do():
+            try:
+                sb = self.browser.verticalScrollBar()
+                sb.setValue(sb.maximum())
+            except Exception:
+                pass
+
+        QtCore.QTimer.singleShot(0, _do)
 
 
 # timeclock/ui/dialogs.py 파일 맨 아래에 추가하세요.
