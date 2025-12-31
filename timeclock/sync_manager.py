@@ -159,9 +159,6 @@ def _parse_gdrive_modified_date(modified_date_str: str) -> int:
     except Exception:
         return 0
 
-def _iso_to_epoch(modified_date_str: str) -> int:
-    # 레거시/호환용 별칭
-    return _parse_gdrive_modified_date(modified_date_str)
 
 
 def _get_cloud_db_file_and_ts(drive, folder_id: str):
@@ -308,12 +305,36 @@ def download_latest_db_snapshot():
         logging.error(f"[Sync] snapshot download failed: {e}")
         return None, 0
 
-def _get_latest_db_file_and_ts(drive, folder_id: str):
+def _iso_to_epoch(iso_str: str) -> int:
     """
-    과거 코드/다른 모듈에서 호출하는 이름 호환용.
-    실제 구현은 _get_cloud_db_file_and_ts를 사용.
+    2025-12-31T10:11:12.345Z 같은 ISO 시간을 epoch seconds로 변환.
+    (안전: 파싱 실패 시 0)
     """
-    return _get_cloud_db_file_and_ts(drive, folder_id)
+    try:
+        from datetime import datetime, timezone
+        s = (iso_str or "").strip()
+        if not s:
+            return 0
+        # Z 처리
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return int(dt.timestamp())
+    except Exception:
+        return 0
+
+
+def _get_latest_db_file_and_ts(*args, **kwargs):
+    """
+    구버전 코드 호환용 alias.
+    기존 구현 함수명이 _get_cloud_db_file_and_ts 라면 그걸 호출.
+    """
+    fn = globals().get("_get_cloud_db_file_and_ts")
+    if callable(fn):
+        return fn(*args, **kwargs)
+    raise NameError("_get_cloud_db_file_and_ts is not defined (cannot resolve latest db file)")
 
 
 def download_latest_db(apply_replace: bool = True, temp_path: str = None):
@@ -383,6 +404,12 @@ def download_latest_db(apply_replace: bool = True, temp_path: str = None):
         try:
             # 교체는 원자적으로
             os.replace(temp_path, str(DB_PATH))
+
+            # ✅ [핵심] “내가 이 클라우드 버전을 기반으로 작업한다” 마커 저장
+            # 업로드 차단 루프를 끊기 위해 반드시 필요
+            if remote_ts and remote_ts > 0:
+                _save_last_sync_ts(remote_ts)
+
         except Exception as e:
             # 교체 실패 시 temp 보관
             try:
@@ -395,6 +422,7 @@ def download_latest_db(apply_replace: bool = True, temp_path: str = None):
                 return False, f"로컬 DB 교체 실패: {e}"
 
         return True, "클라우드 최신 DB 다운로드 완료"
+
 
     except Exception as e:
         return False, str(e)

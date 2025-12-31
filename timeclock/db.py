@@ -769,26 +769,38 @@ class DB:
         now = now_str()
         resolution_comment = (resolution_comment or "").strip()
 
-        # disputes 테이블 컬럼 확인(스키마 불일치 대응)
+        # disputes 테이블 컬럼 확인 (스키마 불일치 안전 처리)
         dcols = {r[1] for r in self.conn.execute("PRAGMA table_info(disputes)").fetchall()}
+        has_resolved_at = ("resolved_at" in dcols)
+        has_resolved_by = ("resolved_by" in dcols)
+        has_decided_at = ("decided_at" in dcols)
+        has_decided_by = ("decided_by" in dcols)
+        has_decision_comment = ("decision_comment" in dcols)
 
-        # 어떤 DB는 decided_*만 있고, 어떤 DB는 resolved_*가 있을 수 있으니 둘 다 지원
-        time_col = "resolved_at" if "resolved_at" in dcols else ("decided_at" if "decided_at" in dcols else None)
-        by_col = "resolved_by" if "resolved_by" in dcols else ("decided_by" if "decided_by" in dcols else None)
-
+        # 1) 상태 업데이트 (가능한 컬럼만)
         sets = ["status=?"]
         params = [new_status]
 
-        if time_col:
-            sets.append(f"{time_col}=?")
+        if has_resolved_at:
+            sets.append("resolved_at=?")
             params.append(now)
-        if by_col:
-            sets.append(f"{by_col}=?")
+        elif has_decided_at:
+            sets.append("decided_at=?")
+            params.append(now)
+
+        if has_resolved_by:
+            sets.append("resolved_by=?")
             params.append(int(owner_id))
+        elif has_decided_by:
+            sets.append("decided_by=?")
+            params.append(int(owner_id))
+
+        if has_decision_comment and resolution_comment:
+            sets.append("decision_comment=?")
+            params.append(resolution_comment)
 
         sql = "UPDATE disputes SET " + ", ".join(sets) + " WHERE id=?"
         params.append(int(dispute_id))
-
         self.conn.execute(sql, tuple(params))
 
         # 2) 메시지가 있다면 추가(이 안에서 _save_and_sync 호출됨)

@@ -156,7 +156,7 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
         # ✅ 폴링(다운로드/DB교체)은 너무 자주 돌면 프로그램이 망가짐
         # 1.5초 → 7초로 완화 (카톡처럼 보이되 크래시는 줄임)
         self._poll_timer = QtCore.QTimer(self)
-        self._poll_timer.setInterval(2000)  # 7초
+        self._poll_timer.setInterval(2000)  # ✅ 2초
         self._poll_timer.timeout.connect(self._silent_poll_refresh)
         self._poll_timer.start()
 
@@ -277,76 +277,97 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
 
     def _run_silent(self, work_fn, done_fn):
         """
-        dialogs.py 전용 '조용한' 백그라운드 실행기.
-        - PyInstaller에서도 안정적으로 동작하도록 import 의존성을 제거한다.
-        - work_fn() 결과를 받아서 UI 스레드에서 done_fn(result) 호출.
+        dialogs.py 내부 전용: 조용히(로딩창 없이) 백그라운드 작업 실행
+        - PyInstaller 환경에서도 깨지지 않도록 외부 SilentWorker 의존 제거
+        - Qt 이벤트 루프를 통해 done_fn은 항상 메인스레드에서 호출
         """
-        import threading
+        thread = QtCore.QThread(self)
 
-        def _t():
+        worker = _SilentWorker(lambda: work_fn(), parent=None)
+        worker.moveToThread(thread)
+
+        def _finish(ok: bool, err: str):
+            try:
+                # work_fn이 (ok, err) 튜플을 반환하는 형태도 있으니 그대로 전달
+                # _SilentWorker는 bool(fn())만 보는데, 여기서는 work_fn을 래핑해서 예외만 잡는다.
+                pass
+            finally:
+                thread.quit()
+                thread.wait(1500)
+                worker.deleteLater()
+                thread.deleteLater()
+
+        def _on_started():
+            # work_fn 결과를 그대로 done_fn으로 전달
             try:
                 res = work_fn()
             except Exception as e:
                 res = (False, str(e))
+            QtCore.QTimer.singleShot(0, lambda: done_fn(res))
+            _finish(True, "")
 
-            # UI thread로 콜백 전달
-            QtCore.QTimer.singleShot(0, lambda r=res: done_fn(r))
+        thread.started.connect(_on_started)
+        thread.start()
 
-        threading.Thread(target=_t, daemon=True).start()
+        # GC 방지
+        if not hasattr(self, "_silent_threads"):
+            self._silent_threads = []
+        self._silent_threads.append(thread)
 
     def send_message(self):
         msg = self.le_input.text().strip()
         if not msg:
             return
 
-        # 카톡 느낌: 전송 누르면 입력창 즉시 비우고, UI는 즉시 갱신
-        self.le_input.clear()
-        self.btn_send.setEnabled(False)
-
         try:
-            if self.my_role == "owner":
-                new_status = self.cb_status.currentData()
-                self.db.resolve_dispute(self.dispute_id, self.user_id, new_status, msg)
-                self.current_status = new_status
-            else:
-                self.db.add_dispute_message(
-                    self.dispute_id,
-                    sender_user_id=self.user_id,
-                    sender_role="worker",
-                    message=msg
-                )
+            # 1) 로컬 DB에 메시지 저장(이 함수 내부에서 _save_and_sync 트리거하도록 db.py가 설계돼 있음)
+            #    -> "근로자도" 동일하게 저장해야 함
+            self.db.add_dispute_message(
+                self.dispute_id,
+                self.user_id,
+                self.my_role,
+                msg,
+                self.current_status
+            )
 
-            # 로컬은 즉시 표시
+            # 2) 입력창 비우고 UI 갱신
+            self.le_input.clear()
             self.refresh_timeline()
 
-        except Exception as e:
-            QtWidgets.QMessageBox.critical(self, "오류", f"전송 실패: {e}")
-            # 실패해도 입력은 날아갔으니 복구해줌(사용자 경험)
-            self.le_input.setText(msg)
+            # 3) 카톡처럼: 입력 후 즉시 “조용히 업로드” 한번 더 보장 (환경/버전 섞여도 안전)
+            #    - add_dispute_message가 이미 업로드 트리거해도, 이건 중복 업로드 방지 로직이 있어 문제 없음 :contentReference[oaicite:4]{index=4}
+            self._silent_upload("dispute_message")
 
-        finally:
-            self.btn_send.setEnabled(True)
+        except Exception as e:
+            logging.exception("send_message failed")
+            QtWidgets.QMessageBox.warning(self, "오류", f"메시지 전송 실패: {e}")
 
     def _silent_poll_refresh(self):
         """
-        카톡처럼(대화방 열려있는 동안만):
-        - 2초마다 실행
-        - 입력 중이면 절대 방해하지 않음
-        - 로컬 DB 파일 교체 금지 (크래시/잠김 방지)
-        - 원격 DB는 '임시 파일'로만 받아서 dispute_messages만 병합 후 화면 갱신
+        2초마다 조용히 동기화(팝업 없이):
+        - 원격 최신 DB를 temp로 다운로드
+        - temp DB에서 dispute_messages를 로컬로 병합
+        - 성공 시 refresh_timeline()
         """
-        # 1) 입력 중이면 건너뜀
-        if self.le_input.hasFocus() or (self.le_input.text().strip() != ""):
-            return
+        # 1) 사용자가 입력 중이면 방해하지 않음
+        try:
+            if self.le_input.hasFocus() or (self.le_input.text().strip() != ""):
+                return
+        except Exception:
+            pass
 
         # 2) 동기화 중이면 중복 실행 방지
         if getattr(self, "_sync_in_progress", False):
             return
 
         self._sync_in_progress = True
-        self.lbl_sync.setText("동기화 중…")
+        try:
+            self.lbl_sync.setText("동기화 중…")
+        except Exception:
+            pass
 
-        import timeclock.sync_manager as sync_manager
+        # ✅ 여기서 import sync_manager 하지 말 것 (PyInstaller에서 모듈 경로 깨짐)
+        # 파일 상단: from timeclock import sync_manager 를 사용한다.
 
         def _job():
             """
@@ -388,15 +409,17 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
 
         def _on_done(ok: bool, msg: str):
             try:
-                # 화면 갱신
                 if ok:
                     self.refresh_timeline()
-                    self.lbl_sync.setText("")  # 조용히
-                else:
-                    # 실패해도 시끄럽게 팝업 띄우지 말고 조용히 표시만
-                    self.lbl_sync.setText("")
+                # 실패 시에도 팝업 띄우지 않고 조용히 종료
             finally:
+                try:
+                    self.lbl_sync.setText("")
+                except Exception:
+                    pass
+
                 self._sync_in_progress = False
+
                 try:
                     self._poll_thread.quit()
                     self._poll_thread.wait(1000)
@@ -583,14 +606,6 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
                 self._poll_timer.stop()
         except Exception:
             pass
-
-        try:
-            if hasattr(self, "_poll_thread") and self._poll_thread and self._poll_thread.isRunning():
-                self._poll_thread.quit()
-                self._poll_thread.wait(500)
-        except Exception:
-            pass
-
         super().closeEvent(event)
 
     def refresh_timeline(self):
