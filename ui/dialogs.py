@@ -1,7 +1,7 @@
 # timeclock/ui/dialogs.py
 # -*- coding: utf-8 -*-
 from PyQt5 import QtWidgets, QtCore
-
+import sqlite3
 
 from timeclock.utils import Message
 from timeclock import sync_manager
@@ -68,6 +68,9 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
         self.setWindowTitle("이의 제기 대화방")
         self.resize(550, 800)
 
+        # ✅ 전송 중 재클릭 방지 플래그
+        self._sending = False
+
         # ---------------- 레이아웃 구성 ----------------
         layout = QtWidgets.QVBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
@@ -115,6 +118,7 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
                 border-radius: 4px; padding: 0 15px; font-weight: bold; height: 35px;
             }
             QPushButton:hover { background-color: #e5d817; }
+            QPushButton:disabled { background-color: #e9e9e9; color: #999; }
         """)
         self.btn_send.clicked.connect(self.send_message)
         input_layout.addWidget(self.btn_send)
@@ -122,7 +126,14 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
         layout.addWidget(input_container)
         self.setLayout(layout)
 
+        # ✅ 최초 표시
         self.refresh_timeline()
+
+        # ✅ 폴링(준-실시간): 2초마다 최신 DB를 받아서 화면 갱신
+        self._poll_timer = QtCore.QTimer(self)
+        self._poll_timer.setInterval(2000)
+        self._poll_timer.timeout.connect(self._poll_refresh)
+        self._poll_timer.start()
 
     def _load_data(self):
         if not self.db or not self.dispute_id: return
@@ -187,63 +198,182 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
         if not msg:
             return
 
-        # [0] DB 연결 보장 (동기화 버튼/자동동기화로 conn이 None이 될 수 있음)
-        try:
-            if hasattr(self.db, "ensure_connection"):
-                self.db.ensure_connection()
-            elif getattr(self.db, "conn", None) is None:
-                self.db.reconnect()
-        except Exception as e:
-            QtWidgets.QMessageBox.critical(self, "오류", f"DB 재연결 실패: {e}")
+        if self._sending:
             return
 
-        # [1] 먼저 내 컴퓨터(DB)에 저장
-        try:
-            if self.my_role == "owner":
-                new_status = self.cb_status.currentData()
-                self.db.resolve_dispute(self.dispute_id, self.user_id, new_status, msg)
-                self.current_status = new_status
-            else:
-                self.db.add_dispute_message(
-                    self.dispute_id,
-                    sender_user_id=self.user_id,
-                    sender_role="worker",
-                    message=msg
-                )
-                # add_dispute_message가 commit 하므로 여기서 추가 commit은 필수는 아님
-        except Exception as e:
-            QtWidgets.QMessageBox.critical(self, "오류", f"저장 실패: {e}")
+        if not self.dispute_id or not self.user_id:
+            QtWidgets.QMessageBox.warning(self, "오류", "이의제기 정보가 올바르지 않습니다.")
             return
 
-        # [2] 업로드 직전에 DB 연결 끊기 (파일 잠금 방지)
-        self.db.close_connection()
+        # ✅ 전송 중 잠금 (중복 클릭/엔터 방지)
+        self._sending = True
+        self.btn_send.setDisabled(True)
+        self.le_input.setDisabled(True)
+        if self.cb_status:
+            self.cb_status.setDisabled(True)
 
+        # owner면 상태코드도 같이 반영
+        new_status = None
+        if self.my_role == "owner" and self.cb_status:
+            new_status = self.cb_status.currentData()
+
+        # ✅ 스레드에서: 다운로드 → (sqlite로) 메시지/상태 반영 → 업로드
+        #    이렇게 하면 self.db.conn(None) 상태로 execute 하는 사고가 원천 차단된다.
         def job_fn(progress_callback):
-            progress_callback({"msg": "☁️ 메시지 전송 중..."})
-            ok = sync_manager.upload_current_db()
-            return ok, "전송 완료"
+            progress_callback({"msg": "☁️ 최신 DB 확인 중..."})
+
+            # 1) 최신 DB 다운로드(없으면 로컬 유지)
+            ok_dl, dl_msg = sync_manager.download_latest_db()
+            if not ok_dl and str(dl_msg) != "클라우드 DB 없음":
+                # 다운로드 자체가 실패(권한/잠금 등)면 여기서 중단
+                return False, f"다운로드 실패: {dl_msg}"
+
+            progress_callback({"msg": "💾 메시지 저장 중..."})
+
+            # 2) 로컬 DB 파일에 직접 반영 (스레드 내 독립 커넥션)
+            conn = sqlite3.connect(str(sync_manager.DB_PATH))
+            conn.row_factory = sqlite3.Row
+            try:
+                cur = conn.cursor()
+
+                if self.my_role == "owner":
+                    # disputes 상태 업데이트 + 메시지 저장
+                    # (테이블/컬럼명이 다르면 여기서 실패하므로 즉시 에러로 반환됨)
+                    if new_status:
+                        cur.execute(
+                            "UPDATE disputes SET status=? WHERE id=?",
+                            (new_status, self.dispute_id)
+                        )
+
+                    cur.execute(
+                        """
+                        INSERT INTO dispute_messages(dispute_id, sender_user_id, sender_role, message, created_at)
+                        VALUES(?, ?, ?, ?, datetime('now','localtime'))
+                        """,
+                        (self.dispute_id, self.user_id, "owner", msg)
+                    )
+                else:
+                    cur.execute(
+                        """
+                        INSERT INTO dispute_messages(dispute_id, sender_user_id, sender_role, message, created_at)
+                        VALUES(?, ?, ?, ?, datetime('now','localtime'))
+                        """,
+                        (self.dispute_id, self.user_id, "worker", msg)
+                    )
+
+                conn.commit()
+            finally:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+
+            progress_callback({"msg": "🚀 서버로 전송 중..."})
+
+            # 3) 업로드
+            ok_up = sync_manager.upload_current_db()
+            if not ok_up:
+                return False, "업로드 실패(충돌 방지/동기화 필요). 먼저 새로고침으로 최신 DB를 받아오세요."
+
+            return True, "전송 완료"
 
         def on_done(ok, res, err):
-            # 업로드 후 반드시 재연결
+            # UI 잠금 해제
+            self._sending = False
+            self.btn_send.setDisabled(False)
+            self.le_input.setDisabled(False)
+            if self.cb_status:
+                self.cb_status.setDisabled(False)
+
+            # 메인 스레드 DB 재연결/갱신
             try:
-                self.db.reconnect()
-            except Exception as e:
-                QtWidgets.QMessageBox.critical(self, "오류", f"DB 재연결 실패: {e}")
-                return
+                if self.db:
+                    self.db.reconnect()
+            except Exception:
+                pass
 
             if ok:
+                if self.my_role == "owner" and new_status:
+                    self.current_status = new_status
                 self.le_input.clear()
-                self.refresh_timeline()
+                try:
+                    self._load_data()
+                    self.refresh_timeline()
+                except Exception:
+                    pass
             else:
-                QtWidgets.QMessageBox.warning(self, "전송 실패", f"서버 전송 실패: {err}")
-                self.refresh_timeline()
+                QtWidgets.QMessageBox.warning(self, "전송 실패", f"{err}")
+                try:
+                    self._load_data()
+                    self.refresh_timeline()
+                except Exception:
+                    pass
+
+        # 실행
+        if self.db:
+            try:
+                self.db.close_connection()
+            except Exception:
+                pass
 
         run_job_with_progress_async(
             self,
-            "전송 중.",
+            "전송 중...",
             job_fn,
             on_done=on_done
         )
+
+    def _poll_refresh(self):
+        """
+        준-실시간 갱신:
+        - DB 연결을 잠깐 끊고
+        - 클라우드 최신 DB를 다운로드(있으면)
+        - 다시 연결 후 타임라인 갱신
+        """
+        if self._sending:
+            return
+
+        if not self.db:
+            return
+
+        # 다운로드가 실패해도(클라우드 DB 없음 등) 화면은 로컬 기준으로 유지
+        try:
+            self.db.close_connection()
+        except Exception:
+            pass
+
+        def job_fn(progress_callback):
+            # 폴링은 조용히 처리(메시지 최소)
+            ok, msg = sync_manager.download_latest_db()
+            return ok, msg
+
+        def on_done(ok_thread, result_data, err):
+            try:
+                self.db.reconnect()
+            except Exception:
+                return
+
+            # 최신 DB 반영 후 화면 갱신
+            try:
+                self._load_data()
+                self.refresh_timeline()
+            except Exception:
+                pass
+
+        run_job_with_progress_async(
+            self,
+            "동기화 중...",
+            job_fn,
+            on_done=on_done
+        )
+
+    def closeEvent(self, event):
+        try:
+            if hasattr(self, "_poll_timer") and self._poll_timer:
+                self._poll_timer.stop()
+        except Exception:
+            pass
+        super().closeEvent(event)
 
     def refresh_timeline(self):
         # DB 연결 보장

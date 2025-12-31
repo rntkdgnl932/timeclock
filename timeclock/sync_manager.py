@@ -181,6 +181,11 @@ def cloud_changed_since_last_sync() -> bool:
     """
     '마지막으로 내가 받아온 클라우드 버전' 이후에 클라우드가 바뀌었는지 검사.
     True면 업로드 금지(덮어쓰기 위험).
+
+    [수정]
+    - last_cloud_sync_ts.txt(마커)가 없더라도,
+      클라우드에 DB가 "아예 없는 경우(remote_ts==0)"에는 업로드를 허용한다.
+    - 클라우드 DB가 존재하는데 마커가 없으면(동기화 이력 불명) -> 안전을 위해 업로드 금지.
     """
     if not HAS_GOOGLE_DRIVE:
         return False
@@ -194,8 +199,13 @@ def cloud_changed_since_last_sync() -> bool:
         _, remote_ts = _get_cloud_db_file_and_ts(drive, folder_id)
 
         last_ts = _load_last_sync_ts()
+
+        # ✅ 클라우드에 DB가 아예 없으면: 초기 업로드 허용
+        if remote_ts <= 0:
+            return False
+
+        # ✅ 클라우드 DB는 있는데 마커가 없으면: 덮어쓰기 위험 -> 업로드 금지
         if last_ts <= 0:
-            # 마커가 없으면 "동기화 이력 불명" -> 안전하게 변경된 것으로 간주
             return True
 
         return remote_ts > last_ts
