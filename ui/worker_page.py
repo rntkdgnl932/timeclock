@@ -411,10 +411,10 @@ class WorkerPage(QtWidgets.QWidget):
                         finally:
                             self.db.reconnect()
 
-                        # 신규 dispute 생성
+                        # ✅ [수정] worker_id를 user_id로 변경 (DB.create_dispute 인자명 일치)
                         dispute_id_local = self.db.create_dispute(
                             work_log_id=work_log_id,
-                            worker_id=self.session.user_id,
+                            user_id=self.session.user_id,
                             dispute_type=dispute_type,
                             comment=initial_msg
                         )
