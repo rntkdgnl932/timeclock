@@ -8,7 +8,7 @@ import datetime
 import csv
 import threading
 import logging
-
+import time
 from timeclock import backup_manager
 from timeclock import sync_manager
 from timeclock.auth import pbkdf2_hash_password, pbkdf2_verify_password

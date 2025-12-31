@@ -277,47 +277,22 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
 
     def _run_silent(self, work_fn, done_fn):
         """
-        dialogs.py 내부에서 쓰는 '조용한' 백그라운드 실행기.
-        - 진행창/팝업 없이 실행
-        - 완료 시 done_fn(ok: bool, result: Any, err: str|None) 호출
-        - 패키지 import 꼬임(SilentWorker) 방지: dialogs.py의 _SilentWorker를 사용
+        dialogs.py 전용 '조용한' 백그라운드 실행기.
+        - PyInstaller에서도 안정적으로 동작하도록 import 의존성을 제거한다.
+        - work_fn() 결과를 받아서 UI 스레드에서 done_fn(result) 호출.
         """
-        # QThread 기반 (UI 안전)
-        th = QtCore.QThread(self)
-        worker = _SilentWorker(work_fn)
-        worker.moveToThread(th)
+        import threading
 
-        def _finish(ok: bool, err: str):
-            # 스레드/워커 정리
+        def _t():
             try:
-                th.quit()
-            except Exception:
-                pass
-            try:
-                th.wait(1000)
-            except Exception:
-                pass
-            try:
-                worker.deleteLater()
-            except Exception:
-                pass
-            try:
-                th.deleteLater()
-            except Exception:
-                pass
+                res = work_fn()
+            except Exception as e:
+                res = (False, str(e))
 
-            # done_fn 호출 형태 통일: done_fn(ok, result, err)
-            try:
-                if ok:
-                    QtCore.QTimer.singleShot(0, lambda: done_fn(True, True, None))
-                else:
-                    QtCore.QTimer.singleShot(0, lambda: done_fn(False, None, err or "unknown error"))
-            except Exception:
-                pass
+            # UI thread로 콜백 전달
+            QtCore.QTimer.singleShot(0, lambda r=res: done_fn(r))
 
-        worker.finished.connect(_finish)
-        th.started.connect(worker.run)
-        th.start()
+        threading.Thread(target=_t, daemon=True).start()
 
     def send_message(self):
         msg = self.le_input.text().strip()

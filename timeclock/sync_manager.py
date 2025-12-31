@@ -159,31 +159,41 @@ def _parse_gdrive_modified_date(modified_date_str: str) -> int:
     except Exception:
         return 0
 
+def _iso_to_epoch(modified_date_str: str) -> int:
+    # 레거시/호환용 별칭
+    return _parse_gdrive_modified_date(modified_date_str)
+
 
 def _get_cloud_db_file_and_ts(drive, folder_id: str):
     """
     클라우드의 timeclock.db 파일(최신 1개)과 modifiedDate(epoch seconds) 반환.
-    중복 파일은 Trash 처리.
+    중복 파일이 있으면 오래된 것들은 Trash 처리.
+    반환: (gfile, remote_ts_epoch) 또는 (None, 0)
     """
-    query = f"'{folder_id}' in parents and title = '{GDRIVE_DB_FILENAME}' and trashed = false"
-    file_list = drive.ListFile({'q': query}).GetList()
+    try:
+        query = f"'{folder_id}' in parents and title = '{GDRIVE_DB_FILENAME}' and trashed = false"
+        file_list = drive.ListFile({'q': query}).GetList()
 
-    if not file_list:
+        if not file_list:
+            return None, 0
+
+        # 최신 modifiedDate 우선
+        file_list.sort(key=lambda x: x.get('modifiedDate', ''), reverse=True)
+        gfile = file_list[0]
+
+        # 중복 정리(최신 1개만 남김)
+        if len(file_list) > 1:
+            for old_f in file_list[1:]:
+                try:
+                    old_f.Trash()
+                except Exception:
+                    pass
+
+        remote_ts = _iso_to_epoch(gfile.get("modifiedDate"))
+        return gfile, remote_ts
+    except Exception:
         return None, 0
 
-    file_list.sort(key=lambda x: x.get('modifiedDate', ''), reverse=True)
-    gfile = file_list[0]
-
-    # 중복 정리
-    if len(file_list) > 1:
-        for old_f in file_list[1:]:
-            try:
-                old_f.Trash()
-            except Exception:
-                pass
-
-    remote_ts = _parse_gdrive_modified_date(gfile.get('modifiedDate', ''))
-    return gfile, remote_ts
 
 def _find_file_in_folder(drive, folder_id: str, filename: str):
     """
@@ -298,6 +308,12 @@ def download_latest_db_snapshot():
         logging.error(f"[Sync] snapshot download failed: {e}")
         return None, 0
 
+def _get_latest_db_file_and_ts(drive, folder_id: str):
+    """
+    과거 코드/다른 모듈에서 호출하는 이름 호환용.
+    실제 구현은 _get_cloud_db_file_and_ts를 사용.
+    """
+    return _get_cloud_db_file_and_ts(drive, folder_id)
 
 
 def download_latest_db(apply_replace: bool = True, temp_path: str = None):
