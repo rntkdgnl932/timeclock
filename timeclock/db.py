@@ -1020,10 +1020,15 @@ class DB:
 
     def reconnect(self):
         """DB 다시 연결 (파일 덮어쓴 후 필수)"""
+        try:
+            from timeclock import sync_manager
+            sync_manager.apply_pending_db_if_exists()
+        except Exception:
+            pass
+
         self.conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
 
-        # 재연결 후에도 초기 연결과 동일한 PRAGMA 유지
         try:
             self.conn.execute("PRAGMA foreign_keys = ON;")
             self.conn.execute("PRAGMA journal_mode = WAL;")

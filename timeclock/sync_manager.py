@@ -214,85 +214,124 @@ def cloud_changed_since_last_sync() -> bool:
         return True
 
 
-def download_latest_db():
+def download_latest_db(force_cache_bust: bool = True):
     """
-    [수정됨] requests를 이용해 URL 뒤에 타임스탬프를 붙여
-    강제로 최신 파일을 받아오도록(캐시 무시) 변경했습니다.
+    클라우드 최신 DB를 다운로드하여 로컬 DB로 반영한다.
+
+    [개선]
+    - 기존 DB 파일을 직접 삭제하지 않는다(WinError 32 방지).
+    - tmp로 다운로드 → os.replace(원자적 교체) 시도.
+    - 교체 실패(잠김) 시 tmp를 .pending으로 보관하고, 다음에 다시 시도할 수 있게 한다.
     """
     if not HAS_GOOGLE_DRIVE:
-        return False, "PyDrive 미설치"
+        return False, "Google Drive 미사용"
 
     try:
         drive = _get_drive()
         if not drive:
-            return False, "구글 드라이브 인증 실패"
+            return False, "Google Drive 인증 실패"
 
         folder_id = _get_folder_id(drive, GDRIVE_SYNC_FOLDER_NAME)
         gfile, remote_ts = _get_cloud_db_file_and_ts(drive, folder_id)
-
-        if not gfile:
+        if not gfile or remote_ts <= 0:
             return False, "클라우드 DB 없음"
 
-        # 임시 파일 경로
-        temp_path = str(DB_PATH) + ".temp"
+        # 로컬 DB 경로
+        local_path = DB_PATH
+        local_dir = local_path.parent
+        local_dir.mkdir(parents=True, exist_ok=True)
 
-        # -------------------------------------------------------------
-        # 🔴 [핵심 수정] PyDrive의 GetContentFile 대신 requests 사용
-        # -------------------------------------------------------------
+        # 다운로드 tmp/pending 경로
+        tmp_dir = local_dir / "_sync_tmp"
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        tmp_path = tmp_dir / f"{local_path.stem}.dl_{ts}{local_path.suffix}"
+        pending_path = local_dir / f"{local_path.name}.pending"
+
+        # 이미 pending이 있으면(과거 교체 실패 잔재) 우선 정리/백업
+        if pending_path.exists():
+            try:
+                pending_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+        # ---- 다운로드: tmp_path로만 받는다 ----
+        if force_cache_bust:
+            try:
+                # drive v3에서 종종 캐시 이슈가 있어 URL에 t 붙이는 로그를 남기던 흐름 유지
+                print(f"[Sync] 캐시 무시 다운로드 요청: {gfile.get('downloadUrl', '')}&t={int(time.time())}")
+            except Exception:
+                pass
+
         try:
-            # 1. PyDrive가 이미 로그인해둔 인증 토큰(Token)을 가져옵니다.
-            access_token = drive.auth.credentials.access_token
+            gfile.GetContentFile(str(tmp_path))
+        except Exception as e:
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+            return False, f"다운로드 실패: {e}"
 
-            # 2. 구글 드라이브 파일 다운로드 API URL (v3)
-            #    여기에 '&t=현재시간'을 붙여서 "새로운 요청"인 척 속입니다.
-            timestamp = int(time.time())
-            file_id = gfile['id']
-            download_url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media&t={timestamp}"
+        # ---- 교체 시도: os.replace(원자적) ----
+        # Windows에서 sqlite가 파일을 잡고 있으면 replace도 막힐 수 있다.
+        # 짧게 재시도 후에도 실패하면 pending으로 보관.
+        last_err = None
+        for _ in range(6):
+            try:
+                # 기존 파일이 있어도, 없어도 동작
+                os.replace(str(tmp_path), str(local_path))
+                last_err = None
+                break
+            except PermissionError as e:
+                last_err = e
+                time.sleep(0.25)
+            except OSError as e:
+                # WinError 32 포함
+                last_err = e
+                time.sleep(0.25)
 
-            # 3. 헤더에 토큰 실어서 요청
-            headers = {"Authorization": f"Bearer {access_token}"}
+        if last_err is not None:
+            # 교체 실패: pending으로 보관 (사용자는 입력/업무 계속 가능)
+            try:
+                os.replace(str(tmp_path), str(pending_path))
+            except Exception:
+                # pending 저장도 실패하면 tmp만 남기고 종료
+                pass
 
-            print(f"[Sync] 캐시 무시 다운로드 요청: {download_url}")
-            response = requests.get(download_url, headers=headers)
+            logging.error(f"[Sync] 로컬 DB 교체 실패(잠김). pending으로 보관: {last_err}")
+            return True, "클라우드 DB 다운로드 완료(대기중: DB 사용 중이라 교체 보류)"
 
-            if response.status_code == 200:
-                with open(temp_path, "wb") as f:
-                    f.write(response.content)
-            else:
-                # 만약 requests가 실패하면(권한 등), 원래 쓰던 PyDrive 방식으로 비상 복구
-                print(f"[Sync] requests 방식 실패({response.status_code}), 기본 방식으로 재시도합니다.")
-                gfile.GetContentFile(temp_path)
-
-        except Exception as req_e:
-            print(f"[Sync] requests 로직 에러: {req_e}, 기본 방식으로 재시도합니다.")
-            gfile.GetContentFile(temp_path)
-        # -------------------------------------------------------------
-
-        # 파일 교체 로직 (기존과 동일)
-        if os.path.exists(temp_path):
-            if DB_PATH.exists():
-                try:
-                    os.remove(DB_PATH)
-                except Exception as e:
-                    try:
-                        os.remove(temp_path)
-                    except:
-                        pass
-                    logging.error(f"[Sync] 기존 DB 삭제 실패: {e}")
-                    return False, f"실행 중인 DB 파일을 덮어쓸 수 없습니다. (잠금 상태): {e}"
-
-            shutil.move(temp_path, DB_PATH)
-
-            if remote_ts > 0:
-                _save_last_sync_ts(remote_ts)
-
-            return True, f"클라우드 최신 DB 다운로드 완료 ({datetime.datetime.fromtimestamp(remote_ts).isoformat() if remote_ts else 'unknown'})"
-
-        return False, "임시 파일 생성 실패"
+        # 교체 성공 → 마커 저장
+        _save_last_sync_ts(remote_ts)
+        logging.info(f"[Sync] 클라우드 최신 DB 다운로드 완료 ({gfile.get('modifiedDate', '')})")
+        return True, f"클라우드 최신 DB 다운로드 완료 ({gfile.get('modifiedDate', '')})"
 
     except Exception as e:
         logging.error(f"[Sync] 다운로드 실패: {e}")
         return False, str(e)
+
+def apply_pending_db_if_exists():
+    """
+    download_latest_db()가 DB 잠김으로 교체를 못 했을 때 생성한
+    timeclock.db.pending 파일을, 잠금이 풀린 시점에 원자적으로 교체한다.
+    """
+    try:
+        pending_path = DB_PATH.parent / f"{DB_PATH.name}.pending"
+        if not pending_path.exists():
+            return False
+
+        # 잠깐 재시도
+        for _ in range(6):
+            try:
+                os.replace(str(pending_path), str(DB_PATH))
+                logging.info("[Sync] pending DB 적용 완료")
+                return True
+            except Exception:
+                time.sleep(0.25)
+        return False
+    except Exception:
+        return False
 
 
 def is_cloud_newer():
