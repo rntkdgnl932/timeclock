@@ -575,18 +575,11 @@ class DB:
         comment = (comment or "").strip()
         now = now_str()
 
-        # disputes 컬럼 호환(구버전/신버전 혼재 대응)
-        d_cols = {r[1] for r in self.conn.execute("PRAGMA table_info(disputes)").fetchall()}
-
-        # 신버전(현 스키마) 컬럼명
-        decided_at_col = "decided_at" if "decided_at" in d_cols else None
-        decided_by_col = "decided_by" if "decided_by" in d_cols else None
-        decision_comment_col = "decision_comment" if "decision_comment" in d_cols else None
-
-        # 구버전 컬럼명(혹시 남아있을 경우)
-        resolved_at_col = "resolved_at" if "resolved_at" in d_cols else None
-        resolved_by_col = "resolved_by" if "resolved_by" in d_cols else None
-        resolution_comment_col = "resolution_comment" if "resolution_comment" in d_cols else None
+        # disputes 테이블 컬럼 확인 (스키마 불일치 안전 처리)
+        dcols = {r[1] for r in self.conn.execute("PRAGMA table_info(disputes)").fetchall()}
+        has_decision = ("decision_comment" in dcols)
+        has_decided_by = ("decided_by" in dcols)
+        has_decided_at = ("decided_at" in dcols)
 
         row = self.conn.execute(
             "SELECT * FROM disputes WHERE work_log_id=? AND user_id=? ORDER BY id DESC LIMIT 1",
@@ -596,95 +589,76 @@ class DB:
         if row:
             dispute_id = int(row["id"])
 
-            # (1) 과거 “결정/처리 코멘트”가 disputes 테이블에만 남아있던 경우,
-            #     dispute_messages 로 한 번만 옮겨심기
+            # 기존 disputes 행에 남아있는 "사업주 답변"이 있다면 dispute_messages로 보강(레거시 데이터 보정)
             old_owner_comment = ""
-
-            if decision_comment_col:
-                old_owner_comment = (
-                    (row[decision_comment_col] or "") if decision_comment_col in row.keys() else "").strip()
-            if not old_owner_comment and resolution_comment_col:
-                old_owner_comment = (
-                    (row[resolution_comment_col] or "") if resolution_comment_col in row.keys() else "").strip()
-
-            old_owner_id = None
-            if decided_by_col:
-                old_owner_id = row[decided_by_col] if decided_by_col in row.keys() else None
-            if old_owner_id is None and resolved_by_col:
-                old_owner_id = row[resolved_by_col] if resolved_by_col in row.keys() else None
-
-            old_status = row["status"] if "status" in row.keys() else None
+            old_owner_by = None
             old_owner_at = None
-            if decided_at_col:
-                old_owner_at = row[decided_at_col] if decided_at_col in row.keys() else None
-            if old_owner_at is None and resolved_at_col:
-                old_owner_at = row[resolved_at_col] if resolved_at_col in row.keys() else None
+
+            if has_decision:
+                old_owner_comment = (row["decision_comment"] or "").strip()
+            else:
+                # 과거 DB에서 resolution_comment가 있을 수 있으므로 안전 접근
+                try:
+                    old_owner_comment = (row["resolution_comment"] or "").strip()
+                except Exception:
+                    old_owner_comment = ""
+
+            if has_decided_by:
+                old_owner_by = row["decided_by"]
+            else:
+                try:
+                    old_owner_by = row["resolved_by"]
+                except Exception:
+                    old_owner_by = None
+
+            if has_decided_at:
+                old_owner_at = row["decided_at"]
+            else:
+                try:
+                    old_owner_at = row["resolved_at"]
+                except Exception:
+                    old_owner_at = None
 
             if old_owner_comment:
                 exists = self.conn.execute(
                     "SELECT 1 FROM dispute_messages WHERE dispute_id=? AND message=? AND sender_role='owner'",
-                    (dispute_id, old_owner_comment),
+                    (dispute_id, old_owner_comment)
                 ).fetchone()
                 if not exists:
-                    # add_dispute_message가 created_at을 now_str()로 박으므로,
-                    # 과거 시각(old_owner_at)을 완벽히 재현하진 않지만 최소한 기록은 남긴다.
-                    # (원하면 add_dispute_message에 created_at 인자를 추가하는 확장도 가능)
-                    self.add_dispute_message(dispute_id, old_owner_id, "owner", old_owner_comment, old_status)
+                    # status_code는 당시 disputes.status를 넣어둠
+                    self.conn.execute(
+                        "INSERT INTO dispute_messages(dispute_id, sender_user_id, sender_role, message, status_code, created_at) "
+                        "VALUES(?,?,?,?,?,?)",
+                        (dispute_id, old_owner_by, "owner", old_owner_comment, row["status"], old_owner_at or now)
+                    )
 
-            # (2) 기존 dispute를 “다시 진행중”으로 되돌림 + 최신 worker 첫 메시지 반영
-            #     - 컬럼명은 신스키마(decided_*, decision_comment)를 기준으로 NULL 처리
-            sets = ["dispute_type=?", "status='PENDING'"]
-            params = [dispute_type]
+            # 기존 이의제기는 "재오픈" 개념으로 상태를 PENDING으로 되돌림
+            self.conn.execute(
+                "UPDATE disputes SET dispute_type=?, status='PENDING' WHERE id=?",
+                (dispute_type, dispute_id)
+            )
 
-            # disputes.comment는 “요약/대표 문구”로 UI에서 쓰이므로 최신 메시지로 교체
-            if "comment" in d_cols:
-                sets.append("comment=?")
-                params.append(comment)
-
-            # 결정 관련 컬럼(신스키마)이 있으면 초기화
-            if decided_at_col:
-                sets.append(f"{decided_at_col}=NULL")
-            if decided_by_col:
-                sets.append(f"{decided_by_col}=NULL")
-            if decision_comment_col:
-                sets.append(f"{decision_comment_col}=NULL")
-
-            # 구버전 컬럼이 살아있다면 그것도 같이 초기화(혼재 DB 방어)
-            if resolved_at_col:
-                sets.append(f"{resolved_at_col}=NULL")
-            if resolved_by_col:
-                sets.append(f"{resolved_by_col}=NULL")
-            if resolution_comment_col:
-                sets.append(f"{resolution_comment_col}=NULL")
-
-            sql = "UPDATE disputes SET " + ", ".join(sets) + " WHERE id=?"
-            params.append(dispute_id)
-            self.conn.execute(sql, tuple(params))
-
-            # (3) worker 메시지를 타임라인에 추가(중복 방지)
+            # 근로자 메시지 추가
             if comment:
-                exists_w = self.conn.execute(
-                    "SELECT 1 FROM dispute_messages WHERE dispute_id=? AND message=? AND sender_role='worker'",
-                    (dispute_id, comment),
-                ).fetchone()
-                if not exists_w:
-                    self.add_dispute_message(dispute_id, user_id, "worker", comment, None)
+                self.add_dispute_message(dispute_id, user_id, "worker", comment, None)
 
             self.conn.commit()
             return dispute_id
 
-        # 신규 생성 경로
+        # 신규 이의제기 생성
         wl = self.conn.execute("SELECT work_date FROM work_logs WHERE id=?", (work_log_id,)).fetchone()
         w_date = wl["work_date"] if wl else now.split(" ")[0]
 
         cur = self.conn.execute(
             "INSERT INTO disputes(work_log_id, user_id, work_date, dispute_type, comment, created_at, status) VALUES(?,?,?,?,?,?,?)",
-            (work_log_id, user_id, w_date, dispute_type, comment, now, "PENDING"),
+            (work_log_id, user_id, w_date, dispute_type, comment, now, "PENDING")
         )
         dispute_id = cur.lastrowid
-        self.add_dispute_message(dispute_id, user_id, "worker", comment, None)
-        self.conn.commit()
 
+        if comment:
+            self.add_dispute_message(dispute_id, user_id, "worker", comment, None)
+
+        self.conn.commit()
         return dispute_id
 
     def list_my_disputes(self, user_id, date_from, date_to, filter_type="ACTIVE", limit=2000):
@@ -726,59 +700,48 @@ class DB:
         ).fetchall()
 
     def resolve_dispute(self, dispute_id, owner_id, new_status, resolution_comment):
-        self.ensure_connection()
-
         now = now_str()
         resolution_comment = (resolution_comment or "").strip()
 
-        # disputes 컬럼 호환(신/구 DB 혼재 방어)
-        d_cols = {r[1] for r in self.conn.execute("PRAGMA table_info(disputes)").fetchall()}
+        # disputes 테이블 컬럼 확인 (현재 스키마: decided_*/decision_comment)
+        dcols = {r[1] for r in self.conn.execute("PRAGMA table_info(disputes)").fetchall()}
 
-        # 신스키마
-        decided_at_col = "decided_at" if "decided_at" in d_cols else None
-        decided_by_col = "decided_by" if "decided_by" in d_cols else None
-        decision_comment_col = "decision_comment" if "decision_comment" in d_cols else None
-
-        # 구스키마(혹시 존재하면 같이 업데이트)
-        resolved_at_col = "resolved_at" if "resolved_at" in d_cols else None
-        resolved_by_col = "resolved_by" if "resolved_by" in d_cols else None
-        resolution_comment_col = "resolution_comment" if "resolution_comment" in d_cols else None
-
+        # 1) 상태 업데이트 (스키마에 맞게 decided_* 사용)
+        # - decision_comment는 "사업주 답변"을 disputes에도 저장(요약/리스트용)
         sets = ["status=?"]
         params = [new_status]
 
-        # 신스키마 업데이트
-        if decided_at_col:
-            sets.append(f"{decided_at_col}=?")
+        if "decided_at" in dcols:
+            sets.append("decided_at=?")
             params.append(now)
-        if decided_by_col:
-            sets.append(f"{decided_by_col}=?")
+        if "decided_by" in dcols:
+            sets.append("decided_by=?")
             params.append(owner_id)
-        if decision_comment_col:
-            sets.append(f"{decision_comment_col}=?")
-            params.append(resolution_comment)
+        if "decision_comment" in dcols:
+            sets.append("decision_comment=?")
+            params.append(resolution_comment if resolution_comment else None)
 
-        # 구스키마도 살아있다면 동일 값 반영
-        if resolved_at_col:
-            sets.append(f"{resolved_at_col}=?")
+        # (혹시 과거 DB에서 resolved_* 계열이 존재하면 같이 업데이트해도 무해)
+        if "resolved_at" in dcols:
+            sets.append("resolved_at=?")
             params.append(now)
-        if resolved_by_col:
-            sets.append(f"{resolved_by_col}=?")
+        if "resolved_by" in dcols:
+            sets.append("resolved_by=?")
             params.append(owner_id)
-        if resolution_comment_col:
-            sets.append(f"{resolution_comment_col}=?")
-            params.append(resolution_comment)
+        if "resolution_comment" in dcols:
+            sets.append("resolution_comment=?")
+            params.append(resolution_comment if resolution_comment else None)
 
-        sql = "UPDATE disputes SET " + ", ".join(sets) + " WHERE id=?"
         params.append(dispute_id)
 
+        sql = "UPDATE disputes SET " + ", ".join(sets) + " WHERE id=?"
         self.conn.execute(sql, tuple(params))
 
-        # 메시지가 있다면 타임라인에도 남김(상태코드 포함)
+        # 2) 메시지(채팅)로도 저장
         if resolution_comment:
             self.add_dispute_message(dispute_id, owner_id, "owner", resolution_comment, new_status)
 
-        # 업로드는 UI가 담당하므로 여기서는 로컬 commit만
+        # 3) 로컬 커밋
         self.conn.commit()
 
     def add_dispute_message(self, dispute_id, sender_user_id, sender_role, message, status_code=None):
@@ -791,16 +754,20 @@ class DB:
         self.conn.commit()
 
     def get_dispute_timeline(self, dispute_id):
-        self.ensure_connection()
-
         req_row = self.conn.execute("SELECT work_log_id FROM disputes WHERE id=?", (dispute_id,)).fetchone()
         if not req_row:
             return []
         target_id = req_row["work_log_id"]
 
+        # disputes 테이블 컬럼 확인 (스키마 불일치 안전 처리)
+        dcols = {r[1] for r in self.conn.execute("PRAGMA table_info(disputes)").fetchall()}
+        has_decision = ("decision_comment" in dcols)
+        has_decided_at = ("decided_at" in dcols)
+
         events = []
         seen = set()
 
+        # 1) dispute_messages(채팅 로그)가 있으면 그게 1순위
         msgs = self.conn.execute(
             """
             SELECT m.*, u.username AS sender_username
@@ -808,7 +775,8 @@ class DB:
             LEFT JOIN users u ON u.id = m.sender_user_id
             WHERE m.dispute_id IN (SELECT id FROM disputes WHERE work_log_id=?)
             ORDER BY m.id ASC
-            """, (target_id,)
+            """,
+            (target_id,)
         ).fetchall()
 
         for row in msgs:
@@ -818,6 +786,7 @@ class DB:
             role = row["sender_role"]
             if (role, txt) in seen:
                 continue
+
             events.append({
                 "who": role,
                 "username": row["sender_username"] or ("Owner" if role == "owner" else "Worker"),
@@ -828,67 +797,62 @@ class DB:
             })
             seen.add((role, txt))
 
-        # 아래 legacy 블록은 기존 파일에 이어지는 그대로 유지되어도 되지만,
-        # 현재 db.py의 legacy 구현이 컬럼명(resolution_comment 등)을 참조할 수 있어
-        # 이전 답변에서 제공한 “호환형 legacy 처리”로 교체하는 것이 가장 안전합니다.
+        # 2) disputes 테이블에만 저장돼 있던 레거시(초기 comment / decision_comment)도 보강
         legacy = self.conn.execute(
             """
             SELECT d.*, u.username
             FROM disputes d
             JOIN users u ON u.id = d.user_id
             WHERE d.work_log_id=? ORDER BY d.id ASC
-            """, (target_id,)
+            """,
+            (target_id,)
         ).fetchall()
 
-        # disputes 컬럼 호환(신/구 혼재 방어)
-        d_cols = {r[1] for r in self.conn.execute("PRAGMA table_info(disputes)").fetchall()}
-        decided_at_col = "decided_at" if "decided_at" in d_cols else None
-        decision_comment_col = "decision_comment" if "decision_comment" in d_cols else None
-        resolved_at_col = "resolved_at" if "resolved_at" in d_cols else None
-        resolution_comment_col = "resolution_comment" if "resolution_comment" in d_cols else None
-
         for row in legacy:
-            # worker 대표 코멘트(comment)
+            # worker 최초 사유(comment)
             w_c = (row["comment"] or "").strip()
             if w_c and ("worker", w_c) not in seen:
-                events.append(
-                    {
-                        "who": "worker",
-                        "username": row["username"],
-                        "at": row["created_at"],
-                        "comment": w_c,
-                        "sort_key": row["created_at"],
-                    }
-                )
+                events.append({
+                    "who": "worker",
+                    "username": row["username"],
+                    "at": row["created_at"],
+                    "comment": w_c,
+                    "sort_key": row["created_at"]
+                })
                 seen.add(("worker", w_c))
 
-            # owner 결정 코멘트(신/구 컬럼 모두 방어)
+            # owner 답변(decision_comment 우선)
             o_c = ""
-            if decision_comment_col and decision_comment_col in row.keys():
-                o_c = (row[decision_comment_col] or "").strip()
-            if not o_c and resolution_comment_col and resolution_comment_col in row.keys():
-                o_c = (row[resolution_comment_col] or "").strip()
-
             o_at = None
-            if decided_at_col and decided_at_col in row.keys():
-                o_at = row[decided_at_col]
-            if not o_at and resolved_at_col and resolved_at_col in row.keys():
-                o_at = row[resolved_at_col]
+
+            if has_decision:
+                o_c = (row["decision_comment"] or "").strip()
+            else:
+                # 과거 DB에서 resolution_comment가 있을 수 있으므로 안전 접근
+                try:
+                    o_c = (row["resolution_comment"] or "").strip()
+                except Exception:
+                    o_c = ""
+
+            if has_decided_at:
+                o_at = row["decided_at"]
+            else:
+                try:
+                    o_at = row["resolved_at"]
+                except Exception:
+                    o_at = None
 
             if o_c and ("owner", o_c) not in seen:
-                at_val = o_at or row["created_at"]
-                events.append(
-                    {
-                        "who": "owner",
-                        "username": "Owner",
-                        "at": at_val,
-                        "comment": o_c,
-                        "sort_key": at_val,
-                    }
-                )
+                events.append({
+                    "who": "owner",
+                    "username": "Owner",
+                    "at": o_at or row["created_at"],
+                    "comment": o_c,
+                    "sort_key": o_at or row["created_at"]
+                })
                 seen.add(("owner", o_c))
 
-        events.sort(key=lambda x: x.get("sort_key") or "")
+        events.sort(key=lambda x: x["sort_key"])
         return events
 
     # ----------------------------------------------------------------
