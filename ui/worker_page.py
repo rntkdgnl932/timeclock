@@ -185,7 +185,6 @@ class WorkerPage(QtWidgets.QWidget):
 
         # [1] 출근 요청 (IN)
         if mode == "IN":
-            # 커스텀 알림창 생성
             msg_box = QtWidgets.QMessageBox(self)
             msg_box.setWindowTitle("작업 시작 확인")
             msg_box.setIcon(QtWidgets.QMessageBox.Warning)
@@ -197,15 +196,23 @@ class WorkerPage(QtWidgets.QWidget):
             msg_box.exec_()
 
             if msg_box.clickedButton() == btn_yes:
+                # ✅ [핵심 추가] 저장 전에 서버 최신 데이터를 가져와 동기화 상태를 맞춥니다.
+                self.db.close_connection()
+                try:
+                    sync_manager.download_latest_db()
+                except Exception as e:
+                    print(f"[Sync before Start] {e}")
+                finally:
+                    self.db.reconnect()
 
-                # 1. [로컬 저장] 먼저 내 컴퓨터에 기록 (에러 나면 중단)
+                # 1. [로컬 저장]
                 try:
                     self.db.start_work(self.session.user_id)
                 except Exception as e:
                     Message.err(self, "오류", str(e))
                     return
 
-                # 2. [업로드] 로딩창 띄우고 서버 전송
+                # 2. [업로드]
                 self.process_async_action(
                     action_func=None,
                     success_callback=lambda: Message.info(self, "완료", "출근 요청이 전송되었습니다.")
@@ -216,21 +223,29 @@ class WorkerPage(QtWidgets.QWidget):
         # [2] 퇴근 요청 (OUT)
         elif mode == "OUT":
             if Message.confirm(self, "퇴근 요청", "작업을 모두 마치고 퇴근 승인을 요청하시겠습니까?"):
+                # ✅ [핵심 추가] 저장 전에 서버 최신 데이터를 가져옵니다.
+                self.db.close_connection()
+                try:
+                    sync_manager.download_latest_db()
+                except Exception as e:
+                    print(f"[Sync before End] {e}")
+                finally:
+                    self.db.reconnect()
 
-                # 1. [로컬 저장] 먼저 내 컴퓨터에 기록
+                # 1. [로컬 저장]
                 try:
                     self.db.end_work(self.session.user_id)
                 except Exception as e:
                     Message.err(self, "오류", str(e))
                     return
 
-                # 2. [업로드] 로딩창 띄우고 서버 전송
+                # 2. [업로드]
                 self.process_async_action(
                     action_func=None,
                     success_callback=lambda: Message.info(self, "완료", "퇴근 요청이 전송되었습니다.")
                 )
 
-        # [3] 그 외 (이미 퇴근함 등)
+        # [3] 그 외 (새로고침)
         else:
             self.refresh()
             self._update_action_button()

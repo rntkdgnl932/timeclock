@@ -15,7 +15,6 @@ import threading
 _SYNC_LOCK = threading.RLock()
 _LAST_DL_CALL_TS = 0.0
 _LAST_UL_CALL_TS = 0.0
-_MIN_CALL_INTERVAL_SEC = 3.0
 
 
 
