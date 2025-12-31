@@ -886,6 +886,71 @@ class DB:
         events.sort(key=lambda x: x["sort_key"])
         return events
 
+    def sync_dispute_thread_from_cloud(self, dispute_id: int):
+        """
+        클라우드 DB를 '스냅샷 다운로드'만 한 뒤,
+        dispute_messages / disputes(상태)만 로컬 DB에 merge한다.
+        - 로컬 DB 파일 교체 없음 (conn 안정)
+        - 채팅 실시간 수신용
+        """
+        try:
+            temp_db_path, _remote_ts = sync_manager.download_latest_db_snapshot()
+            if not temp_db_path:
+                return False
+
+            rconn = sqlite3.connect(str(temp_db_path))
+            rconn.row_factory = sqlite3.Row
+
+            # 1) disputes 상태 merge (status/resolved_at/resolved_by/comment)
+            r_dispute = rconn.execute(
+                "SELECT id, status, resolved_at, resolved_by, comment FROM disputes WHERE id=?",
+                (int(dispute_id),)
+            ).fetchone()
+
+            if r_dispute:
+                self.conn.execute(
+                    "UPDATE disputes SET status=?, resolved_at=?, resolved_by=?, comment=? WHERE id=?",
+                    (r_dispute["status"], r_dispute["resolved_at"], r_dispute["resolved_by"], r_dispute["comment"],
+                     int(dispute_id))
+                )
+
+            # 2) 메시지 merge: id(PK) 기준 INSERT OR IGNORE
+            rows = rconn.execute(
+                "SELECT id, dispute_id, sender_user_id, sender_role, message, status_code, created_at "
+                "FROM dispute_messages WHERE dispute_id=? ORDER BY id ASC",
+                (int(dispute_id),)
+            ).fetchall()
+
+            inserted = 0
+            for r in rows:
+                cur = self.conn.execute(
+                    "INSERT OR IGNORE INTO dispute_messages(id, dispute_id, sender_user_id, sender_role, message, status_code, created_at) "
+                    "VALUES(?,?,?,?,?,?,?)",
+                    (r["id"], r["dispute_id"], r["sender_user_id"], r["sender_role"], r["message"], r["status_code"],
+                     r["created_at"])
+                )
+                # sqlite3는 rowcount가 -1 나오는 경우가 있어도, ignore면 0/1이 나오기도 함
+                if cur.rowcount and cur.rowcount > 0:
+                    inserted += 1
+
+            self.conn.commit()
+
+            try:
+                rconn.close()
+            except Exception:
+                pass
+
+            try:
+                temp_db_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+            return inserted > 0
+
+        except Exception as e:
+            logging.error(f"sync_dispute_thread_from_cloud failed: {e}")
+            return False
+
     # ----------------------------------------------------------------
     # Signup / Audit / Export
     # ----------------------------------------------------------------

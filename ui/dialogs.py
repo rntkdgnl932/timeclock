@@ -3,7 +3,7 @@
 from PyQt5 import QtWidgets, QtCore
 import sqlite3
 import logging
-
+import os
 from timeclock.utils import Message
 from timeclock import sync_manager
 from ui.async_helper import run_job_with_progress_async
@@ -156,7 +156,7 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
         # ✅ 폴링(다운로드/DB교체)은 너무 자주 돌면 프로그램이 망가짐
         # 1.5초 → 7초로 완화 (카톡처럼 보이되 크래시는 줄임)
         self._poll_timer = QtCore.QTimer(self)
-        self._poll_timer.setInterval(7000)  # 7초
+        self._poll_timer.setInterval(2000)  # 7초
         self._poll_timer.timeout.connect(self._silent_poll_refresh)
         self._poll_timer.start()
 
@@ -276,134 +276,255 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
         self._run_silent(_do, _done)
 
     def _run_silent(self, work_fn, done_fn):
-        # dialogs.py 안에서 쓰는 조용한 스레드 실행기
-        try:
-            from async_helper import SilentWorker
-        except Exception:
-            # fallback: 최소 동작
-            import threading
-
-            def _t():
-                res = work_fn()
-                QtCore.QTimer.singleShot(0, lambda: done_fn(res))
-
-            threading.Thread(target=_t, daemon=True).start()
-            return
-
-        w = SilentWorker(work_fn)
-        w.finished.connect(done_fn)
-        w.start()
-
-        # worker가 GC로 날아가지 않도록 보관
-        if not hasattr(self, "_silent_workers"):
-            self._silent_workers = []
-        self._silent_workers.append(w)
-
-    def send_message(self):
         """
-        - 입력 위젯은 QLineEdit 기준: text() 사용
-        - DB.add_dispute_message 시그니처: (dispute_id, sender_user_id, sender_role, message, ...)
-        - 업로드/백업은 DB._save_and_sync에서 백그라운드로 처리(여기서 close/reconnect 금지)
+        dialogs.py 내부에서 쓰는 '조용한' 백그라운드 실행기.
+        - 진행창/팝업 없이 실행
+        - 완료 시 done_fn(ok: bool, result: Any, err: str|None) 호출
+        - 패키지 import 꼬임(SilentWorker) 방지: dialogs.py의 _SilentWorker를 사용
         """
-        try:
-            # QLineEdit 기준
-            if hasattr(self, "input") and self.input is not None:
-                # 혹시 예전 코드가 self.input을 쓰는 경우를 커버
-                msg = self.input.text().strip() if hasattr(self.input, "text") else ""
-            elif hasattr(self, "le_input") and self.le_input is not None:
-                msg = self.le_input.text().strip()
-            else:
-                msg = ""
+        # QThread 기반 (UI 안전)
+        th = QtCore.QThread(self)
+        worker = _SilentWorker(work_fn)
+        worker.moveToThread(th)
 
-            if not msg:
-                return
-
-            # sender_user_id / sender_role 정확히 전달
-            self.db.add_dispute_message(
-                self.dispute_id,
-                int(self.user_id),
-                str(self.my_role),
-                msg
-            )
-
-            # 입력창 비우기
-            if hasattr(self, "input") and hasattr(self.input, "clear"):
-                self.input.clear()
-            if hasattr(self, "le_input") and hasattr(self.le_input, "clear"):
-                self.le_input.clear()
-
-            # 화면 갱신
-            self.refresh_timeline()
-
-        except Exception as e:
+        def _finish(ok: bool, err: str):
+            # 스레드/워커 정리
             try:
-                Message.err(self, "오류", f"메시지 저장 실패: {e}")
+                th.quit()
+            except Exception:
+                pass
+            try:
+                th.wait(1000)
+            except Exception:
+                pass
+            try:
+                worker.deleteLater()
+            except Exception:
+                pass
+            try:
+                th.deleteLater()
             except Exception:
                 pass
 
+            # done_fn 호출 형태 통일: done_fn(ok, result, err)
+            try:
+                if ok:
+                    QtCore.QTimer.singleShot(0, lambda: done_fn(True, True, None))
+                else:
+                    QtCore.QTimer.singleShot(0, lambda: done_fn(False, None, err or "unknown error"))
+            except Exception:
+                pass
+
+        worker.finished.connect(_finish)
+        th.started.connect(worker.run)
+        th.start()
+
+    def send_message(self):
+        msg = self.le_input.text().strip()
+        if not msg:
+            return
+
+        # 카톡 느낌: 전송 누르면 입력창 즉시 비우고, UI는 즉시 갱신
+        self.le_input.clear()
+        self.btn_send.setEnabled(False)
+
+        try:
+            if self.my_role == "owner":
+                new_status = self.cb_status.currentData()
+                self.db.resolve_dispute(self.dispute_id, self.user_id, new_status, msg)
+                self.current_status = new_status
+            else:
+                self.db.add_dispute_message(
+                    self.dispute_id,
+                    sender_user_id=self.user_id,
+                    sender_role="worker",
+                    message=msg
+                )
+
+            # 로컬은 즉시 표시
+            self.refresh_timeline()
+
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "오류", f"전송 실패: {e}")
+            # 실패해도 입력은 날아갔으니 복구해줌(사용자 경험)
+            self.le_input.setText(msg)
+
+        finally:
+            self.btn_send.setEnabled(True)
+
     def _silent_poll_refresh(self):
         """
-        카톡처럼:
-        - 타이핑 중에는 절대 방해하지 않음
-        - 유휴 상태일 때만 서버 최신 DB를 조용히 내려받고(가능하면) 화면 갱신
+        카톡처럼(대화방 열려있는 동안만):
+        - 2초마다 실행
+        - 입력 중이면 절대 방해하지 않음
+        - 로컬 DB 파일 교체 금지 (크래시/잠김 방지)
+        - 원격 DB는 '임시 파일'로만 받아서 dispute_messages만 병합 후 화면 갱신
         """
-        # 1) 입력 중이면 건너뜀(타이핑 방해 금지)
+        # 1) 입력 중이면 건너뜀
         if self.le_input.hasFocus() or (self.le_input.text().strip() != ""):
             return
 
-        # 2) 업로드/다운로드 진행 중이면 건너뜀
+        # 2) 동기화 중이면 중복 실행 방지
         if getattr(self, "_sync_in_progress", False):
             return
 
         self._sync_in_progress = True
         self.lbl_sync.setText("동기화 중…")
 
+        import sync_manager
+
         def _job():
-            # download_latest_db는 "DB 파일 교체"를 수행할 수 있어 파일 잠금이 민감하다.
-            # 여기서는:
-            # - DB 연결을 잠깐 끊고
-            # - 다운로드/교체 시도
-            # - 실패(잠김 등)면 그냥 False로 종료(팝업 X)
+            """
+            워커 스레드에서 실행:
+            - 원격 최신 DB를 temp로 다운로드
+            - temp DB에서 dispute_messages를 로컬로 병합
+            """
+            ok, result = sync_manager.download_latest_db(apply_replace=False)
+            if not ok:
+                return False, result
+
+            temp_db_path = result
             try:
-                try:
-                    if self.db:
-                        self.db.close_connection()
-                except Exception:
-                    pass
-
-                ok, _msg = sync_manager.download_latest_db()
-                return bool(ok)
-
+                merged = self._merge_remote_messages_from_temp_db(temp_db_path)
+                return True, f"merged:{merged}"
             finally:
                 try:
-                    if self.db:
-                        self.db.reconnect()
-                except Exception:
-                    return False
-
-        self._poll_thread = QtCore.QThread(self)
-        self._poll_worker = _SilentWorker(_job)
-        self._poll_worker.moveToThread(self._poll_thread)
-
-        def _on_done(ok: bool, err: str):
-            self._sync_in_progress = False
-            if ok:
-                self.lbl_sync.setText("")
-                try:
-                    self.refresh_timeline()
+                    if temp_db_path and os.path.exists(temp_db_path):
+                        os.remove(temp_db_path)
                 except Exception:
                     pass
-            else:
-                # 팝업 대신 상태만 표시
-                self.lbl_sync.setText("동기화 실패(대기)…")
+
+        # ---- QThread로 백그라운드 실행 ----
+        self._poll_thread = QtCore.QThread(self)
+
+        class _Worker(QtCore.QObject):
+            done = QtCore.pyqtSignal(bool, str)
+
+            @QtCore.pyqtSlot()
+            def run(self):
+                try:
+                    ok, msg = _job()
+                except Exception as e:
+                    ok, msg = False, str(e)
+                self.done.emit(ok, msg)
+
+        self._poll_worker = _Worker()
+        self._poll_worker.moveToThread(self._poll_thread)
+
+        def _on_done(ok: bool, msg: str):
+            try:
+                # 화면 갱신
+                if ok:
+                    self.refresh_timeline()
+                    self.lbl_sync.setText("")  # 조용히
+                else:
+                    # 실패해도 시끄럽게 팝업 띄우지 말고 조용히 표시만
+                    self.lbl_sync.setText("")
+            finally:
+                self._sync_in_progress = False
+                try:
+                    self._poll_thread.quit()
+                    self._poll_thread.wait(1000)
+                except Exception:
+                    pass
+                try:
+                    self._poll_worker.deleteLater()
+                except Exception:
+                    pass
+                try:
+                    self._poll_thread.deleteLater()
+                except Exception:
+                    pass
 
         self._poll_thread.started.connect(self._poll_worker.run)
-        self._poll_worker.finished.connect(_on_done)
-        self._poll_worker.finished.connect(self._poll_thread.quit)
-        self._poll_worker.finished.connect(self._poll_worker.deleteLater)
-        self._poll_thread.finished.connect(self._poll_thread.deleteLater)
-
+        self._poll_worker.done.connect(_on_done)
         self._poll_thread.start()
+
+    def _merge_remote_messages_from_temp_db(self, temp_db_path: str) -> int:
+        """
+        temp DB에서 dispute_messages를 읽어서,
+        로컬 DB의 dispute_messages에 INSERT OR IGNORE로 병합한다.
+
+        return: 병합된(삽입 시도된) row 수(대략치)
+        """
+        import sqlite3
+
+        if not temp_db_path or not os.path.exists(temp_db_path):
+            return 0
+
+        # 로컬 커넥션이 없으면 불가
+        if getattr(self.db, "conn", None) is None:
+            return 0
+
+        # 로컬 최신 created_at을 기준으로 필터(없으면 전체)
+        try:
+            cur = self.db.conn.execute(
+                "SELECT COALESCE(MAX(created_at), '') FROM dispute_messages WHERE dispute_id=?",
+                (self.dispute_id,)
+            )
+            local_max_at = cur.fetchone()[0] or ""
+        except Exception:
+            local_max_at = ""
+
+        remote = sqlite3.connect(temp_db_path)
+        remote.row_factory = sqlite3.Row
+
+        inserted = 0
+        try:
+            # 원격에서 해당 dispute_id 메시지 가져오기
+            # created_at이 local_max_at보다 큰 것만 우선(빠름)
+            if local_max_at:
+                rows = remote.execute(
+                    """
+                    SELECT id, dispute_id, sender_user_id, sender_role, message, created_at, status_code
+                    FROM dispute_messages
+                    WHERE dispute_id=? AND created_at > ?
+                    ORDER BY created_at ASC
+                    """,
+                    (self.dispute_id, local_max_at)
+                ).fetchall()
+            else:
+                rows = remote.execute(
+                    """
+                    SELECT id, dispute_id, sender_user_id, sender_role, message, created_at, status_code
+                    FROM dispute_messages
+                    WHERE dispute_id=?
+                    ORDER BY created_at ASC
+                    """,
+                    (self.dispute_id,)
+                ).fetchall()
+
+            if not rows:
+                return 0
+
+            # 로컬에 병합
+            # (PK 충돌/중복은 IGNORE)
+            for r in rows:
+                try:
+                    self.db.conn.execute(
+                        """
+                        INSERT OR IGNORE INTO dispute_messages
+                        (id, dispute_id, sender_user_id, sender_role, message, created_at, status_code)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            r["id"], r["dispute_id"], r["sender_user_id"], r["sender_role"],
+                            r["message"], r["created_at"], r["status_code"]
+                        )
+                    )
+                    inserted += 1
+                except Exception:
+                    # 한 줄 실패해도 전체는 계속
+                    continue
+
+            self.db.conn.commit()
+            return inserted
+
+        finally:
+            try:
+                remote.close()
+            except Exception:
+                pass
 
     def _on_upload_done(self, ok: bool, err: str):
         self._sync_in_progress = False
@@ -487,33 +608,36 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
                 self._poll_timer.stop()
         except Exception:
             pass
+
+        try:
+            if hasattr(self, "_poll_thread") and self._poll_thread and self._poll_thread.isRunning():
+                self._poll_thread.quit()
+                self._poll_thread.wait(500)
+        except Exception:
+            pass
+
         super().closeEvent(event)
 
     def refresh_timeline(self):
-        # DB 연결 보장
+        """
+        이의제기 대화 타임라인 렌더링 (Qt RichText 호환)
+        - flex 사용 X (Qt에서 깨짐)
+        - table + align + span(inline-block)로 "글자 길이만큼" 둥근 말풍선 구현
+        """
+        # 0) 먼저 클라우드에서 수신 merge (실패해도 로컬 렌더 계속)
         try:
-            if hasattr(self.db, "ensure_connection"):
-                self.db.ensure_connection()
-            elif getattr(self.db, "conn", None) is None:
-                self.db.reconnect()
+            if self.db and self.dispute_id:
+                self.db.sync_dispute_thread_from_cloud(self.dispute_id)
+        except Exception:
+            pass
+
+        # 1) 타임라인 로드
+        try:
+            events = self.db.get_dispute_timeline(self.dispute_id) or []
         except Exception:
             return
 
-        try:
-            timeline_events = self.db.get_dispute_timeline(self.dispute_id)
-        except Exception:
-            return
-
-        # 이하(HTML 렌더링)는 기존 구현 그대로 유지되어도 됩니다.
-        # 너의 dialogs.py는 QTextBrowser 기반 HTML 렌더링을 쓰고 있으니,
-        # 여기서는 DB 안정성만 보강하고 나머지는 건드리지 않습니다.
-
-        KAKAO_BG = "#B2C7D9"
-        MY_BUBBLE = "#FEE500"
-        OTHER_BUBBLE = "#FFFFFF"
-        TIME_COLOR = "#666666"
-        SPACER_W = "45%"
-
+        # 2) 유틸
         def esc(s: str) -> str:
             if s is None:
                 return ""
@@ -525,83 +649,108 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
         def date_only(ts: str) -> str:
             if not ts:
                 return ""
-            return ts.split(" ")[0].strip()
+            ts = str(ts)
+            return ts[:10]
 
         def time_only(ts: str) -> str:
             if not ts:
                 return ""
-            parts = ts.split(" ")
-            if len(parts) < 2:
-                return ts
-            tpart = parts[1]
-            return tpart[:5] if len(tpart) >= 5 else tpart
+            ts = str(ts)
+            if len(ts) >= 16 and " " in ts:
+                return ts[11:16]
+            return ts
 
-        def date_chip(xd: str) -> str:
-            xd = esc(xd)
-            return f"""
-            <div align="center" style="margin:10px 0 14px 0;">
-              <span style="background:#D7E2EC; color:#333; padding:3px 10px; border-radius:12px; font-size:12px; font-weight:bold;">
-                {xd}
-              </span>
-            </div>
-            """
+        # 3) Qt RichText는 CSS 지원이 제한적이라 table 기반으로 구성
+        BG = "#B2C7D9"
+        MY = "#FEE500"
+        OTHER = "#FFFFFF"
+        TIME = "#666666"
 
-        def sys_chip(msg: str) -> str:
-            msg = esc(msg)
-            return f"""
-            <div align="center" style="margin:18px 0 6px 0;">
-              <span style="background:#90A4AE; color:#fff; padding:5px 12px; border-radius:14px; font-size:12px; font-weight:bold;">
-                {msg}
-              </span>
-            </div>
-            """
+        html = f"""
+        <html><head><meta charset="utf-8"></head>
+        <body style="margin:0; padding:0;">
+          <div style="background:{BG}; padding:12px; font-family:'Malgun Gothic'; font-size:13px;">
+        """
 
-        def bubble_html(text: str, ttime_str: str, bg: str, align: str) -> str:
-            text = esc(text).strip()
-            ttime_str = esc(ttime_str)
-            if not text:
-                return ""
-            bubble_div = (
-                f'<table cellspacing="0" cellpadding="0" style="border-collapse:collapse;">'
-                f'  <tr>'
-                f'    <td bgcolor="{bg}" style="padding:10px 14px; border-radius:8px; font-size:13px; color:#111;">{text}</td>'
-                f'    <td style="width:8px;"></td>'
-                f'    <td style="font-size:11px; color:{TIME_COLOR}; vertical-align:bottom; white-space:nowrap;">{ttime_str}</td>'
-                f'  </tr>'
-                f'</table>'
-            )
-            if align == "right":
-                return f'<div align="right" style="margin:8px 10px 8px {SPACER_W};">{bubble_div}</div>'
-            return f'<div align="left" style="margin:8px {SPACER_W} 8px 10px;">{bubble_div}</div>'
-
-        html = ""
         last_date = None
-        for ev in timeline_events:
-            who = ev.get("who") or ""
-            text = ev.get("comment") or ""
-            at = ev.get("at") or ""
-            st_code = ev.get("status_code")
 
-            d = date_only(at)
-            t = time_only(at)
+        for ev in events:
+            who = (ev.get("who") or "").strip()  # "owner" | "worker"
+            username = (ev.get("username") or who or "").strip()
+            msg = (ev.get("comment") or "").strip()
+            ts = (ev.get("at") or "").strip()
 
+            if not msg and not ts and not username:
+                continue
+
+            d = date_only(ts)
             if d and d != last_date:
                 last_date = d
-                html += date_chip(d)
+                html += f"""
+                <div style="text-align:center; margin:10px 0;">
+                  <span style="background:rgba(0,0,0,0.18); color:#fff; padding:4px 10px; border-radius:12px; font-size:12px;">
+                    {esc(d)}
+                  </span>
+                </div>
+                """
 
-            # 상태 시스템 메시지(옵션)
-            if st_code and who == "owner":
-                # 예: 상태 변경을 대화 중간에 표시하고 싶으면 여기서 sys_chip 사용
-                pass
+            # 내/상대 판정
+            if self.my_role == "owner":
+                is_me = (who == "owner")
+            else:
+                is_me = (who == "worker")
 
-            is_me = (self.my_role == "owner" and who == "owner") or (self.my_role != "owner" and who == "worker")
-            bg = MY_BUBBLE if is_me else OTHER_BUBBLE
+            name_disp = username or who
+            t_disp = time_only(ts)
+
+            bubble_bg = MY if is_me else OTHER
             align = "right" if is_me else "left"
-            html += bubble_html(text, t, bg, align)
 
-        self.browser.setHtml(f'<div style="background:{KAKAO_BG}; padding:10px;">{html}</div>')
-        QtCore.QTimer.singleShot(50, lambda: self.browser.verticalScrollBar().setValue(
-            self.browser.verticalScrollBar().maximum()))
+            # ✅ 핵심: span(inline-block) + max-width 로 "글자 길이만큼"만 배경이 칠해짐
+            # Qt에서 div 배경은 줄 전체로 늘어날 수 있으니 bubble은 반드시 span 사용
+            # 기존 span 말풍선을 아래로 교체 (Qt에서 확실히 먹는 방식: table + cellpadding)
+            html += f"""
+            <table width="100%" cellspacing="0" cellpadding="0" style="margin:6px 0;">
+              <tr>
+                <td align="{align}" valign="bottom">
+                  <div style="margin:0; padding:0;">
+                    <div style="font-size:12px; color:#222; margin:0 0 2px 2px; text-align:{align};">
+                      {esc(name_disp)}
+                    </div>
+
+                    <!-- ✅ 말풍선: CSS padding 대신 'cellpadding'으로 크기 조절 -->
+                    <table cellspacing="0" cellpadding="8" style="display:inline-table; max-width:72%;">
+                      <tr>
+                        <td bgcolor="{bubble_bg}" style="border-radius:16px;">
+                          <span style="font-size:13px; line-height:1.45;">
+                            {esc(msg)}
+                          </span>
+                        </td>
+                      </tr>
+                    </table>
+
+                    <div style="font-size:11px; color:{TIME}; margin-top:2px; text-align:{align};">
+                      {esc(t_disp)}
+                    </div>
+                  </div>
+                </td>
+              </tr>
+            </table>
+            """
+
+        html += """
+          </div>
+        </body></html>
+        """
+
+        self.browser.setHtml(html)
+
+        # 스크롤 맨 아래
+        try:
+            sb = self.browser.verticalScrollBar()
+            sb.setValue(sb.maximum())
+        except Exception:
+            pass
 
 
 # timeclock/ui/dialogs.py 파일 맨 아래에 추가하세요.

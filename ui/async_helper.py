@@ -285,3 +285,19 @@ def run_job_with_progress_async(owner: QtWidgets.QWidget, title: str, job, *, ta
         pass
 
     th.start()
+
+
+class _SilentWorker(QtCore.QObject):
+    finished = QtCore.pyqtSignal(bool, str)
+
+    def __init__(self, fn, parent=None):
+        super().__init__(parent)
+        self._fn = fn
+
+    @QtCore.pyqtSlot()
+    def run(self):
+        try:
+            ok = bool(self._fn())
+            self.finished.emit(ok, "")
+        except Exception as e:
+            self.finished.emit(False, str(e))

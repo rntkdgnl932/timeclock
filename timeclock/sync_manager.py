@@ -251,105 +251,138 @@ def cloud_changed_since_last_sync() -> bool:
         return True
 
 
-def download_latest_db():
+def download_latest_db_snapshot():
     """
-    [안정화 패치]
-    - 동시/연속 호출 방지(락 + 쿨다운)
-    - requests는 timeout/stream 사용 (대용량/네이티브 크래시 위험 감소)
+    클라우드의 timeclock.db를 '임시 스냅샷 파일'로만 다운로드하고,
+    로컬 DB_PATH를 교체하지 않는다.
+    반환: (Path(temp_db_path), remote_ts_epoch) 또는 (None, 0)
     """
-    global _LAST_DL_CALL_TS
+    if not HAS_GOOGLE_DRIVE:
+        return None, 0
 
-    with _SYNC_LOCK:
-        now = time.time()
-        if now - _LAST_DL_CALL_TS < _MIN_CALL_INTERVAL_SEC:
-            # 너무 빠른 연속 호출은 바로 컷 (폭주 방지)
-            return False, "download cooldown"
-        _LAST_DL_CALL_TS = now
+    try:
+        drive = _get_drive()
+        if not drive:
+            return None, 0
 
-        if not HAS_GOOGLE_DRIVE:
-            return False, "PyDrive 미설치"
+        folder_id = _get_folder_id(drive, GDRIVE_SYNC_FOLDER_NAME)
+        gfile, remote_ts = _get_latest_db_file_and_ts(drive, folder_id)
+        if not gfile:
+            return None, 0
 
+        tmp_dir = Path(DB_PATH).parent / "_sync_tmp"
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        temp_path = tmp_dir / f"{Path(DB_PATH).stem}.cloudsnap_{ts}{Path(DB_PATH).suffix}"
+
+        # access token으로 v3 download (캐시 방지)
+        access_token = drive.auth.credentials.access_token
+        timestamp = int(time.time())
+        file_id = gfile['id']
+        download_url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media&t={timestamp}"
+        headers = {"Authorization": f"Bearer {access_token}"}
+
+        logging.info(f"[Sync] snapshot download: {download_url}")
+        resp = requests.get(download_url, headers=headers)
+
+        if resp.status_code == 200:
+            temp_path.write_bytes(resp.content)
+            return temp_path, remote_ts
+
+        # 실패 시 PyDrive fallback
+        gfile.GetContentFile(str(temp_path))
+        return temp_path, remote_ts
+
+    except Exception as e:
+        logging.error(f"[Sync] snapshot download failed: {e}")
+        return None, 0
+
+
+
+def download_latest_db(apply_replace: bool = True, temp_path: str = None):
+    """
+    - apply_replace=True (기존 동작): 다운로드 후 로컬 DB(DB_PATH)를 교체
+    - apply_replace=False (안전 모드): 다운로드만 해서 temp_path(또는 자동 temp)로 저장하고,
+      로컬 DB는 절대 건드리지 않음. (대화창 실시간 수신용)
+
+    return:
+      (True, <msg_or_path>) / (False, <error_message>)
+    """
+    if not HAS_GOOGLE_DRIVE:
+        return False, "PyDrive 미설치"
+
+    try:
+        drive = _get_drive()
+        if not drive:
+            return False, "구글 드라이브 인증 실패"
+
+        folder_id = _get_folder_id(drive, GDRIVE_SYNC_FOLDER_NAME)
+        gfile, remote_ts = _get_cloud_db_file_and_ts(drive, folder_id)
+
+        if not gfile:
+            return False, "클라우드 DB 없음"
+
+        # temp_path 결정
+        if not temp_path:
+            # 안전 모드면 _sync_tmp에 저장하는 걸 권장
+            if not apply_replace:
+                sync_tmp = DB_PATH.parent / "_sync_tmp"
+                sync_tmp.mkdir(parents=True, exist_ok=True)
+                temp_path = str(sync_tmp / f"timeclock.dl_{now_str()}.db")
+            else:
+                temp_path = str(DB_PATH) + ".temp"
+
+        # -------------------------------------------------------------
+        # ✅ PyDrive의 GetContentFile 대신 requests 사용(캐시 무시)
+        # -------------------------------------------------------------
         try:
-            drive = _get_drive()
-            if not drive:
-                return False, "구글 드라이브 인증 실패"
+            # PyDrive 인증 세션(토큰) 기반으로 직접 다운로드 URL 구성
+            access_token = drive.auth.credentials.access_token
+            # v3 alt=media 방식
+            url = f"https://www.googleapis.com/drive/v3/files/{gfile['id']}?alt=media&t={int(time.time())}"
+            headers = {"Authorization": f"Bearer {access_token}"}
 
-            folder_id = _get_folder_id(drive, GDRIVE_SYNC_FOLDER_NAME)
-            gfile, remote_ts = _get_cloud_db_file_and_ts(drive, folder_id)
+            r = requests.get(url, headers=headers, stream=True, timeout=60)
+            if r.status_code != 200:
+                return False, f"다운로드 실패 HTTP {r.status_code}: {r.text[:200]}"
 
-            if not gfile:
-                return False, "클라우드 DB 없음"
-
-            temp_path = str(DB_PATH) + ".temp"
-
-            # -------------------------------------------------------------
-            # ✅ requests 방식(안정화: timeout/stream)
-            # -------------------------------------------------------------
-            try:
-                access_token = drive.auth.credentials.access_token
-                timestamp = int(time.time())
-                file_id = gfile["id"]
-                download_url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media&t={timestamp}"
-                headers = {"Authorization": f"Bearer {access_token}"}
-
-                print(f"[Sync] 캐시 무시 다운로드 요청: {download_url}")
-
-                with requests.get(download_url, headers=headers, stream=True, timeout=30) as r:
-                    r.raise_for_status()
-                    with open(temp_path, "wb") as f:
-                        for chunk in r.iter_content(chunk_size=1024 * 1024):
-                            if chunk:
-                                f.write(chunk)
-
-            except Exception as req_e:
-                # requests 실패 시 PyDrive fallback
-                print(f"[Sync] requests 로직 에러: {req_e}, 기본 방식으로 재시도합니다.")
-                try:
-                    gfile.GetContentFile(temp_path)
-                except Exception as e2:
-                    try:
-                        if os.path.exists(temp_path):
-                            os.remove(temp_path)
-                    except Exception:
-                        pass
-                    logging.error(f"[Sync] 다운로드 실패: {e2}")
-                    return False, f"다운로드 실패: {e2}"
-
-            # -------------------------------------------------------------
-            # 로컬 DB 교체 (잠김이면 실패 처리)
-            # -------------------------------------------------------------
-            try:
-                if os.path.exists(DB_PATH):
-                    try:
-                        os.remove(DB_PATH)
-                    except Exception as e:
-                        try:
-                            if os.path.exists(temp_path):
-                                os.remove(temp_path)
-                        except Exception:
-                            pass
-                        logging.error(f"[Sync] 기존 DB 삭제 실패: {e}")
-                        return False, f"실행 중인 DB 파일을 덮어쓸 수 없습니다. (잠금 상태): {e}"
-
-                shutil.move(temp_path, DB_PATH)
-
-            except Exception as e:
-                try:
-                    if os.path.exists(temp_path):
-                        os.remove(temp_path)
-                except Exception:
-                    pass
-                logging.error(f"[Sync] 로컬 DB 교체 실패: {e}")
-                return False, f"로컬 DB 교체 실패: {e}"
-
-            if remote_ts and remote_ts > 0:
-                _save_last_sync_ts(remote_ts)
-
-            return True, "클라우드 최신 DB 다운로드 완료"
+            with open(temp_path, "wb") as f:
+                for chunk in r.iter_content(chunk_size=1024 * 1024):
+                    if chunk:
+                        f.write(chunk)
 
         except Exception as e:
-            logging.error(f"[Sync] 다운로드 실패: {e}")
-            return False, str(e)
+            return False, f"다운로드 예외: {e}"
+
+        # -------------------------------------------------------------
+        # ✅ 안전 모드: temp_path만 반환하고 끝 (로컬 DB 교체 금지)
+        # -------------------------------------------------------------
+        if not apply_replace:
+            return True, temp_path
+
+        # -------------------------------------------------------------
+        # 기존 모드: 로컬 DB 교체
+        # -------------------------------------------------------------
+        try:
+            # 교체는 원자적으로
+            os.replace(temp_path, str(DB_PATH))
+        except Exception as e:
+            # 교체 실패 시 temp 보관
+            try:
+                pending_dir = DB_PATH.parent / "_sync_tmp"
+                pending_dir.mkdir(parents=True, exist_ok=True)
+                pending_path = str(pending_dir / f"timeclock.dl_pending_{now_str()}.db")
+                os.replace(temp_path, pending_path)
+                return False, f"로컬 DB 교체 실패(잠김). pending으로 보관: {e}"
+            except Exception:
+                return False, f"로컬 DB 교체 실패: {e}"
+
+        return True, "클라우드 최신 DB 다운로드 완료"
+
+    except Exception as e:
+        return False, str(e)
+
 
 
 def apply_pending_db_if_exists():
