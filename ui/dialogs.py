@@ -319,135 +319,98 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
         if not msg:
             return
 
-        # 1) 전송 누르면 즉시 입력창 비움 (카톡 느낌)
+        # 1) 전송 누르면 즉시 입력창 비움 + 버튼 잠시 비활성
         self.le_input.clear()
         self.btn_send.setEnabled(False)
 
-        try:
-            # 2) 먼저 로컬 DB에 저장 (즉시 화면 반영의 핵심)
-            if self.my_role == "owner":
-                new_status = self.cb_status.currentData()
-                self.db.resolve_dispute(self.dispute_id, self.user_id, new_status, msg)
-                self.current_status = new_status
-            else:
-                self.db.add_dispute_message(
-                    self.dispute_id,
-                    sender_user_id=self.user_id,
-                    sender_role="worker",
-                    message=msg
-                )
+        # 2) ✅ 서버/DB 기다리지 않고 "즉시" 화면에 먼저 올림
+        self._append_local_echo(msg)
 
-            # 3) 즉시 화면 갱신 + 하단 고정
-            self.refresh_timeline()
+        # 3) 저장/업로드는 백그라운드로 처리 (UI 프리징 방지)
+        def _work():
+            try:
+                if self.my_role == "owner":
+                    new_status = self.cb_status.currentData() if self.cb_status else self.current_status
+                    self.db.resolve_dispute(self.dispute_id, self.user_id, new_status, msg)
+                    return True, new_status
+                else:
+                    self.db.add_dispute_message(
+                        self.dispute_id,
+                        sender_user_id=self.user_id,
+                        sender_role="worker",
+                        message=msg
+                    )
+                    return True, None
+            except Exception as e:
+                return False, str(e)
 
-            # 4) 서버 업로드는 백그라운드(비동기)
-            self._silent_upload("dispute_message")
+        def _done(res):
+            # res: (ok, payload)
+            try:
+                ok = bool(res[0]) if isinstance(res, (tuple, list)) and len(res) >= 1 else False
+                payload = res[1] if isinstance(res, (tuple, list)) and len(res) >= 2 else None
 
-        except Exception as e:
-            QtWidgets.QMessageBox.critical(self, "오류", f"전송 실패: {e}")
-            # 실패하면 입력 복구
-            self.le_input.setText(msg)
+                if ok:
+                    # owner면 status 갱신
+                    if self.my_role == "owner" and payload and isinstance(payload, str):
+                        self.current_status = payload
 
-        finally:
-            self.btn_send.setEnabled(True)
+                    # 정합성 맞추기 위해 로컬 DB 기반으로 다시 렌더링 + 하단 고정
+                    self.refresh_timeline()
+
+                    # 업로드는 조용히(백그라운드)
+                    self._silent_upload("dispute_message")
+                else:
+                    err = payload or "unknown error"
+                    QtWidgets.QMessageBox.critical(self, "오류", f"전송 실패: {err}")
+                    # 실패 시 입력 복구(사용자 편의)
+                    self.le_input.setText(msg)
+
+            finally:
+                self.btn_send.setEnabled(True)
+
+        self._run_silent(_work, _done)
 
     def _silent_poll_refresh(self):
         """
-        2초마다 조용히 동기화(팝업 없이):
-        - 원격 최신 DB를 temp로 다운로드
-        - temp DB에서 dispute_messages를 로컬로 병합
-        - 성공 시 refresh_timeline()
+        2초마다 호출:
+        - 클라우드 스냅샷을 받아서(dispute thread) 로컬에 병합
+        - 변경이 있으면 refresh_timeline() + 하단 고정
+        - 입력 중이면 방해하지 않음
         """
-        # 1) 사용자가 입력 중이면 방해하지 않음
+        # 입력 중이면 수신 갱신을 잠깐 멈춤(타자 방해 방지)
         try:
             if self.le_input.hasFocus() or (self.le_input.text().strip() != ""):
                 return
         except Exception:
             pass
 
-        # 2) 동기화 중이면 중복 실행 방지
         if getattr(self, "_sync_in_progress", False):
             return
 
         self._sync_in_progress = True
-        try:
-            self.lbl_sync.setText("동기화 중…")
-        except Exception:
-            pass
 
-        # ✅ 여기서 import sync_manager 하지 말 것 (PyInstaller에서 모듈 경로 깨짐)
-        # 파일 상단: from timeclock import sync_manager 를 사용한다.
-
-        def _job():
-            """
-            워커 스레드에서 실행:
-            - 원격 최신 DB를 temp로 다운로드
-            - temp DB에서 dispute_messages를 로컬로 병합
-            """
-            ok, result = sync_manager.download_latest_db(apply_replace=False)
-            if not ok:
-                return False, result
-
-            temp_db_path = result
+        def _work():
             try:
-                merged = self._merge_remote_messages_from_temp_db(temp_db_path)
-                return True, f"merged:{merged}"
-            finally:
-                try:
-                    if temp_db_path and os.path.exists(temp_db_path):
-                        os.remove(temp_db_path)
-                except Exception:
-                    pass
+                # db.py에서 cloud snapshot을 병합하는 함수가 정상 동작해야 함
+                # 병합 결과가 "변경 있음(True)/없음(False)" 형태면 그대로 사용
+                changed = self.db.sync_dispute_thread_from_cloud(self.dispute_id)
+                return True, bool(changed)
+            except Exception as e:
+                return False, str(e)
 
-        # ---- QThread로 백그라운드 실행 ----
-        self._poll_thread = QtCore.QThread(self)
-
-        class _Worker(QtCore.QObject):
-            done = QtCore.pyqtSignal(bool, str)
-
-            @QtCore.pyqtSlot()
-            def run(self):
-                try:
-                    ok, msg = _job()
-                except Exception as e:
-                    ok, msg = False, str(e)
-                self.done.emit(ok, msg)
-
-        self._poll_worker = _Worker()
-        self._poll_worker.moveToThread(self._poll_thread)
-
-        def _on_done(ok: bool, msg: str):
+        def _done(res):
             try:
-                if ok:
+                ok = bool(res[0]) if isinstance(res, (tuple, list)) and len(res) >= 1 else False
+                payload = res[1] if isinstance(res, (tuple, list)) and len(res) >= 2 else None
+
+                if ok and payload:
+                    # 변경이 있을 때만 리렌더 + 하단 고정
                     self.refresh_timeline()
-                    self._scroll_to_bottom()
-
-                # 실패 시에도 팝업 띄우지 않고 조용히 종료
             finally:
-                try:
-                    self.lbl_sync.setText("")
-                except Exception:
-                    pass
-
                 self._sync_in_progress = False
 
-                try:
-                    self._poll_thread.quit()
-                    self._poll_thread.wait(1000)
-                except Exception:
-                    pass
-                try:
-                    self._poll_worker.deleteLater()
-                except Exception:
-                    pass
-                try:
-                    self._poll_thread.deleteLater()
-                except Exception:
-                    pass
-
-        self._poll_thread.started.connect(self._poll_worker.run)
-        self._poll_worker.done.connect(_on_done)
-        self._poll_thread.start()
+        self._run_silent(_work, _done)
 
     def _merge_remote_messages_from_temp_db(self, temp_db_path: str) -> int:
         """
@@ -749,6 +712,71 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
 
         QtCore.QTimer.singleShot(0, _do)
 
+    def _append_local_echo(self, msg: str):
+        """
+        전송 버튼 누른 즉시(서버/DB 기다리지 않고) 화면에 말풍선을 추가한다.
+        - 나중에 백그라운드 저장/업로드가 끝나면 refresh_timeline()로 정합성을 맞춘다.
+        """
+        try:
+            msg = (msg or "").strip()
+            if not msg:
+                return
+
+            # 시간 표시(간단)
+            t_disp = QtCore.QDateTime.currentDateTime().toString("HH:mm")
+
+            # 내/상대 말풍선 색상
+            MY = "#FEE500"
+            OTHER = "#FFFFFF"
+            TIME = "#666666"
+
+            is_me = True  # 이 함수는 "내가 보낸 것"의 즉시 반영용
+
+            bubble_bg = MY if is_me else OTHER
+            align = "right" if is_me else "left"
+
+            def esc(s: str) -> str:
+                s = "" if s is None else str(s)
+                s = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                s = s.replace("\n", "<br>")
+                return s
+
+            html = f"""
+            <table width="100%" cellspacing="0" cellpadding="0" style="margin:6px 0;">
+              <tr>
+                <td align="{align}" valign="bottom">
+                  <div style="margin:0; padding:0;">
+                    <table cellspacing="0" cellpadding="10" style="display:inline-table; max-width:72%; border-radius:16px;">
+                      <tr>
+                        <td bgcolor="{bubble_bg}" style="border-radius:16px;">
+                          <span style="font-size:13px; line-height:1.45;">
+                            {esc(msg)}
+                          </span>
+                        </td>
+                      </tr>
+                    </table>
+
+                    <div style="font-size:11px; color:{TIME}; margin-top:2px; text-align:{align};">
+                      {esc(t_disp)}
+                    </div>
+                  </div>
+                </td>
+              </tr>
+            </table>
+            """
+
+            # QTextBrowser 끝에 append (setHtml을 다시 하지 않음)
+            cur = self.browser.textCursor()
+            cur.movePosition(cur.End)
+            cur.insertHtml(html)
+            cur.insertBlock()
+            self.browser.setTextCursor(cur)
+
+            self._scroll_to_bottom()
+
+        except Exception:
+            # 즉시 반영 실패는 UI를 깨지 않도록 조용히 무시
+            pass
 
 # timeclock/ui/dialogs.py 파일 맨 아래에 추가하세요.
 
