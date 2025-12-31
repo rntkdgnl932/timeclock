@@ -8,6 +8,21 @@ from timeclock import sync_manager
 from ui.async_helper import run_job_with_progress_async
 
 
+class _SilentWorker(QtCore.QObject):
+    finished = QtCore.pyqtSignal(bool, str)
+
+    def __init__(self, fn, parent=None):
+        super().__init__(parent)
+        self._fn = fn
+
+    @QtCore.pyqtSlot()
+    def run(self):
+        try:
+            ok = bool(self._fn())
+            self.finished.emit(ok, "")
+        except Exception as e:
+            self.finished.emit(False, str(e))
+
 class ChangePasswordDialog(QtWidgets.QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -68,8 +83,9 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
         self.setWindowTitle("이의 제기 대화방")
         self.resize(550, 800)
 
-        # ✅ 전송 중 재클릭 방지 플래그
-        self._sending = False
+        # --- 내부 상태(카톡식) ---
+        self._sync_in_progress = False
+        self._pending_upload = False  # 업로드 실패/대기 플래그
 
         # ---------------- 레이아웃 구성 ----------------
         layout = QtWidgets.QVBoxLayout()
@@ -103,6 +119,11 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
             self.cb_status.setMinimumHeight(35)
             input_layout.addWidget(self.cb_status)
 
+        # ✅ 조용한 동기화 상태 표시(작게)
+        self.lbl_sync = QtWidgets.QLabel("")
+        self.lbl_sync.setStyleSheet("color:#777; font-size:11px; padding-right:6px;")
+        input_layout.addWidget(self.lbl_sync)
+
         self.le_input = QtWidgets.QLineEdit()
         self.le_input.setPlaceholderText("메시지를 입력하세요...")
         self.le_input.setMinimumHeight(35)
@@ -114,11 +135,10 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
         self.btn_send.setCursor(QtCore.Qt.PointingHandCursor)
         self.btn_send.setStyleSheet("""
             QPushButton {
-                background-color: #fef01b; color: #3c1e1e; border: none; 
+                background-color: #fef01b; color: #3c1e1e; border: none;
                 border-radius: 4px; padding: 0 15px; font-weight: bold; height: 35px;
             }
             QPushButton:hover { background-color: #e5d817; }
-            QPushButton:disabled { background-color: #e9e9e9; color: #999; }
         """)
         self.btn_send.clicked.connect(self.send_message)
         input_layout.addWidget(self.btn_send)
@@ -126,13 +146,13 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
         layout.addWidget(input_container)
         self.setLayout(layout)
 
-        # ✅ 최초 표시
+        # 최초 표시
         self.refresh_timeline()
 
-        # ✅ 폴링(준-실시간): 2초마다 최신 DB를 받아서 화면 갱신
+        # ✅ 카톡처럼: 주기적으로 조용히(입력 중이면 건너뜀) 최신 내용 반영
         self._poll_timer = QtCore.QTimer(self)
-        self._poll_timer.setInterval(2000)
-        self._poll_timer.timeout.connect(self._poll_refresh)
+        self._poll_timer.setInterval(1500)  # 1.5초
+        self._poll_timer.timeout.connect(self._silent_poll_refresh)
         self._poll_timer.start()
 
     def _load_data(self):
@@ -198,130 +218,89 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
         if not msg:
             return
 
-        if self._sending:
-            return
+        # ✅ 1) UI는 즉시 반응(카톡식): 입력창 먼저 비우고 포커스 유지
+        self.le_input.clear()
+        self.le_input.setFocus()
 
-        if not self.dispute_id or not self.user_id:
-            QtWidgets.QMessageBox.warning(self, "오류", "이의제기 정보가 올바르지 않습니다.")
-            return
-
-        # ✅ 전송 중 잠금 (중복 클릭/엔터 방지)
-        self._sending = True
-        self.btn_send.setDisabled(True)
-        self.le_input.setDisabled(True)
-        if self.cb_status:
-            self.cb_status.setDisabled(True)
-
-        # owner면 상태코드도 같이 반영
-        new_status = None
-        if self.my_role == "owner" and self.cb_status:
-            new_status = self.cb_status.currentData()
-
-        # ✅ 스레드에서: 다운로드 → (sqlite로) 메시지/상태 반영 → 업로드
-        #    이렇게 하면 self.db.conn(None) 상태로 execute 하는 사고가 원천 차단된다.
-        def job_fn(progress_callback):
-            progress_callback({"msg": "☁️ 최신 DB 확인 중..."})
-
-            # 1) 최신 DB 다운로드(없으면 로컬 유지)
-            ok_dl, dl_msg = sync_manager.download_latest_db()
-            if not ok_dl and str(dl_msg) != "클라우드 DB 없음":
-                # 다운로드 자체가 실패(권한/잠금 등)면 여기서 중단
-                return False, f"다운로드 실패: {dl_msg}"
-
-            progress_callback({"msg": "💾 메시지 저장 중..."})
-
-            # 2) 로컬 DB 파일에 직접 반영 (스레드 내 독립 커넥션)
-            conn = sqlite3.connect(str(sync_manager.DB_PATH))
-            conn.row_factory = sqlite3.Row
-            try:
-                cur = conn.cursor()
-
-                if self.my_role == "owner":
-                    # disputes 상태 업데이트 + 메시지 저장
-                    # (테이블/컬럼명이 다르면 여기서 실패하므로 즉시 에러로 반환됨)
-                    if new_status:
-                        cur.execute(
-                            "UPDATE disputes SET status=? WHERE id=?",
-                            (new_status, self.dispute_id)
-                        )
-
-                    cur.execute(
-                        """
-                        INSERT INTO dispute_messages(dispute_id, sender_user_id, sender_role, message, created_at)
-                        VALUES(?, ?, ?, ?, datetime('now','localtime'))
-                        """,
-                        (self.dispute_id, self.user_id, "owner", msg)
-                    )
-                else:
-                    cur.execute(
-                        """
-                        INSERT INTO dispute_messages(dispute_id, sender_user_id, sender_role, message, created_at)
-                        VALUES(?, ?, ?, ?, datetime('now','localtime'))
-                        """,
-                        (self.dispute_id, self.user_id, "worker", msg)
-                    )
-
-                conn.commit()
-            finally:
-                try:
-                    conn.close()
-                except Exception:
-                    pass
-
-            progress_callback({"msg": "🚀 서버로 전송 중..."})
-
-            # 3) 업로드
-            ok_up = sync_manager.upload_current_db()
-            if not ok_up:
-                return False, "업로드 실패(충돌 방지/동기화 필요). 먼저 새로고침으로 최신 DB를 받아오세요."
-
-            return True, "전송 완료"
-
-        def on_done(ok, res, err):
-            # UI 잠금 해제
-            self._sending = False
-            self.btn_send.setDisabled(False)
-            self.le_input.setDisabled(False)
-            if self.cb_status:
-                self.cb_status.setDisabled(False)
-
-            # 메인 스레드 DB 재연결/갱신
-            try:
-                if self.db:
-                    self.db.reconnect()
-            except Exception:
-                pass
-
-            if ok:
-                if self.my_role == "owner" and new_status:
-                    self.current_status = new_status
-                self.le_input.clear()
-                try:
-                    self._load_data()
-                    self.refresh_timeline()
-                except Exception:
-                    pass
+        # ✅ 2) 로컬 DB 저장(빠르게)
+        try:
+            if self.my_role == "owner":
+                new_status = self.cb_status.currentData() if self.cb_status else self.current_status
+                self.db.resolve_dispute(self.dispute_id, self.user_id, new_status, msg)
+                self.current_status = new_status
             else:
-                QtWidgets.QMessageBox.warning(self, "전송 실패", f"{err}")
-                try:
-                    self._load_data()
-                    self.refresh_timeline()
-                except Exception:
-                    pass
+                self.db.add_dispute_message(
+                    self.dispute_id,
+                    sender_user_id=self.user_id,
+                    sender_role="worker",
+                    message=msg
+                )
+                self.db.conn.commit()
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "오류", f"저장 실패: {e}")
+            return
 
-        # 실행
-        if self.db:
-            try:
-                self.db.close_connection()
-            except Exception:
-                pass
+        # ✅ 3) 내 화면에 즉시 반영
+        self.refresh_timeline()
 
-        run_job_with_progress_async(
-            self,
-            "전송 중...",
-            job_fn,
-            on_done=on_done
-        )
+        # ✅ 4) 업로드는 조용히 백그라운드
+        self._silent_upload()
+
+    def _silent_upload(self):
+        # 동시 업로드 방지
+        if self._sync_in_progress:
+            self._pending_upload = True
+            self.lbl_sync.setText("동기화 대기…")
+            return
+
+        self._sync_in_progress = True
+        self._pending_upload = False
+        self.lbl_sync.setText("동기화 중…")
+
+        def _job():
+            # sync_manager.upload_current_db()는 이제 DB 스냅샷을 업로드하므로
+            # UI/DB 연결을 끊을 필요가 없다.
+            return sync_manager.upload_current_db()
+
+        self._thread = QtCore.QThread(self)
+        self._worker = _SilentWorker(_job)
+        self._worker.moveToThread(self._thread)
+
+        self._thread.started.connect(self._worker.run)
+        self._worker.finished.connect(self._on_upload_done)
+        self._worker.finished.connect(self._thread.quit)
+        self._worker.finished.connect(self._worker.deleteLater)
+        self._thread.finished.connect(self._thread.deleteLater)
+
+        self._thread.start()
+
+    def _silent_poll_refresh(self):
+        # 1) 입력 중이면 건너뜀(카톡처럼 타이핑 방해 금지)
+        if self.le_input.hasFocus() or (self.le_input.text().strip() != ""):
+            return
+
+        # 2) 업로드 진행 중이면 건너뜀
+        if self._sync_in_progress:
+            return
+
+        # 3) 여기서는 "다운로드로 DB 교체"까지 강제하지 않고,
+        #    일단 로컬 DB 기준으로만 새로고침(가장 안전/부드러움)
+        #    (실시간성이 더 필요하면, 별도 버튼/조건에서 download_latest_db를 백그라운드로 붙이면 됨)
+        self.refresh_timeline()
+
+    def _on_upload_done(self, ok: bool, err: str):
+        self._sync_in_progress = False
+
+        if ok:
+            self.lbl_sync.setText("")  # 조용히 성공
+        else:
+            # 팝업을 띄우면 카톡감이 깨져서, 상태만 표시(원하면 Message.err로 바꿔도 됨)
+            self.lbl_sync.setText("동기화 실패(재시도)…")
+            self._pending_upload = True
+
+        # 업로드 중에 또 메시지가 쌓였으면 한 번 더 업로드
+        if self._pending_upload:
+            QtCore.QTimer.singleShot(200, self._silent_upload)
 
     def _poll_refresh(self):
         """

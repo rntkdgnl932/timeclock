@@ -310,6 +310,10 @@ def upload_current_db():
     - last_cloud_sync_ts.txt(내가 마지막으로 받은 클라우드 버전) 이후에
       클라우드 DB가 변경되었으면 업로드를 막는다.
     - 막았을 때는 사용자가 먼저 download_latest_db()를 수행해야 한다.
+
+    [개선] DB 파일을 직접 업로드하지 않고, 로컬 DB를 임시 스냅샷으로 복사한 뒤 업로드한다.
+    - SQLite가 열려 있어도(=프로그램 사용 중이어도) 업로드가 안정적으로 동작
+    - UI에서 DB 연결을 끊을 필요가 없어져, 채팅 입력이 막히지 않는다.
     """
     if not HAS_GOOGLE_DRIVE:
         return False
@@ -322,7 +326,6 @@ def upload_current_db():
         folder_id = _get_folder_id(drive, GDRIVE_SYNC_FOLDER_NAME)
 
         # ★ 핵심: 충돌 감지(덮어쓰기 방지)
-        # 마커가 없거나, 클라우드가 그 이후 변경되었으면 업로드 금지
         if cloud_changed_since_last_sync():
             logging.warning(
                 "[Sync] 업로드 차단: 클라우드 DB가 마지막 동기화 이후 변경되었습니다. "
@@ -347,8 +350,38 @@ def upload_current_db():
         else:
             gfile = drive.CreateFile({'title': GDRIVE_DB_FILENAME, 'parents': [{'id': folder_id}]})
 
-        gfile.SetContentFile(str(DB_PATH))
-        gfile.Upload()
+        # -------------------------------
+        # ✅ DB 스냅샷(임시 복사본) 만들어 업로드
+        # -------------------------------
+        snap_dir = DB_PATH.parent / "_sync_tmp"
+        snap_dir.mkdir(parents=True, exist_ok=True)
+
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        snap_path = snap_dir / f"{DB_PATH.stem}.snapshot_{ts}{DB_PATH.suffix}"
+
+        # Windows 파일 잠금/간헐 실패 대비: 짧게 재시도
+        last_err = None
+        for _ in range(3):
+            try:
+                shutil.copy2(str(DB_PATH), str(snap_path))
+                last_err = None
+                break
+            except Exception as e:
+                last_err = e
+                time.sleep(0.15)
+
+        if last_err is not None:
+            logging.error(f"[Sync] DB 스냅샷 생성 실패: {last_err}")
+            return False
+
+        try:
+            gfile.SetContentFile(str(snap_path))
+            gfile.Upload()
+        finally:
+            try:
+                snap_path.unlink(missing_ok=True)
+            except Exception:
+                pass
 
         # ★ 업로드 성공 후: 방금 업로드된 클라우드 modifiedDate를 마커로 저장
         remote_ts = _parse_gdrive_modified_date(gfile.get('modifiedDate', ''))
