@@ -927,113 +927,114 @@ class DB:
         events.sort(key=lambda x: x["sort_key"])
         return events
 
+        # timeclock/db.py 내 sync_dispute_thread_from_cloud 함수 전체입니다.
 
     def sync_dispute_thread_from_cloud(self, dispute_id: int):
-        """
-        클라우드 DB를 '스냅샷 다운로드'만 한 뒤,
-        dispute_messages / disputes(상태)만 로컬 DB에 merge한다.
-        - 로컬 DB 파일 교체 없음 (conn 안정)
-        - 채팅 실시간 수신용
-        """
-        try:
-            temp_db_path, _remote_ts = sync_manager.download_latest_db_snapshot()
-            if not temp_db_path:
+            """
+            클라우드 DB를 '스냅샷 다운로드'만 한 뒤,
+            dispute_messages / disputes(상태)만 로컬 DB에 merge한다.
+            - 로컬 DB 파일 교체 없음 (conn 안정)
+            - 채팅 실시간 수신용
+            """
+            try:
+                # 1. 클라우드 스냅샷 다운로드
+                temp_db_path, _remote_ts = sync_manager.download_latest_db_snapshot()
+                if not temp_db_path:
+                    return False
+
+                rconn = sqlite3.connect(str(temp_db_path))
+                rconn.row_factory = sqlite3.Row
+
+                # 로컬/원격 disputes 컬럼 목록 확인
+                lcols = {r[1] for r in self.conn.execute("PRAGMA table_info(disputes)").fetchall()}
+                rcols = {r[1] for r in rconn.execute("PRAGMA table_info(disputes)").fetchall()}
+
+                def pick_time_col(cols):
+                    return "resolved_at" if "resolved_at" in cols else ("decided_at" if "decided_at" in cols else None)
+
+                def pick_by_col(cols):
+                    return "resolved_by" if "resolved_by" in cols else ("decided_by" if "decided_by" in cols else None)
+
+                r_time = pick_time_col(rcols)
+                r_by = pick_by_col(rcols)
+                l_time = pick_time_col(lcols)
+                l_by = pick_by_col(lcols)
+
+                # 1) disputes 상태 merge
+                sel_cols = ["id", "status"]
+                if r_time:
+                    sel_cols.append(r_time)
+                if r_by:
+                    sel_cols.append(r_by)
+                if "comment" in rcols:
+                    sel_cols.append("comment")
+
+                r_dispute = rconn.execute(
+                    f"SELECT {', '.join(sel_cols)} FROM disputes WHERE id=?",
+                    (int(dispute_id),)
+                ).fetchone()
+
+                if r_dispute:
+                    sets = ["status=?"]
+                    params = [r_dispute["status"]]
+
+                    if l_time and r_time:
+                        sets.append(f"{l_time}=?")
+                        params.append(r_dispute[r_time])
+                    if l_by and r_by:
+                        sets.append(f"{l_by}=?")
+                        params.append(r_dispute[r_by])
+
+                    if "comment" in lcols and "comment" in rcols:
+                        sets.append("comment=?")
+                        params.append(r_dispute["comment"])
+
+                    params.append(int(dispute_id))
+                    self.conn.execute(
+                        "UPDATE disputes SET " + ", ".join(sets) + " WHERE id=?",
+                        tuple(params)
+                    )
+
+                # 2) 메시지 merge: id(PK) 기준 INSERT OR IGNORE
+                rows = rconn.execute(
+                    "SELECT id, dispute_id, sender_user_id, sender_role, message, status_code, created_at "
+                    "FROM dispute_messages WHERE dispute_id=? ORDER BY id ASC",
+                    (int(dispute_id),)
+                ).fetchall()
+
+                inserted = 0
+                for r in rows:
+                    cur = self.conn.execute(
+                        "INSERT OR IGNORE INTO dispute_messages(id, dispute_id, sender_user_id, sender_role, message, status_code, created_at) "
+                        "VALUES(?,?,?,?,?,?,?)",
+                        (r["id"], r["dispute_id"], r["sender_user_id"], r["sender_role"], r["message"],
+                         r["status_code"],
+                         r["created_at"])
+                    )
+                    if cur.rowcount and cur.rowcount > 0:
+                        inserted += 1
+
+                self.conn.commit()
+
+                # ✅ [핵심 수정] 병합 성공 시, 클라우드 시각 마커를 갱신하여 내 컴퓨터가 최신임을 선언합니다.
+                if _remote_ts and _remote_ts > 0:
+                    sync_manager._save_last_sync_ts(_remote_ts)
+
+                try:
+                    rconn.close()
+                except Exception:
+                    pass
+
+                try:
+                    temp_db_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
+
+                return inserted > 0
+
+            except Exception as e:
+                logging.error(f"sync_dispute_thread_from_cloud failed: {e}")
                 return False
-
-            rconn = sqlite3.connect(str(temp_db_path))
-            rconn.row_factory = sqlite3.Row
-
-            # 로컬/원격 disputes 컬럼 목록
-            lcols = {r[1] for r in self.conn.execute("PRAGMA table_info(disputes)").fetchall()}
-            rcols = {r[1] for r in rconn.execute("PRAGMA table_info(disputes)").fetchall()}
-
-            def pick_time_col(cols):
-                return "resolved_at" if "resolved_at" in cols else ("decided_at" if "decided_at" in cols else None)
-
-            def pick_by_col(cols):
-                return "resolved_by" if "resolved_by" in cols else ("decided_by" if "decided_by" in cols else None)
-
-            r_time = pick_time_col(rcols)
-            r_by = pick_by_col(rcols)
-            l_time = pick_time_col(lcols)
-            l_by = pick_by_col(lcols)
-
-            # 1) disputes 상태 merge
-            # 원격에서 실제로 존재하는 컬럼만 SELECT
-            sel_cols = ["id", "status"]
-            if r_time:
-                sel_cols.append(r_time)
-            if r_by:
-                sel_cols.append(r_by)
-            if "comment" in rcols:
-                sel_cols.append("comment")
-
-            r_dispute = rconn.execute(
-                f"SELECT {', '.join(sel_cols)} FROM disputes WHERE id=?",
-                (int(dispute_id),)
-            ).fetchone()
-
-            if r_dispute:
-                sets = ["status=?"]
-                params = [r_dispute["status"]]
-
-                # 시간/작성자 컬럼은 로컬에 존재할 때만 업데이트
-                if l_time and r_time:
-                    sets.append(f"{l_time}=?")
-                    params.append(r_dispute[r_time])
-                if l_by and r_by:
-                    sets.append(f"{l_by}=?")
-                    params.append(r_dispute[r_by])
-
-                if "comment" in lcols and "comment" in rcols:
-                    sets.append("comment=?")
-                    params.append(r_dispute["comment"])
-
-                params.append(int(dispute_id))
-                self.conn.execute(
-                    "UPDATE disputes SET " + ", ".join(sets) + " WHERE id=?",
-                    tuple(params)
-                )
-
-            # 2) 메시지 merge: id(PK) 기준 INSERT OR IGNORE
-            rows = rconn.execute(
-                "SELECT id, dispute_id, sender_user_id, sender_role, message, status_code, created_at "
-                "FROM dispute_messages WHERE dispute_id=? ORDER BY id ASC",
-                (int(dispute_id),)
-            ).fetchall()
-
-            inserted = 0
-            for r in rows:
-                cur = self.conn.execute(
-                    "INSERT OR IGNORE INTO dispute_messages(id, dispute_id, sender_user_id, sender_role, message, status_code, created_at) "
-                    "VALUES(?,?,?,?,?,?,?)",
-                    (r["id"], r["dispute_id"], r["sender_user_id"], r["sender_role"], r["message"], r["status_code"],
-                     r["created_at"])
-                )
-                if cur.rowcount and cur.rowcount > 0:
-                    inserted += 1
-
-            self.conn.commit()
-
-            # ✅ 클라우드에서 최신 정보를 병합했으므로 동기화 마커를 업데이트합니다.
-            if _remote_ts and _remote_ts > 0:
-                sync_manager._save_last_sync_ts(_remote_ts)
-
-            try:
-                rconn.close()
-            except Exception:
-                pass
-
-            try:
-                temp_db_path.unlink(missing_ok=True)
-            except Exception:
-                pass
-
-            return inserted > 0
-
-        except Exception as e:
-            logging.error(f"sync_dispute_thread_from_cloud failed: {e}")
-            return False
 
     # ----------------------------------------------------------------
     # Signup / Audit / Export

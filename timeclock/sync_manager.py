@@ -461,6 +461,8 @@ def is_cloud_newer():
     return cloud_changed_since_last_sync()
 
 
+# timeclock/sync_manager.py 내 upload_current_db 함수 전체입니다.
+
 def upload_current_db(db_path: Path = None):
     """
     - db_path가 주어지면 해당 파일(스냅샷)을 업로드
@@ -470,7 +472,7 @@ def upload_current_db(db_path: Path = None):
 
     with _SYNC_LOCK:
         now = time.time()
-        # ✅ settings.py에서 가져온 전역 설정값을 사용합니다.
+        # ✅ settings.py의 전역 설정값을 사용하여 업로드 간격을 체크합니다.
         if now - _LAST_UL_CALL_TS < _MIN_CALL_INTERVAL_SEC:
             print(f"[Sync] 업로드 간격이 너무 짧습니다. (대기: {now - _LAST_UL_CALL_TS:.1f}s)")
             return False
@@ -485,7 +487,7 @@ def upload_current_db(db_path: Path = None):
 
             folder_id = _get_folder_id(drive, GDRIVE_SYNC_FOLDER_NAME)
 
-            # 충돌 감지(덮어쓰기 방지)
+            # ✅ 충돌 감지(덮어쓰기 방지): 서버가 로컬보다 최신이면 업로드를 차단합니다.
             if cloud_changed_since_last_sync():
                 logging.warning(
                     "[Sync] 업로드 차단: 클라우드 DB가 마지막 동기화 이후 변경되었습니다. "
@@ -493,6 +495,7 @@ def upload_current_db(db_path: Path = None):
                 )
                 return False
 
+            # 성공적인 업로드 시도를 위해 시점 갱신
             _LAST_UL_CALL_TS = now
             upload_path = Path(db_path) if db_path else Path(DB_PATH)
 
@@ -514,7 +517,7 @@ def upload_current_db(db_path: Path = None):
             gfile.SetContentFile(str(upload_path))
             gfile.Upload()
 
-            # 마커 저장
+            # ✅ 업로드 완료 후 마커를 저장하여 충돌 방지 로직이 정상 작동하게 합니다.
             try:
                 gfile.FetchMetadata(fields="modifiedDate")
                 remote_ts = _parse_gdrive_modified_date(gfile.get("modifiedDate", ""))

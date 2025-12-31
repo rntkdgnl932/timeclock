@@ -138,12 +138,15 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
         self.btn_send = QtWidgets.QPushButton("전송")
         # noinspection PyUnresolvedReferences
         self.btn_send.setCursor(QtCore.Qt.PointingHandCursor)
+
+        # ✅ [스타일 수정] :disabled 상태일 때 배경색을 회색(#ccc)으로, 글자색을 #888로 변경합니다.
         self.btn_send.setStyleSheet("""
             QPushButton {
                 background-color: #fef01b; color: #3c1e1e; border: none;
                 border-radius: 4px; padding: 0 15px; font-weight: bold; height: 35px;
             }
             QPushButton:hover { background-color: #e5d817; }
+            QPushButton:disabled { background-color: #cccccc; color: #888888; }
         """)
         self.btn_send.clicked.connect(self.send_message)
         input_layout.addWidget(self.btn_send)
@@ -154,10 +157,9 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
         # 최초 표시
         self.refresh_timeline()
 
-        # ✅ 폴링(다운로드/DB교체)은 너무 자주 돌면 프로그램이 망가짐
-        # 1.5초 → 7초로 완화 (카톡처럼 보이되 크래시는 줄임)
+        # ✅ 폴링(다운로드/DB교체) 간격 관리
         self._poll_timer = QtCore.QTimer(self)
-        self._poll_timer.setInterval(2000)  # ✅ 2초
+        self._poll_timer.setInterval(2000)  # 2초
         self._poll_timer.timeout.connect(self._silent_poll_refresh)
         self._poll_timer.start()
 
@@ -324,20 +326,22 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
         if not msg:
             return
 
-        # 1) 전송 누르면 즉시 입력창 비움 + 버튼 비활성화
+        # 1) 전송 시작 시 입력창 비움 및 버튼 즉시 비활성화 (스타일시트에 의해 회색으로 변함)
         self.le_input.clear()
         self.btn_send.setEnabled(False)
 
-        # 2) 화면에 즉시 표시 (로컬 에코)
+        # 2) UI 즉시 반영 (로컬 에코)
         self._append_local_echo(msg)
 
-        # 3) 저장/업로드는 백그라운드로 처리
+        # 3) 저장/업로드 백그라운드 처리 (Fetch-before-Write 로직 적용)
         def _work():
             try:
+                # ✅ 전송 전 강제 병합 실행
+                self.db.sync_dispute_thread_from_cloud(self.dispute_id)
+
                 if self.my_role == "owner":
                     new_status = self.cb_status.currentData() if self.cb_status else self.current_status
                     self.db.resolve_dispute(self.dispute_id, self.user_id, new_status, msg)
-                    return True, new_status
                 else:
                     self.db.add_dispute_message(
                         self.dispute_id,
@@ -345,28 +349,28 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
                         sender_role="worker",
                         message=msg
                     )
-                    return True, None
+
+                # ✅ 최신 DB 업로드
+                from timeclock import sync_manager
+                ok_up = sync_manager.upload_current_db()
+
+                return True, ok_up
             except Exception as e:
                 return False, str(e)
 
         def _done(res):
             try:
                 ok = bool(res[0]) if isinstance(res, (tuple, list)) and len(res) >= 1 else False
-                payload = res[1] if isinstance(res, (tuple, list)) and len(res) >= 2 else None
-
                 if ok:
-                    if self.my_role == "owner" and payload and isinstance(payload, str):
-                        self.current_status = payload
                     self.refresh_timeline()
-                    self._silent_upload("dispute_message")
                 else:
-                    err = payload or "unknown error"
+                    err = res[1] if len(res) > 1 else "Unknown error"
                     QtWidgets.QMessageBox.critical(self, "오류", f"전송 실패: {err}")
                     self.le_input.setText(msg)
 
             finally:
-                # ✅ [핵심 수정] settings.py의 간격보다 0.1초 더 길게 버튼을 잠급니다.
-                # 예: 간격이 1.0초면 1100ms(1.1초) 동안 비활성화
+                # ✅ settings.py의 _MIN_CALL_INTERVAL_SEC(1.0초) 기반으로 1.1초 후 버튼 재활성화
+                from timeclock.settings import _MIN_CALL_INTERVAL_SEC
                 lock_ms = int(_MIN_CALL_INTERVAL_SEC * 1000) + 100
                 QtCore.QTimer.singleShot(lock_ms, lambda: self.btn_send.setEnabled(True))
 
