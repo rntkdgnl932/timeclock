@@ -48,33 +48,35 @@ class DB:
     def __init__(self, db_path: Path):
         ensure_dirs()
         self.db_path = db_path
-        self.conn = sqlite3.connect(str(db_path))
+
+        # UI/스레드/동기화 상황에서 잠금/NoneType 방지
+        self.conn = sqlite3.connect(str(db_path), check_same_thread=False, timeout=30)
         self.conn.row_factory = sqlite3.Row
-        self.conn.execute("PRAGMA foreign_keys = ON;")
-        self.conn.execute("PRAGMA journal_mode = WAL;")
-        self.conn.commit()
+
+        try:
+            self.conn.execute("PRAGMA foreign_keys = ON;")
+            self.conn.execute("PRAGMA journal_mode = WAL;")
+            self.conn.commit()
+        except Exception:
+            pass
 
         self._migrate()
         self._ensure_defaults()
 
-    # timeclock/db.py 의 DB 클래스 내부에 추가하세요.
-
-    def _save_and_sync(self, tag: str) -> None:
+    def _save_and_sync(self, tag):
         """
-        기존: close_connection()을 길게 잡고 업로드 → 그 사이 UI에서 execute 호출하면 NoneType execute 터짐
-        변경: DB는 닫지 않고, commit만 한 뒤 백그라운드로 업로드/백업 실행
+        [핵심] DB 변경 후 공통 동기화
+        - 절대 close_connection()으로 conn을 None으로 만들지 않는다 (UI 전체가 공유 중일 수 있음)
+        - 커밋만 확정하고, 백업/업로드는 백그라운드로 돌린다
         """
         try:
-            if getattr(self, "conn", None) is not None:
+            if self.conn is not None:
                 self.conn.commit()
         except Exception:
-            logging.exception("_save_and_sync commit failed")
+            pass
 
-        try:
-            # run_sync_background는 별도 스레드에서 백업+업로드를 수행해야 한다.
-            run_sync_background(tag)
-        except Exception:
-            logging.exception("_save_and_sync background start failed")
+        print(f"🔄 [AutoSync] '{tag}' 동기화 시작(백그라운드)...")
+        run_sync_background(tag)
 
     def close(self):
         try:
