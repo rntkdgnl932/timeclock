@@ -341,11 +341,7 @@ class WorkerPage(QtWidgets.QWidget):
         except Exception:
             pass
         finally:
-            try:
-                self.db.reconnect()
-            except Exception:
-                Message.err(self, "오류", "DB 재연결 실패. 프로그램을 재시작하세요.")
-                return
+            self.db.reconnect()
 
         row = self.dispute_table.selected_first_row_index()
         dispute_id = None
@@ -364,21 +360,7 @@ class WorkerPage(QtWidgets.QWidget):
             )
             dlg.exec_()
 
-            # 대화 종료 후 업로드 (채팅 내용 저장) - DB 잠금 방지
-            try:
-                self.db.close_connection()
-            except Exception:
-                pass
-
-            try:
-                sync_manager.upload_current_db()
-            finally:
-                try:
-                    self.db.reconnect()
-                except Exception:
-                    Message.err(self, "오류", "DB 재연결 실패. 프로그램을 재시작하세요.")
-                    return
-
+            # ✅ 업로드는 dialogs.py(채팅창)에서만 담당 (중복 업로드/충돌 방지)
             self.refresh_my_disputes()
             return
 
@@ -397,49 +379,63 @@ class WorkerPage(QtWidgets.QWidget):
                 text, ok2 = QtWidgets.QInputDialog.getText(self, "이의 제기", "첫 메시지를 입력하세요:")
                 if ok2 and text:
 
-                    # 1. [로컬 저장] DB에 생성 (commit만 됨)
-                    try:
-                        dispute_id = self.db.create_dispute(work_log_id, self.session.user_id, item, text)
-                    except Exception as e:
-                        Message.err(self, "오류", f"이의제기 생성 실패: {e}")
+                    # 1) 신규 이의제기 생성/저장(로컬)
+                    # 2) 서버 업로드는 아래 process_async_action에서 수행
+                    dispute_type = item
+                    initial_msg = text.strip()
+                    if not initial_msg:
                         return
 
-                    # 2. [채팅창 열기 함수] 업로드가 끝나면 실행될 함수 정의
-                    def open_chat_window():
+                    def job_fn(progress_callback):
+                        # DB 잠금 방지: 작업 전 최신 다운로드
+                        self.db.close_connection()
+                        try:
+                            sync_manager.download_latest_db()
+                        except Exception:
+                            pass
+                        finally:
+                            self.db.reconnect()
+
+                        # 신규 dispute 생성
+                        dispute_id_local = self.db.create_dispute(
+                            work_log_id=work_log_id,
+                            worker_id=self.session.user_id,
+                            dispute_type=dispute_type,
+                            comment=initial_msg
+                        )
+
+                        # 업로드
+                        ok_up = sync_manager.upload_current_db()
+                        return dispute_id_local, ok_up
+
+                    def on_done(ok, res, err):
+                        if not ok:
+                            Message.err(self, "오류", f"이의제기 생성 실패: {err}")
+                            return
+
+                        dispute_id_local, ok_up = res
+                        if not ok_up:
+                            Message.warn(self, "알림", "서버 업로드가 실패했습니다. 채팅창에서 재전송될 수 있습니다.")
+
+                        self.refresh_my_disputes()
+
+                        # 생성된 dispute로 채팅 오픈
                         dlg = DisputeTimelineDialog(
                             parent=self,
                             db=self.db,
                             user_id=self.session.user_id,
-                            dispute_id=dispute_id,
+                            dispute_id=int(dispute_id_local),
                             my_role="worker"
                         )
                         dlg.exec_()
-
-                        # 채팅 끝나면 한 번 더 업로드 (채팅 내용 저장) - DB 잠금 방지
-                        try:
-                            self.db.close_connection()
-                        except Exception:
-                            pass
-
-                        try:
-                            sync_manager.upload_current_db()
-                        finally:
-                            try:
-                                self.db.reconnect()
-                            except Exception:
-                                Message.err(self, "오류", "DB 재연결 실패. 프로그램을 재시작하세요.")
-                                return
-
                         self.refresh_my_disputes()
 
-                    # 3. [업로드] 로딩창 -> 끝나면 open_chat_window 실행
-                    self.process_async_action(
-                        action_func=None,
-                        success_callback=open_chat_window
+                    run_job_with_progress_async(
+                        self,
+                        "이의제기 생성/업로드 중.",
+                        job_fn,
+                        on_done=on_done
                     )
-            return
-
-        Message.warn(self, "알림", "이의 제기 내역 또는 근무 기록을 먼저 선택해주세요.")
 
     def calculate_my_salary(self):
         # ... (생략 없이 기존 로직 유지) ...

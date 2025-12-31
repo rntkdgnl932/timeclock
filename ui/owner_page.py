@@ -825,10 +825,27 @@ class OwnerPage(QtWidgets.QWidget):
         return w
 
     def refresh_disputes(self):
+        # ✅ “새로고침” = 서버 최신 DB 다운로드 후 목록 갱신
         d1, d2 = self.filter_disputes.get_range()
         filter_type = self.cb_dispute_filter.currentData()
 
         try:
+            # 1) DB 잠금 방지: 반드시 close -> download -> reconnect
+            try:
+                self.db.close_connection()
+            except Exception:
+                pass
+
+            try:
+                sync_manager.download_latest_db()
+            finally:
+                try:
+                    self.db.reconnect()
+                except Exception as e:
+                    Message.err(self, "오류", f"DB 재연결 실패: {e}\n프로그램을 재시작하세요.")
+                    return
+
+            # 2) 최신 DB 기준 목록 로드
             rows = self.db.list_disputes(d1, d2, filter_type)
             self._dispute_rows = rows
 
@@ -839,7 +856,8 @@ class OwnerPage(QtWidgets.QWidget):
                 st_map = {"PENDING": "미처리", "IN_REVIEW": "검토중", "RESOLVED": "완료", "REJECTED": "기각"}
 
                 summary = (rr["comment"] or "").replace("\n", " ")
-                if len(summary) > 30: summary = summary[:30] + "..."
+                if len(summary) > 30:
+                    summary = summary[:30] + "."
 
                 out.append([
                     str(rr["id"]),
@@ -850,8 +868,8 @@ class OwnerPage(QtWidgets.QWidget):
                     summary,
                     rr["created_at"]
                 ])
-            self.dispute_table.set_rows(out)
 
+            self.dispute_table.set_rows(out)
             self.update_badges()
 
         except Exception as e:
@@ -877,9 +895,8 @@ class OwnerPage(QtWidgets.QWidget):
         finally:
             try:
                 self.db.reconnect()
-            except Exception:
-                # reconnect 실패면 이후 execute에서 터질 수 있으니, 여기서 바로 안내하고 종료
-                Message.err(self, "오류", "DB 재연결 실패. 프로그램을 재시작하세요.")
+            except Exception as e:
+                Message.err(self, "오류", f"DB 재연결 실패: {e}\n프로그램을 재시작하세요.")
                 return
 
         row = self.dispute_table.selected_first_row_index()
@@ -899,21 +916,7 @@ class OwnerPage(QtWidgets.QWidget):
         )
         dlg.exec_()
 
-        # [Sync] 대화 후 서버 업로드 (DB 잠금 방지: close -> upload -> reconnect)
-        try:
-            self.db.close_connection()
-        except Exception:
-            pass
-
-        try:
-            sync_manager.upload_current_db()
-        finally:
-            try:
-                self.db.reconnect()
-            except Exception:
-                Message.err(self, "오류", "DB 재연결 실패. 프로그램을 재시작하세요.")
-                return
-
+        # ✅ 업로드는 dialogs.py(채팅창)에서만 담당 (중복 업로드/충돌 방지)
         self.refresh_disputes()
 
     # ==========================================================

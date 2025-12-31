@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 from PyQt5 import QtWidgets, QtCore
 import sqlite3
+import logging
 
 from timeclock.utils import Message
 from timeclock import sync_manager
@@ -213,59 +214,6 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
         else:
             self.cb_status.setCurrentIndex(0)
 
-    def send_message(self):
-        msg = self.le_input.text().strip()
-        if not msg: return
-
-        # [1] 먼저 내 컴퓨터(DB)에 저장
-        try:
-            if self.my_role == "owner":
-                new_status = self.cb_status.currentData()
-                # db.py에서 commit만 하게 바꿨으므로 순식간에 끝남
-                self.db.resolve_dispute(self.dispute_id, self.user_id, new_status, msg)
-                self.current_status = new_status
-            else:
-                self.db.add_dispute_message(
-                    self.dispute_id,
-                    sender_user_id=self.user_id,
-                    sender_role="worker",
-                    message=msg
-                )
-                self.db.conn.commit()  # 근로자 메시지도 로컬 저장 확정
-        except Exception as e:
-            QtWidgets.QMessageBox.critical(self, "오류", f"저장 실패: {e}")
-            return
-
-        # [2] [핵심] 로딩창 띄우고 업로드 (안전장치)
-        # 1. DB 연결 끊기
-        self.db.close_connection()
-
-        # 2. 업로드 작업 정의
-        def job_fn(progress_callback):
-            progress_callback({"msg": "☁️ 메시지 전송 중..."})
-            ok = sync_manager.upload_current_db()
-            return ok, "전송 완료"
-
-        # 3. 완료 후 재연결 및 갱신
-        def on_done(ok, res, err):
-            print("🔌 DB 재연결...")
-            self.db.reconnect()  # 다시 문 열기
-
-            if ok:
-                self.le_input.clear()
-                self.refresh_timeline()  # 내 화면에 메시지 표시
-            else:
-                QtWidgets.QMessageBox.warning(self, "전송 실패", f"서버 전송 실패: {err}")
-                self.refresh_timeline()  # 실패해도 일단 내 화면엔 보여줌
-
-        # 4. 실행
-        run_job_with_progress_async(
-            self,
-            "전송 중.",
-            job_fn,
-            on_done=on_done
-        )
-
     def _silent_upload(self):
         # 동시 업로드 방지
         if self._sync_in_progress:
@@ -294,33 +242,125 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
 
         self._thread.start()
 
+    def send_message(self):
+        msg = self.le_input.text().strip()
+        if not msg:
+            return
+
+        try:
+            # 1) 로컬 DB에 먼저 저장 (UI는 즉시 갱신)
+            if self.my_role == "owner":
+                # 사업주는 dispute 상태/답변을 함께 갱신할 수 있음(기존 로직 유지)
+                # 여기서는 “답변 = 메시지”로만 저장하고 상태 변경은 기존 처리 흐름을 따름
+                self.db.add_dispute_message(self.dispute_id, "owner", msg)
+            else:
+                self.db.add_dispute_message(self.dispute_id, "worker", msg)
+
+            self.db.conn.commit()
+
+            # 2) 카톡처럼: 입력창 즉시 비우고 타임라인 즉시 갱신
+            self.le_input.clear()
+            self.refresh_timeline()
+
+            # 3) 업로드는 조용히 백그라운드로
+            self._silent_upload()
+
+        except Exception as e:
+            logging.exception("send_message failed")
+            QtWidgets.QMessageBox.warning(self, "오류", f"메시지 저장 실패: {e}")
+
     def _silent_poll_refresh(self):
-        # 1) 입력 중이면 건너뜀(카톡처럼 타이핑 방해 금지)
+        """
+        카톡처럼:
+        - 타이핑 중에는 절대 방해하지 않음
+        - 유휴 상태일 때만 서버 최신 DB를 조용히 내려받고(가능하면) 화면 갱신
+        """
+        # 1) 입력 중이면 건너뜀(타이핑 방해 금지)
         if self.le_input.hasFocus() or (self.le_input.text().strip() != ""):
             return
 
-        # 2) 업로드 진행 중이면 건너뜀
-        if self._sync_in_progress:
+        # 2) 업로드/다운로드 진행 중이면 건너뜀
+        if getattr(self, "_sync_in_progress", False):
             return
 
-        # 3) 여기서는 "다운로드로 DB 교체"까지 강제하지 않고,
-        #    일단 로컬 DB 기준으로만 새로고침(가장 안전/부드러움)
-        #    (실시간성이 더 필요하면, 별도 버튼/조건에서 download_latest_db를 백그라운드로 붙이면 됨)
-        self.refresh_timeline()
+        self._sync_in_progress = True
+        self.lbl_sync.setText("동기화 중…")
+
+        def _job():
+            # DB 파일 교체(download_latest_db)는 파일 잠금이 치명적이므로
+            # 반드시 연결을 끊고 교체 후 재연결
+            try:
+                try:
+                    self.db.close_connection()
+                except Exception:
+                    pass
+
+                ok, _msg = sync_manager.download_latest_db()
+                return ok
+            finally:
+                try:
+                    self.db.reconnect()
+                except Exception:
+                    # reconnect 실패는 다음 액션에서 터질 수 있으므로 False로 반환
+                    return False
+
+        self._poll_thread = QtCore.QThread(self)
+        self._poll_worker = _SilentWorker(_job)
+        self._poll_worker.moveToThread(self._poll_thread)
+
+        def _on_done(ok: bool, err: str):
+            self._sync_in_progress = False
+
+            if ok:
+                # 조용히 최신 반영
+                self.lbl_sync.setText("")
+                try:
+                    self.refresh_timeline()
+                except Exception:
+                    pass
+            else:
+                # 팝업 대신 상태만 표시(타이핑 UX 유지)
+                self.lbl_sync.setText("동기화 실패(대기)…")
+
+        self._poll_thread.started.connect(self._poll_worker.run)
+        self._poll_worker.finished.connect(_on_done)
+        self._poll_worker.finished.connect(self._poll_thread.quit)
+        self._poll_worker.finished.connect(self._poll_worker.deleteLater)
+        self._poll_thread.finished.connect(self._poll_thread.deleteLater)
+
+        self._poll_thread.start()
 
     def _on_upload_done(self, ok: bool, err: str):
         self._sync_in_progress = False
 
         if ok:
             self.lbl_sync.setText("")  # 조용히 성공
-        else:
-            # 팝업을 띄우면 카톡감이 깨져서, 상태만 표시(원하면 Message.err로 바꿔도 됨)
-            self.lbl_sync.setText("동기화 실패(재시도)…")
-            self._pending_upload = True
+            # 업로드 성공이면 “대기 업로드” 플래그는 해제
+            self._pending_upload = False
+            self._upload_retry_count = 0
+            return
 
-        # 업로드 중에 또 메시지가 쌓였으면 한 번 더 업로드
-        if self._pending_upload:
-            QtCore.QTimer.singleShot(200, self._silent_upload)
+        # 업로드 실패: 팝업 대신 라벨만 표시 + 대기 상태로 전환
+        self.lbl_sync.setText("동기화 실패(대기)…")
+        self._pending_upload = True
+
+        # 과도한 재시도(200ms 연타) 방지: 점진적 백오프
+        cnt = getattr(self, "_upload_retry_count", 0) + 1
+        self._upload_retry_count = cnt
+
+        # 1회: 1초, 2~3회: 3초, 4회 이상: 8초
+        if cnt <= 1:
+            delay_ms = 1000
+        elif cnt <= 3:
+            delay_ms = 3000
+        else:
+            delay_ms = 8000
+
+        # 타이핑 중이면 재시도 안 함(다음 전송/유휴 때 자연스럽게)
+        if self.le_input.hasFocus() or (self.le_input.text().strip() != ""):
+            return
+
+        QtCore.QTimer.singleShot(delay_ms, self._silent_upload)
 
     def _poll_refresh(self):
         """
