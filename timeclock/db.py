@@ -765,12 +765,7 @@ class DB:
             (date_from, date_to, limit)
         ).fetchall()
 
-    def resolve_dispute(self, dispute_id, owner_id, new_status, resolution_comment, autosync: bool = True):
-        """
-        dispute 상태 변경 + (선택)코멘트 메시지 기록.
-        - autosync=True : 기존처럼 즉시 _save_and_sync 트리거
-        - autosync=False: 로컬 저장/커밋만 수행 (UI에서 사용)
-        """
+    def resolve_dispute(self, dispute_id, owner_id, new_status, resolution_comment):
         now = now_str()
         resolution_comment = (resolution_comment or "").strip()
 
@@ -807,32 +802,15 @@ class DB:
         sql = "UPDATE disputes SET " + ", ".join(sets) + " WHERE id=?"
         params.append(int(dispute_id))
         self.conn.execute(sql, tuple(params))
-        self.conn.commit()
 
-        # 2) 코멘트가 있으면 dispute_messages에도 남김
+        # 2) 메시지가 있다면 추가(이 안에서 _save_and_sync 호출됨)
         if resolution_comment:
-            # resolve_dispute에서 autosync를 제어하므로, add_dispute_message에는 동일 autosync를 전달
-            self.add_dispute_message(
-                dispute_id,
-                owner_id,
-                "owner",
-                resolution_comment,
-                new_status,
-                autosync=autosync,
-            )
-            return
-
-        # 3) 코멘트가 없고 autosync면 resolve 이벤트만 업로드
-        if autosync:
+            self.add_dispute_message(dispute_id, owner_id, "owner", resolution_comment, new_status)
+        else:
+            self.conn.commit()
             self._save_and_sync("dispute_resolve")
 
-    def add_dispute_message(self, dispute_id, sender_user_id, sender_role, message, status_code=None,
-                            autosync: bool = True):
-        """
-        dispute_messages INSERT.
-        - autosync=True : 기존처럼 즉시 _save_and_sync 트리거
-        - autosync=False: 로컬 저장/커밋만 수행 (UI에서 사용)
-        """
+    def add_dispute_message(self, dispute_id, sender_user_id, sender_role, message, status_code=None):
         message = (message or "").strip()
         if not message:
             return
@@ -840,12 +818,12 @@ class DB:
         self.conn.execute(
             "INSERT INTO dispute_messages(dispute_id, sender_user_id, sender_role, message, status_code, created_at) "
             "VALUES(?,?,?,?,?,?)",
-            (dispute_id, int(sender_user_id), str(sender_role), message, status_code, now_str()),
+            (dispute_id, int(sender_user_id), str(sender_role), message, status_code, now_str())
         )
         self.conn.commit()
 
-        if autosync:
-            self._save_and_sync("dispute_message")
+        # ✅ 이의제기 메시지는 즉시 서버 업로드 트리거
+        self._save_and_sync("dispute_message")
 
     def get_dispute_timeline(self, dispute_id):
         req_row = self.conn.execute("SELECT work_log_id FROM disputes WHERE id=?", (dispute_id,)).fetchone()
