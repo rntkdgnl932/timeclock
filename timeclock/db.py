@@ -927,6 +927,7 @@ class DB:
         events.sort(key=lambda x: x["sort_key"])
         return events
 
+
     def sync_dispute_thread_from_cloud(self, dispute_id: int):
         """
         클라우드 DB를 '스냅샷 다운로드'만 한 뒤,
@@ -1013,6 +1014,10 @@ class DB:
                     inserted += 1
 
             self.conn.commit()
+
+            # ✅ 클라우드에서 최신 정보를 병합했으므로 동기화 마커를 업데이트합니다.
+            if _remote_ts and _remote_ts > 0:
+                sync_manager._save_last_sync_ts(_remote_ts)
 
             try:
                 rconn.close()

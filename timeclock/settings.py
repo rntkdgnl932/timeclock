@@ -87,3 +87,12 @@ WORK_STATUS = {
     "APPROVED": "확정(승인)",  # 퇴근까지 관리자가 다 승인한 상태
     "REJECTED": "반려"
 }
+
+
+
+
+_MIN_CALL_INTERVAL_SEC = 1.0
+
+
+
+

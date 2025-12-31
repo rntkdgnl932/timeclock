@@ -5,7 +5,7 @@ import shutil
 import logging
 from pathlib import Path
 import datetime
-from timeclock.settings import DB_PATH, APP_DIR
+from timeclock.settings import DB_PATH, APP_DIR, _MIN_CALL_INTERVAL_SEC
 from timeclock.utils import now_str
 import requests  # [추가] 다운로드 통신용
 import time      # [추가] 캐시방지 시간생성용
@@ -470,9 +470,10 @@ def upload_current_db(db_path: Path = None):
 
     with _SYNC_LOCK:
         now = time.time()
+        # ✅ settings.py에서 가져온 전역 설정값을 사용합니다.
         if now - _LAST_UL_CALL_TS < _MIN_CALL_INTERVAL_SEC:
+            print(f"[Sync] 업로드 간격이 너무 짧습니다. (대기: {now - _LAST_UL_CALL_TS:.1f}s)")
             return False
-        _LAST_UL_CALL_TS = now
 
         if not HAS_GOOGLE_DRIVE:
             return False
@@ -488,10 +489,11 @@ def upload_current_db(db_path: Path = None):
             if cloud_changed_since_last_sync():
                 logging.warning(
                     "[Sync] 업로드 차단: 클라우드 DB가 마지막 동기화 이후 변경되었습니다. "
-                    "먼저 최신 DB를 다운로드한 뒤 다시 시도하세요."
+                    "먼저 최신 DB를 다운로드(병합)한 뒤 다시 시도하세요."
                 )
                 return False
 
+            _LAST_UL_CALL_TS = now
             upload_path = Path(db_path) if db_path else Path(DB_PATH)
 
             query = f"'{folder_id}' in parents and title = '{GDRIVE_DB_FILENAME}' and trashed = false"
@@ -500,7 +502,6 @@ def upload_current_db(db_path: Path = None):
             if file_list:
                 file_list.sort(key=lambda x: x.get('modifiedDate', ''), reverse=True)
                 gfile = file_list[0]
-                # 중복 정리
                 if len(file_list) > 1:
                     for old_f in file_list[1:]:
                         try:
@@ -513,7 +514,7 @@ def upload_current_db(db_path: Path = None):
             gfile.SetContentFile(str(upload_path))
             gfile.Upload()
 
-            # last_sync_ts 저장
+            # 마커 저장
             try:
                 gfile.FetchMetadata(fields="modifiedDate")
                 remote_ts = _parse_gdrive_modified_date(gfile.get("modifiedDate", ""))

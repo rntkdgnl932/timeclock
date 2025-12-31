@@ -7,7 +7,8 @@ import os
 from timeclock.utils import Message
 from timeclock import sync_manager
 from ui.async_helper import run_job_with_progress_async
-
+# 기존 임포트 코드 아래에 추가합니다.
+from timeclock.settings import _MIN_CALL_INTERVAL_SEC
 
 class _SilentWorker(QtCore.QObject):
     finished = QtCore.pyqtSignal(bool, str)
@@ -263,15 +264,19 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
                 return False, str(e)
 
         def _done(result):
+            # ✅ 성공 여부와 관계없이 작업이 끝났으므로 플래그를 해제합니다.
             self._uploading = False
             ok, err = result
-            if not ok and err:
+            if ok:
+                self.lbl_sync.setText("") # 성공 시 라벨 비움
+            elif err:
                 # 조용히 실패 로그만 남기고, UX는 유지
                 try:
                     import logging
                     logging.exception("[DisputeChat] silent upload failed: %s", err)
                 except Exception:
                     pass
+                self.lbl_sync.setText("동기화 대기중…")
 
         self._run_silent(_do, _done)
 
@@ -319,14 +324,14 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
         if not msg:
             return
 
-        # 1) 전송 누르면 즉시 입력창 비움 + 버튼 잠시 비활성
+        # 1) 전송 누르면 즉시 입력창 비움 + 버튼 비활성화
         self.le_input.clear()
         self.btn_send.setEnabled(False)
 
-        # 2) ✅ 서버/DB 기다리지 않고 "즉시" 화면에 먼저 올림
+        # 2) 화면에 즉시 표시 (로컬 에코)
         self._append_local_echo(msg)
 
-        # 3) 저장/업로드는 백그라운드로 처리 (UI 프리징 방지)
+        # 3) 저장/업로드는 백그라운드로 처리
         def _work():
             try:
                 if self.my_role == "owner":
@@ -345,29 +350,25 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
                 return False, str(e)
 
         def _done(res):
-            # res: (ok, payload)
             try:
                 ok = bool(res[0]) if isinstance(res, (tuple, list)) and len(res) >= 1 else False
                 payload = res[1] if isinstance(res, (tuple, list)) and len(res) >= 2 else None
 
                 if ok:
-                    # owner면 status 갱신
                     if self.my_role == "owner" and payload and isinstance(payload, str):
                         self.current_status = payload
-
-                    # 정합성 맞추기 위해 로컬 DB 기반으로 다시 렌더링 + 하단 고정
                     self.refresh_timeline()
-
-                    # 업로드는 조용히(백그라운드)
                     self._silent_upload("dispute_message")
                 else:
                     err = payload or "unknown error"
                     QtWidgets.QMessageBox.critical(self, "오류", f"전송 실패: {err}")
-                    # 실패 시 입력 복구(사용자 편의)
                     self.le_input.setText(msg)
 
             finally:
-                self.btn_send.setEnabled(True)
+                # ✅ [핵심 수정] settings.py의 간격보다 0.1초 더 길게 버튼을 잠급니다.
+                # 예: 간격이 1.0초면 1100ms(1.1초) 동안 비활성화
+                lock_ms = int(_MIN_CALL_INTERVAL_SEC * 1000) + 100
+                QtCore.QTimer.singleShot(lock_ms, lambda: self.btn_send.setEnabled(True))
 
         self._run_silent(_work, _done)
 
