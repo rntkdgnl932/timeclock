@@ -8,7 +8,7 @@ from timeclock.utils import Message
 from timeclock import sync_manager
 from ui.async_helper import run_job_with_progress_async
 
-######
+###### ajwl
 class _SilentWorker(QtCore.QObject):
     finished = QtCore.pyqtSignal(bool, str)
 
