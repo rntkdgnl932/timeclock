@@ -63,20 +63,80 @@ class DB:
         self._migrate()
         self._ensure_defaults()
 
-    def _save_and_sync(self, tag):
+    def _save_and_sync(self, tag: str):
         """
-        [핵심] DB 변경 후 공통 동기화
-        - 절대 close_connection()으로 conn을 None으로 만들지 않는다 (UI 전체가 공유 중일 수 있음)
-        - 커밋만 확정하고, 백업/업로드는 백그라운드로 돌린다
+        [안정화 핵심]
+        - UI가 DB를 사용 중인 상태에서 self.conn을 close/reconnect 하지 않는다. (크래시 원인)
+        - 대신 DB 스냅샷 파일을 만들어 백그라운드에서:
+            1) 로컬 백업
+            2) 구글드라이브 업로드(스냅샷 파일 업로드)
+          를 수행한다.
         """
         try:
-            if self.conn is not None:
+            # DB 변경사항은 우선 커밋
+            try:
                 self.conn.commit()
-        except Exception:
-            pass
+            except Exception:
+                pass
 
-        print(f"🔄 [AutoSync] '{tag}' 동기화 시작(백그라운드)...")
-        run_sync_background(tag)
+            # 스냅샷 파일 생성
+            snap_dir = self.db_path.parent / "_sync_tmp"
+            snap_dir.mkdir(parents=True, exist_ok=True)
+
+            ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            snap_path = snap_dir / f"{self.db_path.stem}.snapshot_{ts}{self.db_path.suffix}"
+
+            # WAL 환경에서 안전하게 파일을 “복사”하기 위해 checkpoint 후 복사
+            try:
+                self.conn.execute("PRAGMA wal_checkpoint(FULL);")
+                self.conn.commit()
+            except Exception:
+                pass
+
+            # 짧게 재시도(Windows 잠금/간헐 실패 대비)
+            last_err = None
+            for _ in range(3):
+                try:
+                    shutil.copy2(str(self.db_path), str(snap_path))
+                    last_err = None
+                    break
+                except Exception as e:
+                    last_err = e
+                    time.sleep(0.15)
+
+            if last_err is not None:
+                print(f"[AutoSync] snapshot copy failed: {last_err}")
+                return
+
+            def _worker():
+                try:
+                    # 1) 로컬 백업(기존 정책 유지)
+                    try:
+                        backup_manager.run_backup(tag)
+                    except Exception as e:
+                        print(f"[AutoSync] backup failed: {e}")
+
+                    # 2) 업로드(스냅샷 파일 업로드)
+                    try:
+                        ok = sync_manager.upload_current_db(db_path=snap_path)
+                        if ok:
+                            print(f"✅ [AutoSync] '{tag}' 업로드 완료")
+                        else:
+                            print(f"⚠️ [AutoSync] '{tag}' 업로드 차단/실패")
+                    except Exception as e:
+                        print(f"[AutoSync] upload failed: {e}")
+
+                finally:
+                    try:
+                        snap_path.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+
+            t = threading.Thread(target=_worker, daemon=True)
+            t.start()
+
+        except Exception as e:
+            print(f"[AutoSync] _save_and_sync failed: {e}")
 
     def close(self):
         try:

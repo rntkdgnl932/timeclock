@@ -300,34 +300,46 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
         self._silent_workers.append(w)
 
     def send_message(self):
+        """
+        - 입력 위젯은 QLineEdit 기준: text() 사용
+        - DB.add_dispute_message 시그니처: (dispute_id, sender_user_id, sender_role, message, ...)
+        - 업로드/백업은 DB._save_and_sync에서 백그라운드로 처리(여기서 close/reconnect 금지)
+        """
         try:
-            msg = (self.input.toPlainText() or "").strip()
+            # QLineEdit 기준
+            if hasattr(self, "input") and self.input is not None:
+                # 혹시 예전 코드가 self.input을 쓰는 경우를 커버
+                msg = self.input.text().strip() if hasattr(self.input, "text") else ""
+            elif hasattr(self, "le_input") and self.le_input is not None:
+                msg = self.le_input.text().strip()
+            else:
+                msg = ""
+
             if not msg:
                 return
 
-            # DB 연결 보장 (동기화/새로고침에서 close될 수 있음)
-            if hasattr(self.db, "ensure_connection"):
-                self.db.ensure_connection()
-
-            # ✅ add_dispute_message 시그니처: (dispute_id, user_id, sender_role, message, ...)
-            # DB.add_dispute_message()가 4개 필수 인자를 요구하는 구조로 되어 있으므로 반드시 맞춰 호출
+            # sender_user_id / sender_role 정확히 전달
             self.db.add_dispute_message(
                 self.dispute_id,
-                self.user_id,
-                self.my_role,
+                int(self.user_id),
+                str(self.my_role),
                 msg
             )
 
-            self.input.clear()
+            # 입력창 비우기
+            if hasattr(self, "input") and hasattr(self.input, "clear"):
+                self.input.clear()
+            if hasattr(self, "le_input") and hasattr(self.le_input, "clear"):
+                self.le_input.clear()
+
+            # 화면 갱신
             self.refresh_timeline()
 
-            # 채팅은 “즉시 업로드”가 UX적으로 중요 → 조용히 업로드 트리거
-            self._silent_upload(tag="dispute_chat")
-
         except Exception as e:
-            import traceback
-            traceback.print_exc()
-            Message.err(self, "오류", f"메시지 저장 실패: {e}")
+            try:
+                Message.err(self, "오류", f"메시지 저장 실패: {e}")
+            except Exception:
+                pass
 
     def _silent_poll_refresh(self):
         """

@@ -10,7 +10,13 @@ from timeclock.utils import now_str
 import requests  # [추가] 다운로드 통신용
 import time      # [추가] 캐시방지 시간생성용
 import threading
+
+# ✅ 동기화(다운/업) 동시 실행 방지 + 폭주 방지(크래시 방어)
 _SYNC_LOCK = threading.RLock()
+_LAST_DL_CALL_TS = 0.0
+_LAST_UL_CALL_TS = 0.0
+_MIN_CALL_INTERVAL_SEC = 3.0
+
 
 
 # [설정] 구글 드라이브 경로 및 설정
@@ -179,6 +185,34 @@ def _get_cloud_db_file_and_ts(drive, folder_id: str):
     remote_ts = _parse_gdrive_modified_date(gfile.get('modifiedDate', ''))
     return gfile, remote_ts
 
+def _find_file_in_folder(drive, folder_id: str, filename: str):
+    """
+    특정 폴더(folder_id) 안에서 title=filename 인 파일을 1개 찾아 반환.
+    없으면 None.
+    중복이면 최신(modifiedDate) 1개만 남기고 나머지는 Trash 처리.
+    """
+    try:
+        query = f"'{folder_id}' in parents and title = '{filename}' and trashed = false"
+        file_list = drive.ListFile({'q': query}).GetList()
+        if not file_list:
+            return None
+
+        # 최신 1개 선택
+        file_list.sort(key=lambda x: x.get('modifiedDate', ''), reverse=True)
+        gfile = file_list[0]
+
+        # 중복 정리
+        if len(file_list) > 1:
+            for old_f in file_list[1:]:
+                try:
+                    old_f.Trash()
+                except Exception:
+                    pass
+
+        return gfile
+    except Exception:
+        return None
+
 
 def cloud_changed_since_last_sync() -> bool:
     """
@@ -219,10 +253,19 @@ def cloud_changed_since_last_sync() -> bool:
 
 def download_latest_db():
     """
-    [수정됨] requests를 이용해 URL 뒤에 타임스탬프를 붙여
-    강제로 최신 파일을 받아오도록(캐시 무시) 변경했습니다.
+    [안정화 패치]
+    - 동시/연속 호출 방지(락 + 쿨다운)
+    - requests는 timeout/stream 사용 (대용량/네이티브 크래시 위험 감소)
     """
+    global _LAST_DL_CALL_TS
+
     with _SYNC_LOCK:
+        now = time.time()
+        if now - _LAST_DL_CALL_TS < _MIN_CALL_INTERVAL_SEC:
+            # 너무 빠른 연속 호출은 바로 컷 (폭주 방지)
+            return False, "download cooldown"
+        _LAST_DL_CALL_TS = now
+
         if not HAS_GOOGLE_DRIVE:
             return False, "PyDrive 미설치"
 
@@ -237,57 +280,77 @@ def download_latest_db():
             if not gfile:
                 return False, "클라우드 DB 없음"
 
-            # 임시 파일 경로
             temp_path = str(DB_PATH) + ".temp"
 
             # -------------------------------------------------------------
-            # 🔴 [핵심 수정] PyDrive의 GetContentFile 대신 requests 사용
+            # ✅ requests 방식(안정화: timeout/stream)
             # -------------------------------------------------------------
             try:
-                url = gfile["downloadUrl"]
-                # cache busting
-                url_with_ts = f"{url}&t={int(time.time())}"
+                access_token = drive.auth.credentials.access_token
+                timestamp = int(time.time())
+                file_id = gfile["id"]
+                download_url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media&t={timestamp}"
+                headers = {"Authorization": f"Bearer {access_token}"}
 
-                print(f"[Sync] 캐시 무시 다운로드 요청: {url_with_ts}")
+                print(f"[Sync] 캐시 무시 다운로드 요청: {download_url}")
 
-                headers = {"Authorization": f"Bearer {drive.auth.credentials.access_token}"}
-                r = requests.get(url_with_ts, headers=headers, stream=True, timeout=30)
-                r.raise_for_status()
+                with requests.get(download_url, headers=headers, stream=True, timeout=30) as r:
+                    r.raise_for_status()
+                    with open(temp_path, "wb") as f:
+                        for chunk in r.iter_content(chunk_size=1024 * 1024):
+                            if chunk:
+                                f.write(chunk)
 
-                with open(temp_path, "wb") as f:
-                    for chunk in r.iter_content(chunk_size=1024 * 1024):
-                        if chunk:
-                            f.write(chunk)
-
-            except Exception as e:
-                return False, f"다운로드 실패: {e}"
+            except Exception as req_e:
+                # requests 실패 시 PyDrive fallback
+                print(f"[Sync] requests 로직 에러: {req_e}, 기본 방식으로 재시도합니다.")
+                try:
+                    gfile.GetContentFile(temp_path)
+                except Exception as e2:
+                    try:
+                        if os.path.exists(temp_path):
+                            os.remove(temp_path)
+                    except Exception:
+                        pass
+                    logging.error(f"[Sync] 다운로드 실패: {e2}")
+                    return False, f"다운로드 실패: {e2}"
 
             # -------------------------------------------------------------
             # 로컬 DB 교체 (잠김이면 실패 처리)
             # -------------------------------------------------------------
             try:
-                # 기존 DB 백업/교체 로직이 있는 경우 그대로 유지
                 if os.path.exists(DB_PATH):
                     try:
                         os.remove(DB_PATH)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        try:
+                            if os.path.exists(temp_path):
+                                os.remove(temp_path)
+                        except Exception:
+                            pass
+                        logging.error(f"[Sync] 기존 DB 삭제 실패: {e}")
+                        return False, f"실행 중인 DB 파일을 덮어쓸 수 없습니다. (잠금 상태): {e}"
 
                 shutil.move(temp_path, DB_PATH)
 
             except Exception as e:
-                # temp는 남겨도 되지만, 최대한 정리
                 try:
                     if os.path.exists(temp_path):
-                        pass
+                        os.remove(temp_path)
                 except Exception:
                     pass
+                logging.error(f"[Sync] 로컬 DB 교체 실패: {e}")
                 return False, f"로컬 DB 교체 실패: {e}"
+
+            if remote_ts and remote_ts > 0:
+                _save_last_sync_ts(remote_ts)
 
             return True, "클라우드 최신 DB 다운로드 완료"
 
         except Exception as e:
-            return False, f"download_latest_db 예외: {e}"
+            logging.error(f"[Sync] 다운로드 실패: {e}")
+            return False, str(e)
+
 
 def apply_pending_db_if_exists():
     """
@@ -321,101 +384,79 @@ def is_cloud_newer():
     return cloud_changed_since_last_sync()
 
 
-def upload_current_db():
+def upload_current_db(db_path: Path = None):
     """
-    [중요] 업로드 전에 충돌 검사:
-    - last_cloud_sync_ts.txt(내가 마지막으로 받은 클라우드 버전) 이후에
-      클라우드 DB가 변경되었으면 업로드를 막는다.
-    - 막았을 때는 사용자가 먼저 download_latest_db()를 수행해야 한다.
-
-    [개선] DB 파일을 직접 업로드하지 않고, 로컬 DB를 임시 스냅샷으로 복사한 뒤 업로드한다.
-    - SQLite가 열려 있어도(=프로그램 사용 중이어도) 업로드가 안정적으로 동작
-    - UI에서 DB 연결을 끊을 필요가 없어져, 채팅 입력이 막히지 않는다.
+    [안정화 패치]
+    - 동시/연속 호출 방지(락 + 쿨다운)
+    - 충돌 감지 로직 유지
+    - db_path가 주어지면 해당 파일(스냅샷)을 업로드한다.
+      (UI DB 연결을 닫지 않아도 됨)
     """
-    if not HAS_GOOGLE_DRIVE:
-        return False
+    global _LAST_UL_CALL_TS
 
-    try:
-        drive = _get_drive()
-        if not drive:
+    with _SYNC_LOCK:
+        now = time.time()
+        if now - _LAST_UL_CALL_TS < _MIN_CALL_INTERVAL_SEC:
             return False
+        _LAST_UL_CALL_TS = now
 
-        folder_id = _get_folder_id(drive, GDRIVE_SYNC_FOLDER_NAME)
-
-        # ★ 핵심: 충돌 감지(덮어쓰기 방지)
-        if cloud_changed_since_last_sync():
-            logging.warning(
-                "[Sync] 업로드 차단: 클라우드 DB가 마지막 동기화 이후 변경되었습니다. "
-                "먼저 클라우드 최신 DB를 다운로드(download_latest_db)한 뒤 다시 시도하세요."
-            )
-            return False
-
-        # 기존 파일 검색(없으면 새로 생성)
-        query = f"'{folder_id}' in parents and title = '{GDRIVE_DB_FILENAME}' and trashed = false"
-        file_list = drive.ListFile({'q': query}).GetList()
-
-        gfile = None
-        if file_list:
-            file_list.sort(key=lambda x: x.get('modifiedDate', ''), reverse=True)
-            gfile = file_list[0]
-            if len(file_list) > 1:
-                for old_f in file_list[1:]:
-                    try:
-                        old_f.Trash()
-                    except Exception:
-                        pass
-        else:
-            gfile = drive.CreateFile({'title': GDRIVE_DB_FILENAME, 'parents': [{'id': folder_id}]})
-
-        # -------------------------------
-        # ✅ DB 스냅샷(임시 복사본) 만들어 업로드
-        # -------------------------------
-        snap_dir = DB_PATH.parent / "_sync_tmp"
-        snap_dir.mkdir(parents=True, exist_ok=True)
-
-        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        snap_path = snap_dir / f"{DB_PATH.stem}.snapshot_{ts}{DB_PATH.suffix}"
-
-        # Windows 파일 잠금/간헐 실패 대비: 짧게 재시도
-        last_err = None
-        for _ in range(3):
-            try:
-                shutil.copy2(str(DB_PATH), str(snap_path))
-                last_err = None
-                break
-            except Exception as e:
-                last_err = e
-                time.sleep(0.15)
-
-        if last_err is not None:
-            logging.error(f"[Sync] DB 스냅샷 생성 실패: {last_err}")
+        if not HAS_GOOGLE_DRIVE:
             return False
 
         try:
-            gfile.SetContentFile(str(snap_path))
+            drive = _get_drive()
+            if not drive:
+                return False
+
+            folder_id = _get_folder_id(drive, GDRIVE_SYNC_FOLDER_NAME)
+
+            # ★ 충돌 감지(덮어쓰기 방지)
+            if cloud_changed_since_last_sync():
+                logging.warning(
+                    "[Sync] 업로드 차단: 클라우드 DB가 마지막 동기화 이후 변경되었습니다. "
+                    "먼저 클라우드 최신 DB를 다운로드(download_latest_db)한 뒤 다시 시도하세요."
+                )
+                return False
+
+            upload_path = Path(db_path) if db_path else Path(DB_PATH)
+
+            # 기존 파일 검색(없으면 새로 생성) - _find_file_in_folder 없어도 동작하도록 내장 검색 사용
+            query = f"'{folder_id}' in parents and title = '{GDRIVE_DB_FILENAME}' and trashed = false"
+            file_list = drive.ListFile({'q': query}).GetList()
+
+            gfile = None
+            if file_list:
+                file_list.sort(key=lambda x: x.get('modifiedDate', ''), reverse=True)
+                gfile = file_list[0]
+                # 중복 파일 정리
+                if len(file_list) > 1:
+                    for old_f in file_list[1:]:
+                        try:
+                            old_f.Trash()
+                        except Exception:
+                            pass
+            else:
+                gfile = drive.CreateFile({'title': GDRIVE_DB_FILENAME, 'parents': [{'id': folder_id}]})
+
+            gfile.SetContentFile(str(upload_path))
             gfile.Upload()
-        finally:
+
+            # 업로드 성공 후, 클라우드 modifiedDate를 last_sync로 저장
             try:
-                snap_path.unlink(missing_ok=True)
+                gfile.FetchMetadata(fields="modifiedDate")
+                remote_ts = _parse_gdrive_modified_date(gfile.get("modifiedDate", ""))
+                if remote_ts and remote_ts > 0:
+                    _save_last_sync_ts(remote_ts)
             except Exception:
                 pass
 
-        # ★ 업로드 성공 후: 방금 업로드된 클라우드 modifiedDate를 마커로 저장
-        remote_ts = _parse_gdrive_modified_date(gfile.get('modifiedDate', ''))
-        if remote_ts > 0:
-            _save_last_sync_ts(remote_ts)
+            logging.info(f"[Sync] 업로드 완료: {GDRIVE_DB_FILENAME}")
+            return True
 
-        logging.info(f"[Sync] 업로드 완료: {GDRIVE_DB_FILENAME}")
-        return True
+        except Exception as e:
+            logging.error(f"[Sync] 업로드 실패: {e}")
+            return False
 
-    except Exception as e:
-        logging.error(f"[Sync] 업로드 실패: {e}")
-        return False
-
-
-# timeclock/sync_manager.py 맨 아래에 추가
-
-# timeclock/sync_manager.py 파일의 맨 끝에 아래 내용을 붙여넣으세요.
 
 def run_startup_sync():
     """
