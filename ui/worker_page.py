@@ -341,7 +341,11 @@ class WorkerPage(QtWidgets.QWidget):
         except Exception:
             pass
         finally:
-            self.db.reconnect()
+            try:
+                self.db.reconnect()
+            except Exception:
+                Message.err(self, "오류", "DB 재연결 실패. 프로그램을 재시작하세요.")
+                return
 
         row = self.dispute_table.selected_first_row_index()
         dispute_id = None
@@ -360,8 +364,21 @@ class WorkerPage(QtWidgets.QWidget):
             )
             dlg.exec_()
 
-            # 대화 종료 후 업로드 (채팅 내용 저장)
-            sync_manager.upload_current_db()
+            # 대화 종료 후 업로드 (채팅 내용 저장) - DB 잠금 방지
+            try:
+                self.db.close_connection()
+            except Exception:
+                pass
+
+            try:
+                sync_manager.upload_current_db()
+            finally:
+                try:
+                    self.db.reconnect()
+                except Exception:
+                    Message.err(self, "오류", "DB 재연결 실패. 프로그램을 재시작하세요.")
+                    return
+
             self.refresh_my_disputes()
             return
 
@@ -389,7 +406,6 @@ class WorkerPage(QtWidgets.QWidget):
 
                     # 2. [채팅창 열기 함수] 업로드가 끝나면 실행될 함수 정의
                     def open_chat_window():
-                        # 이때는 DB가 재연결된 상태이므로 안전함
                         dlg = DisputeTimelineDialog(
                             parent=self,
                             db=self.db,
@@ -398,8 +414,22 @@ class WorkerPage(QtWidgets.QWidget):
                             my_role="worker"
                         )
                         dlg.exec_()
-                        # 채팅 끝나면 한 번 더 업로드 (채팅 내용 저장)
-                        sync_manager.upload_current_db()
+
+                        # 채팅 끝나면 한 번 더 업로드 (채팅 내용 저장) - DB 잠금 방지
+                        try:
+                            self.db.close_connection()
+                        except Exception:
+                            pass
+
+                        try:
+                            sync_manager.upload_current_db()
+                        finally:
+                            try:
+                                self.db.reconnect()
+                            except Exception:
+                                Message.err(self, "오류", "DB 재연결 실패. 프로그램을 재시작하세요.")
+                                return
+
                         self.refresh_my_disputes()
 
                     # 3. [업로드] 로딩창 -> 끝나면 open_chat_window 실행

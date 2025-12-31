@@ -215,17 +215,13 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
 
     def send_message(self):
         msg = self.le_input.text().strip()
-        if not msg:
-            return
+        if not msg: return
 
-        # ✅ 1) UI는 즉시 반응(카톡식): 입력창 먼저 비우고 포커스 유지
-        self.le_input.clear()
-        self.le_input.setFocus()
-
-        # ✅ 2) 로컬 DB 저장(빠르게)
+        # [1] 먼저 내 컴퓨터(DB)에 저장
         try:
             if self.my_role == "owner":
-                new_status = self.cb_status.currentData() if self.cb_status else self.current_status
+                new_status = self.cb_status.currentData()
+                # db.py에서 commit만 하게 바꿨으므로 순식간에 끝남
                 self.db.resolve_dispute(self.dispute_id, self.user_id, new_status, msg)
                 self.current_status = new_status
             else:
@@ -235,16 +231,40 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
                     sender_role="worker",
                     message=msg
                 )
-                self.db.conn.commit()
+                self.db.conn.commit()  # 근로자 메시지도 로컬 저장 확정
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, "오류", f"저장 실패: {e}")
             return
 
-        # ✅ 3) 내 화면에 즉시 반영
-        self.refresh_timeline()
+        # [2] [핵심] 로딩창 띄우고 업로드 (안전장치)
+        # 1. DB 연결 끊기
+        self.db.close_connection()
 
-        # ✅ 4) 업로드는 조용히 백그라운드
-        self._silent_upload()
+        # 2. 업로드 작업 정의
+        def job_fn(progress_callback):
+            progress_callback({"msg": "☁️ 메시지 전송 중..."})
+            ok = sync_manager.upload_current_db()
+            return ok, "전송 완료"
+
+        # 3. 완료 후 재연결 및 갱신
+        def on_done(ok, res, err):
+            print("🔌 DB 재연결...")
+            self.db.reconnect()  # 다시 문 열기
+
+            if ok:
+                self.le_input.clear()
+                self.refresh_timeline()  # 내 화면에 메시지 표시
+            else:
+                QtWidgets.QMessageBox.warning(self, "전송 실패", f"서버 전송 실패: {err}")
+                self.refresh_timeline()  # 실패해도 일단 내 화면엔 보여줌
+
+        # 4. 실행
+        run_job_with_progress_async(
+            self,
+            "전송 중.",
+            job_fn,
+            on_done=on_done
+        )
 
     def _silent_upload(self):
         # 동시 업로드 방지

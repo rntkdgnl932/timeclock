@@ -866,8 +866,21 @@ class OwnerPage(QtWidgets.QWidget):
         self.dispute_table.itemDoubleClicked.connect(self.open_dispute_chat)
 
     def open_dispute_chat(self):
-        # [Sync] 이의제기 대화 열기 전 최신 DB 다운로드
-        sync_manager.download_latest_db()
+        # [Sync] 이의제기 대화 열기 전 최신 DB 다운로드 (DB 잠금 방지: 반드시 close -> download -> reconnect)
+        try:
+            self.db.close_connection()
+        except Exception:
+            pass
+
+        try:
+            sync_manager.download_latest_db()
+        finally:
+            try:
+                self.db.reconnect()
+            except Exception:
+                # reconnect 실패면 이후 execute에서 터질 수 있으니, 여기서 바로 안내하고 종료
+                Message.err(self, "오류", "DB 재연결 실패. 프로그램을 재시작하세요.")
+                return
 
         row = self.dispute_table.selected_first_row_index()
         if row < 0 or row >= len(self._dispute_rows):
@@ -886,8 +899,21 @@ class OwnerPage(QtWidgets.QWidget):
         )
         dlg.exec_()
 
-        # [Sync] 대화 후 서버 업로드
-        sync_manager.upload_current_db()
+        # [Sync] 대화 후 서버 업로드 (DB 잠금 방지: close -> upload -> reconnect)
+        try:
+            self.db.close_connection()
+        except Exception:
+            pass
+
+        try:
+            sync_manager.upload_current_db()
+        finally:
+            try:
+                self.db.reconnect()
+            except Exception:
+                Message.err(self, "오류", "DB 재연결 실패. 프로그램을 재시작하세요.")
+                return
+
         self.refresh_disputes()
 
     # ==========================================================
