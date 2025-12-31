@@ -346,7 +346,7 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
         self._sync_in_progress = True
         self.lbl_sync.setText("동기화 중…")
 
-        import sync_manager
+        import timeclock.sync_manager as sync_manager
 
         def _job():
             """
