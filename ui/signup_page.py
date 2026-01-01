@@ -8,6 +8,7 @@ import logging
 from timeclock.utils import Message
 from timeclock.auth import pbkdf2_hash_password  # 비밀번호 해시 함수 (submit 함수에서 사용)
 from timeclock import sync_manager
+from ui.async_helper import run_job_with_progress_async
 
 ID_PATTERN = re.compile(r"^[a-zA-Z0-9_]{4,20}$")
 
@@ -234,13 +235,10 @@ class SignupPage(QtWidgets.QWidget):
         username = self.ed_id.text().strip()
         pw = self.ed_pw.text()
         pw2 = self.ed_pw2.text()
-
         name = self.ed_name.text().strip()
-
         p1 = self.ed_phone1.text()
         p2 = self.ed_phone2.text()
         p3 = self.ed_phone3.text()
-
         y = self.ed_birth_y.text()
         m = self.ed_birth_m.text()
         d = self.ed_birth_d.text()
@@ -254,24 +252,19 @@ class SignupPage(QtWidgets.QWidget):
             Message.err(self, "가입신청", "ID 중복확인을 먼저 해주세요.")
             return
 
-        # ---------- PW ----------
+        # ---------- PW / 성함 / 전화 / 생년월일 검증 ----------
         if not pw or pw != pw2 or len(pw) < 6:
             Message.err(self, "가입신청", "비밀번호를 확인하세요.(6자 이상)")
             return
-        # ---------- 성함 ----------
         if not name:
             Message.err(self, "가입신청", "성함을 입력해주세요.")
             return
 
-        # ---------- 전화 ----------
         phone_digits = f"{p1}{p2}{p3}"
         if not phone_digits.isdigit() or len(phone_digits) not in (10, 11):
             Message.err(self, "가입신청", "전화번호가 올바르지 않습니다.")
             return
 
-        phone = phone_digits
-
-        # ---------- 생년월일 ----------
         try:
             birthdate = f"{int(y):04d}-{int(m):02d}-{int(d):02d}"
             datetime.strptime(birthdate, "%Y-%m-%d")
@@ -279,51 +272,57 @@ class SignupPage(QtWidgets.QWidget):
             Message.err(self, "가입신청", "생년월일이 올바르지 않습니다.")
             return
 
-        # ---------- 선택 ----------
+        # ---------- 선택값 및 해싱 ----------
         email = self.ed_email.text().strip()
         bank_account = self.ed_bank.text().strip()
         address = self.ed_addr.text().strip()
-
-        # 비밀번호 해싱 (auth.py 재사용)
         pw_hash = pbkdf2_hash_password(pw)
 
-        # 🔴 [Sync] 1. 저장 전 DB 연결 해제 및 최신 다운로드
-        self.db.close_connection()
-        try:
-            sync_manager.download_latest_db()
-        except Exception as e:
-            print(f"[Sync Error] {e}")
-        finally:
-            self.db.reconnect()
+        # ✅ [핵심 수정] 비동기 작업 정의 (Fetch -> Write -> Push)
+        def job_fn(progress_callback):
+            try:
+                # 1. 동기화 전 최신 DB 다운로드
+                progress_callback({"msg": "☁️ 서버 데이터 확인 중..."})
+                self.db.close_connection()
+                sync_manager.download_latest_db()
+                self.db.reconnect()
 
-        # ---------- DB ----------
-        try:
-            self.db.create_signup_request(
-                username=username,
-                pw_hash=pw_hash,
-                name=name,
-                phone=phone,
-                birth=birthdate,
-                email=email,
-                account=bank_account,
-                address=address,
-            )
+                # 2. 가입 신청 데이터 로컬 DB 저장
+                progress_callback({"msg": "💾 가입 신청 정보를 저장하는 중..."})
+                self.db.create_signup_request(
+                    username=username,
+                    pw_hash=pw_hash,
+                    name=name,
+                    phone=phone_digits,
+                    birth=birthdate,
+                    email=email,
+                    account=bank_account,
+                    address=address,
+                )
 
-            # 🔴 [Sync] 2. 저장 직후 서버 업로드 (사업주가 즉시 확인 가능하도록)
-            sync_manager.upload_current_db()
+                # 3. 서버 업로드
+                progress_callback({"msg": "🚀 서버에 가입 신청서 제출 중..."})
+                ok_up = sync_manager.upload_current_db()
+                return ok_up, None
+            except Exception as e:
+                return False, str(e)
 
-        except Exception as e:
-            # 로깅을 추가하여 디버깅을 돕습니다.
-            logging.exception("가입신청 DB 등록 중 오류 발생")
-            Message.err(self, "가입신청 실패", str(e))
-            return
+        # 비동기 작업 완료 후 콜백
+        def on_done(ok, res, err):
+            if ok:
+                Message.info(self, "가입신청 완료", "가입신청이 완료되었습니다.\n사업주 승인 후 로그인 가능합니다.")
+                self.signup_done.emit()
+            else:
+                error_msg = res if res and isinstance(res, str) else err
+                Message.err(self, "가입신청 실패", f"오류가 발생했습니다: {error_msg}")
 
-        Message.info(
+        # ✅ 비동기 실행 (로딩창 표시)
+        run_job_with_progress_async(
             self,
-            "가입신청 완료",
-            "가입신청이 완료되었습니다.\n사업주 승인 후 로그인 가능합니다.",
+            "가입 신청 중...",
+            job_fn,
+            on_done=on_done
         )
-        self.signup_done.emit()
 
 
     # ?

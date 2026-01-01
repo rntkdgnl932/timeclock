@@ -908,8 +908,9 @@ class ConfirmPasswordDialog(QtWidgets.QDialog):
         return self._pw
 
 
+
 class ProfileEditDialog(QtWidgets.QDialog):
-    """아이디 제외 개인 정보 변경(기본: 이름/연락처/생년월일)."""
+    """아이디 제외 개인 정보 및 비밀번호 변경."""
     saved = QtCore.pyqtSignal()
 
     def __init__(self, db, user_id: int, parent=None):
@@ -919,7 +920,7 @@ class ProfileEditDialog(QtWidgets.QDialog):
 
         self.setWindowTitle("개인정보 변경")
         self.setModal(True)
-        self.resize(460, 360)
+        self.resize(460, 500)  # 높이를 조금 더 키움
 
         u = None
         try:
@@ -931,25 +932,25 @@ class ProfileEditDialog(QtWidgets.QDialog):
         v.setContentsMargins(18, 16, 18, 16)
         v.setSpacing(12)
 
-        title = QtWidgets.QLabel("개인정보 변경")
+        title = QtWidgets.QLabel("개인정보 및 비밀번호 변경")
         title.setStyleSheet("font-size:18px; font-weight:800; color:#222;")
         v.addWidget(title)
 
-        sub = QtWidgets.QLabel("아이디는 변경할 수 없습니다. 변경 후 저장을 눌러주세요.")
+        sub = QtWidgets.QLabel("아이디는 변경할 수 없습니다. 비밀번호 입력 시에만 변경 처리됩니다.")
         sub.setStyleSheet("font-size:12px; color:#666;")
         v.addWidget(sub)
 
         form = QtWidgets.QFormLayout()
-        # noinspection PyUnresolvedReferences
         form.setLabelAlignment(QtCore.Qt.AlignLeft)
-        # noinspection PyUnresolvedReferences
         form.setFormAlignment(QtCore.Qt.AlignTop)
         form.setHorizontalSpacing(12)
         form.setVerticalSpacing(10)
 
-        def mk_le(placeholder: str):
+        def mk_le(placeholder: str, is_pw=False):
             le = QtWidgets.QLineEdit()
             le.setPlaceholderText(placeholder)
+            if is_pw:
+                le.setEchoMode(QtWidgets.QLineEdit.Password)
             le.setStyleSheet(
                 "QLineEdit{border:1px solid #ddd; border-radius:12px; padding:10px 12px; font-size:13px;}"
                 "QLineEdit:focus{border-color:#7aa7ff;}"
@@ -966,6 +967,10 @@ class ProfileEditDialog(QtWidgets.QDialog):
         self.le_phone = mk_le("예: 010-1234-5678")
         self.le_birth = mk_le("예: 1990-01-31 (YYYY-MM-DD)")
 
+        # ✅ 비밀번호 입력 필드 추가
+        self.le_pw = mk_le("새 비밀번호 (6자 이상)", is_pw=True)
+        self.le_pw2 = mk_le("새 비밀번호 확인", is_pw=True)
+
         if u:
             self.le_username.setText(str(u.get("username", "") or ""))
             self.le_name.setText(str(u.get("name", "") or ""))
@@ -976,6 +981,8 @@ class ProfileEditDialog(QtWidgets.QDialog):
         form.addRow("이름", self.le_name)
         form.addRow("연락처", self.le_phone)
         form.addRow("생년월일", self.le_birth)
+        form.addRow("새 비밀번호", self.le_pw)
+        form.addRow("비밀번호 확인", self.le_pw2)
 
         v.addLayout(form)
         v.addStretch()
@@ -987,7 +994,6 @@ class ProfileEditDialog(QtWidgets.QDialog):
         self.btn_save = QtWidgets.QPushButton("저장")
 
         for b in (self.btn_cancel, self.btn_save):
-            # noinspection PyUnresolvedReferences
             b.setCursor(QtCore.Qt.PointingHandCursor)
             b.setMinimumHeight(38)
             b.setStyleSheet(
@@ -1011,12 +1017,30 @@ class ProfileEditDialog(QtWidgets.QDialog):
         phone = self.le_phone.text().strip()
         birth = self.le_birth.text().strip()
 
+        # ✅ 비밀번호 변경 로직
+        new_pw = self.le_pw.text()
+        new_pw2 = self.le_pw2.text()
+
         if birth and not QtCore.QRegExp(r"^\d{4}-\d{2}-\d{2}$").exactMatch(birth):
             QtWidgets.QMessageBox.warning(self, "형식 오류", "생년월일은 YYYY-MM-DD 형식으로 입력해 주세요.")
             return
 
+        if new_pw or new_pw2:
+            if len(new_pw) < 6:
+                QtWidgets.QMessageBox.warning(self, "비밀번호 변경", "새 비밀번호는 6자 이상이어야 합니다.")
+                return
+            if new_pw != new_pw2:
+                QtWidgets.QMessageBox.warning(self, "비밀번호 변경", "새 비밀번호가 서로 일치하지 않습니다.")
+                return
+
         try:
+            # 1. 개인정보 업데이트
             self.db.update_user_profile(self.user_id, name=name, phone=phone, birthdate=birth)
+
+            # 2. 비밀번호 업데이트 (입력된 경우에만)
+            if new_pw:
+                self.db.change_password(self.user_id, new_pw)
+
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, "오류", f"저장 실패: {e}")
             return
