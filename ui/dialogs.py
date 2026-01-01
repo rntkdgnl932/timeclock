@@ -25,46 +25,116 @@ class _SilentWorker(QtCore.QObject):
         except Exception as e:
             self.finished.emit(False, str(e))
 
+
+# timeclock/ui/dialogs.py 내 ChangePasswordDialog 클래스 전체
+
 class ChangePasswordDialog(QtWidgets.QDialog):
+    """더 예쁘고 친절한 비밀번호 변경 창"""
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("비밀번호 변경")
         self.setModal(True)
-        self.resize(380, 170)
+        self.resize(400, 280)  # 안내 문구를 위해 높이를 조금 키움
+        self.setStyleSheet("background-color: white;")
+
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(30, 25, 30, 25)
+        layout.setSpacing(15)
+
+        # 1. 상단 타이틀 및 안내
+        title_label = QtWidgets.QLabel("새로운 비밀번호 설정")
+        title_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #333;")
+        layout.addWidget(title_label)
+
+        desc_label = QtWidgets.QLabel("보안을 위해 6자리 이상의 비밀번호를 입력해 주세요.")
+        desc_label.setStyleSheet("font-size: 12px; color: #d9534f; font-weight: bold;")  # 빨간색 강조
+        layout.addWidget(desc_label)
+
+        # 2. 입력 폼 레이아웃
+        form = QtWidgets.QFormLayout()
+        form.setVerticalSpacing(12)
+        form.setLabelAlignment(QtCore.Qt.AlignLeft)
+
+        input_style = """
+            QLineEdit {
+                border: 1px solid #ddd;
+                border-radius: 8px;
+                padding: 10px;
+                font-size: 14px;
+                background-color: #f9f9f9;
+            }
+            QLineEdit:focus {
+                border: 1px solid #6D4C41;
+                background-color: white;
+            }
+        """
 
         self.le_new = QtWidgets.QLineEdit()
         self.le_new.setEchoMode(QtWidgets.QLineEdit.Password)
+        self.le_new.setPlaceholderText("새 비밀번호 입력")
+        self.le_new.setStyleSheet(input_style)
+
         self.le_new2 = QtWidgets.QLineEdit()
         self.le_new2.setEchoMode(QtWidgets.QLineEdit.Password)
+        self.le_new2.setPlaceholderText("비밀번호 확인 입력")
+        self.le_new2.setStyleSheet(input_style)
 
-        form = QtWidgets.QFormLayout()
         form.addRow("새 비밀번호", self.le_new)
-        form.addRow("새 비밀번호(확인)", self.le_new2)
+        form.addRow("비밀번호 확인", self.le_new2)
+        layout.addLayout(form)
 
-        self.btn_ok = QtWidgets.QPushButton("변경")
+        layout.addStretch(1)
+
+        # 3. 버튼 레이아웃
+        btns = QtWidgets.QHBoxLayout()
+        btns.setSpacing(10)
+
         self.btn_cancel = QtWidgets.QPushButton("취소")
-        self.btn_ok.clicked.connect(self.accept)
+        self.btn_cancel.setCursor(QtCore.Qt.PointingHandCursor)
+        self.btn_cancel.setFixedHeight(40)
+        self.btn_cancel.setStyleSheet("""
+            QPushButton {
+                background-color: #f5f5f5; color: #666; border: 1px solid #ddd; border-radius: 8px; font-weight: bold;
+            }
+            QPushButton:hover { background-color: #eee; }
+        """)
+
+        self.btn_ok = QtWidgets.QPushButton("비밀번호 변경")
+        self.btn_ok.setCursor(QtCore.Qt.PointingHandCursor)
+        self.btn_ok.setFixedHeight(40)
+        self.btn_ok.setStyleSheet("""
+            QPushButton {
+                background-color: #6D4C41; color: white; border: none; border-radius: 8px; font-weight: bold;
+            }
+            QPushButton:hover { background-color: #5d4036; }
+        """)
+
+        self.btn_ok.clicked.connect(self._on_accept)
         self.btn_cancel.clicked.connect(self.reject)
 
-        btns = QtWidgets.QHBoxLayout()
-        btns.addStretch(1)
-        btns.addWidget(self.btn_ok)
-        btns.addWidget(self.btn_cancel)
-
-        layout = QtWidgets.QVBoxLayout()
-        layout.addLayout(form)
-        layout.addStretch(1)
+        btns.addWidget(self.btn_cancel, 1)
+        btns.addWidget(self.btn_ok, 2)
         layout.addLayout(btns)
-        self.setLayout(layout)
 
-    def get_password(self):
+    def _on_accept(self):
         p1 = self.le_new.text().strip()
         p2 = self.le_new2.text().strip()
-        if not p1 or len(p1) < 4:
-            return None
+
+        if not p1:
+            QtWidgets.QMessageBox.warning(self, "알림", "새 비밀번호를 입력하세요.")
+            return
+        if len(p1) < 6:
+            QtWidgets.QMessageBox.warning(self, "알림", "비밀번호는 반드시 6자리 이상이어야 합니다.")
+            return
         if p1 != p2:
-            return None
-        return p1
+            QtWidgets.QMessageBox.warning(self, "알림", "비밀번호가 서로 일치하지 않습니다.")
+            return
+
+        self.accept()
+
+    def get_password(self):
+        return self.le_new.text().strip()
 
 
 # ==========================================================
@@ -1201,52 +1271,87 @@ class PersonalInfoDialog(QtWidgets.QDialog):
         btns.addWidget(self.btn_save)
         root.addLayout(btns)
 
-    def _on_save(self):
-        cur_pw = (self.ed_cur_pw.text() or "").strip()
-        if not cur_pw:
-            Message.err(self, "확인", "현재 비밀번호를 입력해주세요.")
-            return
+        # timeclock/ui/dialogs.py 내 PersonalInfoDialog._on_save 함수 전체
 
-        if not self.db.verify_user_password(self.user_id, cur_pw):
-            Message.err(self, "확인", "현재 비밀번호가 올바르지 않습니다.")
-            return
-
-        # 비밀번호 변경(선택)
-        new_pw = (self.ed_new_pw.text() or "")
-        new_pw2 = (self.ed_new_pw2.text() or "")
-        if new_pw or new_pw2:
-            if len(new_pw) < 6:
-                Message.err(self, "비밀번호 변경", "새 비밀번호는 6자 이상이어야 합니다.")
-                return
-            if new_pw != new_pw2:
-                Message.err(self, "비밀번호 변경", "새 비밀번호가 서로 일치하지 않습니다.")
+        def _on_save(self):
+            # 1. 입력값 검증 (UI 스레드에서 즉시 수행)
+            cur_pw = (self.ed_cur_pw.text() or "").strip()
+            if not cur_pw:
+                Message.err(self, "확인", "현재 비밀번호를 입력해주세요.")
                 return
 
-        # 개인정보 저장
-        name = (self.ed_name.text() or "").strip()
-        phone = (self.ed_phone.text() or "").strip()
-        birth = (self.ed_birth.text() or "").strip()
-        email = (self.ed_email.text() or "").strip()
-        account = (self.ed_account.text() or "").strip()
-        address = (self.ed_address.text() or "").strip()
+            # 비밀번호 확인 로직
+            if not self.db.verify_user_password(self.user_id, cur_pw):
+                Message.err(self, "확인", "현재 비밀번호가 올바르지 않습니다.")
+                return
 
-        try:
-            self.db.update_user_profile(
-                self.user_id,
-                name=name or None,
-                phone=phone or None,
-                birthdate=birth or None,
-                email=email or None,
-                account=account or None,
-                address=address or None,
+            # 새 비밀번호 검증
+            new_pw = (self.ed_new_pw.text() or "")
+            new_pw2 = (self.ed_new_pw2.text() or "")
+            if new_pw or new_pw2:
+                if len(new_pw) < 6:
+                    Message.err(self, "비밀번호 변경", "새 비밀번호는 6자 이상이어야 합니다.")
+                    return
+                if new_pw != new_pw2:
+                    Message.err(self, "비밀번호 변경", "새 비밀번호가 서로 일치하지 않습니다.")
+                    return
+
+            # 저장할 데이터 정리
+            name = (self.ed_name.text() or "").strip()
+            phone = (self.ed_phone.text() or "").strip()
+            birth = (self.ed_birth.text() or "").strip()
+            email = (self.ed_email.text() or "").strip()
+            account = (self.ed_account.text() or "").strip()
+            address = (self.ed_address.text() or "").strip()
+
+            # ✅ 2. 비동기 작업 정의 (Fetch -> Write -> Push)
+            def job_fn(progress_callback):
+                try:
+                    # DB 잠금 방지를 위해 연결 해제 후 최신본 다운로드
+                    progress_callback({"msg": "☁️ 서버 데이터와 대조 중..."})
+                    self.db.close_connection()
+                    from timeclock import sync_manager
+                    sync_manager.download_latest_db()
+                    self.db.reconnect()
+
+                    # 데이터 업데이트
+                    progress_callback({"msg": "💾 개인정보를 저장하는 중..."})
+                    self.db.update_user_profile(
+                        self.user_id,
+                        name=name or None,
+                        phone=phone or None,
+                        birthdate=birth or None,
+                        email=email or None,
+                        account=account or None,
+                        address=address or None,
+                    )
+
+                    # 비밀번호 변경이 있는 경우
+                    if new_pw:
+                        progress_callback({"msg": "🔐 비밀번호 보안 업데이트 중..."})
+                        self.db.change_password(self.user_id, new_pw)
+
+                    # 서버 업로드
+                    progress_callback({"msg": "🚀 변경 사항을 서버에 반영 중..."})
+                    ok_up = sync_manager.upload_current_db()
+                    return ok_up, None
+                except Exception as e:
+                    return False, str(e)
+
+            # 3. 작업 완료 후 콜백
+            def on_done(ok, res, err):
+                if ok:
+                    Message.info(self, "완료", "개인정보와 비밀번호가 안전하게 변경되었습니다.")
+                    self.accept()
+                else:
+                    error_msg = res if isinstance(res, str) else err
+                    Message.err(self, "저장 실패", f"오류가 발생했습니다: {error_msg}")
+
+            # ✅ 4. 비동기 실행 (로딩창 표시)
+            run_job_with_progress_async(
+                self,
+                "개인정보 변경 처리",
+                job_fn,
+                on_done=on_done
             )
-            if new_pw:
-                self.db.change_password(self.user_id, new_pw)
-
-        except Exception as e:
-            Message.err(self, "저장 실패", str(e))
-            return
-
-        Message.info(self, "완료", "개인정보가 저장되었습니다.")
-        self.accept()
 
