@@ -326,7 +326,15 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
         if not msg:
             return
 
-        # 1) 전송 시작 시 입력창 비움 및 버튼 즉시 비활성화 (스타일시트에 의해 회색으로 변함)
+        # ✅ [추가] 종료된 이의제기인지 체크하여 경고창 표시
+        if self.current_status == "RESOLVED":
+            QtWidgets.QMessageBox.warning(self, "알림", "완료된 이의제기 입니다.")
+            return
+        if self.current_status == "REJECTED":
+            QtWidgets.QMessageBox.warning(self, "알림", "기각된 이의제기 입니다.")
+            return
+
+        # 1) 전송 시작 시 입력창 비움 및 버튼 즉시 비활성화
         self.le_input.clear()
         self.btn_send.setEnabled(False)
 
@@ -336,12 +344,13 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
         # 3) 저장/업로드 백그라운드 처리 (Fetch-before-Write 로직 적용)
         def _work():
             try:
-                # ✅ 전송 전 강제 병합 실행
+                # 전송 전 강제 병합 실행
                 self.db.sync_dispute_thread_from_cloud(self.dispute_id)
 
                 if self.my_role == "owner":
                     new_status = self.cb_status.currentData() if self.cb_status else self.current_status
                     self.db.resolve_dispute(self.dispute_id, self.user_id, new_status, msg)
+                    return True, new_status
                 else:
                     self.db.add_dispute_message(
                         self.dispute_id,
@@ -350,7 +359,7 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
                         message=msg
                     )
 
-                # ✅ 최신 DB 업로드
+                # 최신 DB 업로드
                 from timeclock import sync_manager
                 ok_up = sync_manager.upload_current_db()
 
@@ -369,7 +378,7 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
                     self.le_input.setText(msg)
 
             finally:
-                # ✅ settings.py의 _MIN_CALL_INTERVAL_SEC(1.0초) 기반으로 1.1초 후 버튼 재활성화
+                # settings.py의 _MIN_CALL_INTERVAL_SEC(1.0초) 기반으로 버튼 재활성화
                 from timeclock.settings import _MIN_CALL_INTERVAL_SEC
                 lock_ms = int(_MIN_CALL_INTERVAL_SEC * 1000) + 100
                 QtCore.QTimer.singleShot(lock_ms, lambda: self.btn_send.setEnabled(True))
@@ -379,11 +388,9 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
     def _silent_poll_refresh(self):
         """
         2초마다 호출:
-        - 클라우드 스냅샷을 받아서(dispute thread) 로컬에 병합
-        - 변경이 있으면 refresh_timeline() + 하단 고정
-        - 입력 중이면 방해하지 않음
+        - 클라우드 스냅샷을 받아서 로컬에 병합
+        - 변경이 있으면 refresh_timeline() 호출하여 배너 및 차단 상태 업데이트
         """
-        # 입력 중이면 수신 갱신을 잠깐 멈춤(타자 방해 방지)
         try:
             if self.le_input.hasFocus() or (self.le_input.text().strip() != ""):
                 return
@@ -397,8 +404,7 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
 
         def _work():
             try:
-                # db.py에서 cloud snapshot을 병합하는 함수가 정상 동작해야 함
-                # 병합 결과가 "변경 있음(True)/없음(False)" 형태면 그대로 사용
+                # DB에서 원격 데이터를 병합합니다.
                 changed = self.db.sync_dispute_thread_from_cloud(self.dispute_id)
                 return True, bool(changed)
             except Exception as e:
@@ -410,7 +416,7 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
                 payload = res[1] if isinstance(res, (tuple, list)) and len(res) >= 2 else None
 
                 if ok and payload:
-                    # 변경이 있을 때만 리렌더 + 하단 고정
+                    # ✅ 데이터 변경이 있다면 타임라인을 새로 고침하여 종료 배너 등을 표시합니다.
                     self.refresh_timeline()
             finally:
                 self._sync_in_progress = False
@@ -590,9 +596,11 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
     def refresh_timeline(self):
         """
         이의제기 대화 타임라인 렌더링 (로컬 DB 기반)
-        - IMPORTANT: 여기서 클라우드 동기화(다운로드/병합) 절대 하지 않음
-          => UI 즉시 반응/전송 즉시 표시 보장
+        - 상태가 완료/기각이면 하단에 안내 문구를 표시하고 입력을 차단합니다.
         """
+        # 최신 상태(current_status) 반영을 위해 데이터 재로드
+        self._load_data()
+
         # 1) 타임라인 로드 (로컬)
         try:
             events = self.db.get_dispute_timeline(self.dispute_id) or []
@@ -635,7 +643,7 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
         last_date = None
 
         for ev in events:
-            who = (ev.get("who") or "").strip()  # "owner" | "worker"
+            who = (ev.get("who") or "").strip()
             username = (ev.get("username") or who or "").strip()
             msg = (ev.get("comment") or "").strip()
             ts = (ev.get("at") or "").strip()
@@ -654,7 +662,6 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
                 </div>
                 """
 
-            # 내/상대 판정
             if self.my_role == "owner":
                 is_me = (who == "owner")
             else:
@@ -693,6 +700,22 @@ class DisputeTimelineDialog(QtWidgets.QDialog):
               </tr>
             </table>
             """
+
+        # ✅ [복구] 상태가 완료/기각인 경우 하단 중앙에 안내 배너 추가
+        if self.current_status in ["RESOLVED", "REJECTED"]:
+            status_text = "처리 완료된 이의제기입니다." if self.current_status == "RESOLVED" else "기각된 이의제기입니다."
+            html += f"""
+            <div style="text-align:center; margin:20px 0;">
+              <span style="background:#f0f0f0; color:#555; padding:6px 15px; border-radius:15px; font-size:12px; border:1px solid #ddd; font-weight:bold;">
+                {status_text}
+              </span>
+            </div>
+            """
+            # 근로자라면 입력창과 버튼을 완전히 비활성화
+            if self.my_role == "worker":
+                self.le_input.setEnabled(False)
+                self.le_input.setPlaceholderText("종료된 대화입니다.")
+                self.btn_send.setEnabled(False)
 
         html += """
           </div>
