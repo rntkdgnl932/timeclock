@@ -1111,8 +1111,8 @@ class ProfileEditDialog(QtWidgets.QDialog):
         birth = self.le_birth.text().strip()
 
         # ✅ 비밀번호 변경 로직
-        new_pw = self.le_pw.text()
-        new_pw2 = self.le_pw2.text()
+        new_pw = self.le_pw.text().strip()
+        new_pw2 = self.le_pw2.text().strip()
 
         if birth and not QtCore.QRegExp(r"^\d{4}-\d{2}-\d{2}$").exactMatch(birth):
             QtWidgets.QMessageBox.warning(self, "형식 오류", "생년월일은 YYYY-MM-DD 형식으로 입력해 주세요.")
@@ -1286,8 +1286,8 @@ class PersonalInfoDialog(QtWidgets.QDialog):
                 return
 
             # 새 비밀번호 검증
-            new_pw = (self.ed_new_pw.text() or "")
-            new_pw2 = (self.ed_new_pw2.text() or "")
+            new_pw = (self.ed_new_pw.text() or "").strip()
+            new_pw2 = (self.ed_new_pw2.text() or "").strip()
             if new_pw or new_pw2:
                 if len(new_pw) < 6:
                     Message.err(self, "비밀번호 변경", "새 비밀번호는 6자 이상이어야 합니다.")

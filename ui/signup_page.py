@@ -233,8 +233,8 @@ class SignupPage(QtWidgets.QWidget):
     def submit(self):
         # ---------- 필수값 ----------
         username = self.ed_id.text().strip()
-        pw = self.ed_pw.text()
-        pw2 = self.ed_pw2.text()
+        pw = self.ed_pw.text().strip()
+        pw2 = self.ed_pw2.text().strip()
         name = self.ed_name.text().strip()
         p1 = self.ed_phone1.text()
         p2 = self.ed_phone2.text()

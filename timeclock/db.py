@@ -414,9 +414,18 @@ class DB:
         return u
 
     def change_password(self, user_id, new_password):
+        # ✅ 비밀번호 앞뒤 공백 제거 (최종 방어선)
+        new_password = str(new_password).strip()
         pw_hash = pbkdf2_hash_password(new_password)
-        self.conn.execute("UPDATE users SET pw_hash=?, must_change_pw=0 WHERE id=?", (pw_hash, user_id))
+
+        # ✅ ID를 정수형으로 확실히 변환하여 쿼리 수행
+        self.conn.execute(
+            "UPDATE users SET pw_hash=?, must_change_pw=0 WHERE id=?",
+            (pw_hash, int(user_id))
+        )
         self.conn.commit()
+
+        # ✅ 변경 사항을 즉시 서버에 알림
         self._save_and_sync("change_password")
 
     def verify_user_password(self, user_id: int, password: str) -> bool:

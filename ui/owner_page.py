@@ -550,7 +550,6 @@ class OwnerPage(QtWidgets.QWidget):
         run_job_with_progress_async(self, "작업 반려 처리", job_fn, on_done=on_done)
 
 
-
     def _build_member_tab(self):
         self.le_member_search = QtWidgets.QLineEdit()
         self.le_member_search.setPlaceholderText("이름 검색...")
@@ -572,6 +571,11 @@ class OwnerPage(QtWidgets.QWidget):
 
         self.btn_edit_job_title = QtWidgets.QPushButton("🏷 직급 변경")
         self.btn_edit_job_title.clicked.connect(self.edit_job_title)
+
+        # ✅ 비밀번호 초기화 버튼 추가
+        self.btn_reset_pw = QtWidgets.QPushButton("🔑 비번 초기화")
+        self.btn_reset_pw.clicked.connect(self.reset_worker_password)
+        self._set_btn_variant(self.btn_reset_pw, "warn")
 
         self.btn_calc_salary = QtWidgets.QPushButton("🧮 급여 정산")
         self.btn_calc_salary.clicked.connect(self.calculate_salary)
@@ -604,6 +608,7 @@ class OwnerPage(QtWidgets.QWidget):
         tlay.addStretch(1)
         tlay.addWidget(self.btn_edit_wage)
         tlay.addWidget(self.btn_edit_job_title)
+        tlay.addWidget(self.btn_reset_pw)  # ✅ 초기화 버튼 툴바 추가
         tlay.addWidget(self.btn_calc_salary)
         tlay.addWidget(self.btn_export_payslip)
         tlay.addWidget(self.btn_resign)
@@ -616,7 +621,6 @@ class OwnerPage(QtWidgets.QWidget):
         w = QtWidgets.QWidget()
         w.setLayout(l)
         return w
-
     def refresh_members(self):
         keyword = self.le_member_search.text().strip()
         status_filter = self.cb_member_filter.currentData()
@@ -747,6 +751,47 @@ class OwnerPage(QtWidgets.QWidget):
                 self.refresh_members()
 
             run_job_with_progress_async(self, "직급 정보 수정", job_fn, on_done=on_done)
+
+
+    def reset_worker_password(self):
+        """선택한 직원의 비밀번호를 '111111'로 초기화합니다."""
+        row = self.member_table.selected_first_row_index()
+        if row < 0:
+            Message.warn(self, "알림", "비밀번호를 초기화할 직원을 선택하세요.")
+            return
+
+        rr = dict(self._member_rows[row])
+        user_id = rr['id']
+        username = rr['username']
+        name = rr['worker_name'] if 'worker_name' in rr else rr.get('name', username)
+
+        if Message.confirm(self, "비밀번호 초기화", f"'{name}'님의 비밀번호를 '111111'로 초기화하시겠습니까?"):
+            def job_fn(progress_callback):
+                try:
+                    progress_callback({"msg": "☁️ 서버 데이터 확인 중..."})
+                    self.db.close_connection()
+                    from timeclock import sync_manager
+                    sync_manager.download_latest_db()
+                    self.db.reconnect()
+
+                    progress_callback({"msg": "🔐 비밀번호 초기화 중..."})
+                    self.db.change_password(user_id, "111111")
+
+                    progress_callback({"msg": "🚀 변경 사항을 서버에 반영 중..."})
+                    ok_up = sync_manager.upload_current_db()
+                    return ok_up, None
+                except Exception as e:
+                    return False, str(e)
+
+            def on_done(ok, res, err):
+                if ok:
+                    Message.info(self, "완료", f"'{name}'님의 비밀번호가 '111111'로 초기화되었습니다.")
+                else:
+                    error_msg = res if isinstance(res, str) else err
+                    Message.err(self, "실패", f"초기화 중 오류 발생: {error_msg}")
+                self.refresh_members()
+
+            run_job_with_progress_async(self, "비밀번호 초기화", job_fn, on_done=on_done)
 
     # ==========================================================
     # 3. 이의 제기 탭
