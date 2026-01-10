@@ -157,9 +157,9 @@ class SalaryCalculator:
 
         lines = []
 
-        # 1. 휴게시간 공제 명시
+        # 1. 휴게시간 공제 명시 (용어 변경: 체류시간 -> 작업시간)
         lines.append("■ 근로시간 상세")
-        lines.append(f"   • 총 체류시간({r['total_hours']}h) - 휴게시간({r['break_hours']}h) = 실 근로시간({r['actual_hours']}h)")
+        lines.append(f"   • 총 작업시간({r['total_hours']}h) - 휴게시간({r['break_hours']}h) = 실 근무시간({r['actual_hours']}h)")
         lines.append("")
 
         # 2. 법적 가산 미적용 안내 (5인 미만일 경우)
@@ -184,13 +184,21 @@ class SalaryCalculator:
             lines.append("   • " + ", ".join(details))
             lines.append("")
 
-        # 4. 주휴수당 발생 사유
+        # 4. 주휴수당 발생 내역 (상세 시간 표기 추가)
         lines.append("■ 주휴수당 발생 내역")
         ju_list = r['ju_hyu_details']
         if len(ju_list) > 0:
+            total_ju_pay = sum(ju_list)
             lines.append(f"   • 주 15시간 이상 개근한 {len(ju_list)}개 주에 대해 주휴수당 발생")
-            lines.append(f"   • (지급액: {sum(ju_list):,}원)")
+
+            # [추가] 시급 정보를 역산하여 몇 시간분인지 표기
+            if self.wage > 0:
+                avg_ju_hours = round(total_ju_pay / self.wage, 1)
+                lines.append(f"   • 인정 시간: 총 {avg_ju_hours}시간 (시급 {self.wage:,}원 기준)")
+
+            lines.append(f"   • (지급액: {total_ju_pay:,}원)")
         else:
             lines.append("   • 해당 기간 내 주 15시간 이상 만근한 주가 없어 발생하지 않음")
 
         return "\n".join(lines)
+

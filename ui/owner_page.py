@@ -1161,14 +1161,25 @@ class OwnerPage(QtWidgets.QWidget):
         friendly_text = calc.get_friendly_description(res)
         total_pay = res['grand_total']
 
-        ei_tax = int(total_pay * 0.009 / 10) * 10
+        # --- [수정] 3.3% 세금 분리 계산 (소득세 3%, 지방세 0.3%) ---
+        # 1. 4대보험 관련은 0으로 설정 (프리랜서/아르바이트 3.3% 기준)
+        ei_tax = 0
         pension = 0
         health = 0
         care = 0
-        income_tax = 0
-        local_tax = 0
-        total_deduction = ei_tax + pension + health + care + income_tax + local_tax
+
+        # 2. 소득세 (3%) - 원 단위 절사
+        income_tax = int(total_pay * 0.03 / 10) * 10
+
+        # 3. 지방소득세 (소득세의 10% = 총액의 0.3%) - 원 단위 절사
+        local_tax = int(income_tax * 0.1 / 10) * 10
+
+        # 4. 공제 총액
+        total_deduction = income_tax + local_tax + ei_tax + pension + health + care
+
+        # 5. 실 수령액
         net_pay = total_pay - total_deduction
+        # -----------------------------------------------------------
 
         over_hours = 0
         night_hours = 0
@@ -1224,15 +1235,20 @@ class OwnerPage(QtWidgets.QWidget):
             "pension": pension,
             "health_ins": health,
             "care_ins": care,
+
+            # [수정] 3.3% 분리 적용된 세금 항목
             "income_tax": income_tax,
             "local_tax": local_tax,
+
             "total_deduction": total_deduction,
             "net_pay": net_pay,
             "calc_detail": friendly_text,
             "base_detail": base_str,
             "over_detail": over_str,
             "ju_hyu_detail": ju_hyu_str,
-            "tax_detail": "고용보험 0.9%",
+
+            # [수정] 하단 텍스트 변경
+            "tax_detail": "사업소득세 3% + 지방소득세 0.3% 적용",
             "note": note_text
         }
 
